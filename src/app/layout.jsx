@@ -1,7 +1,7 @@
 import '@/styles/globals.css';
 
 export const metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://medicare-amber-five.vercel.app'),
   title: {
     default:  'MediCare – Controle de Medicamentos',
     template: '%s | MediCare',
