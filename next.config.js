@@ -2,14 +2,21 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
-  
-  compiler: {
-    removeConsole: process.env.NODE_ENV === 'production'
-      ? { exclude: ['error', 'warn'] }
-      : false,
+
+  // Safe fallback so build never fails when env var is absent during CI
+  env: {
+    NEXT_PUBLIC_APP_URL:
+      process.env.NEXT_PUBLIC_APP_URL ||
+      'https://medicare-amber-five.vercel.app',
   },
 
-  // Image optimization
+  compiler: {
+    removeConsole:
+      process.env.NODE_ENV === 'production'
+        ? { exclude: ['error', 'warn'] }
+        : false,
+  },
+
   images: {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [
@@ -17,7 +24,6 @@ const nextConfig = {
     ],
   },
 
-  // Performance headers
   async headers() {
     return [
       {
@@ -30,7 +36,7 @@ const nextConfig = {
       {
         source: '/manifest.json',
         headers: [
-          { key: 'Content-Type', value: 'application/manifest+json' },
+          { key: 'Content-Type',  value: 'application/manifest+json' },
           { key: 'Cache-Control', value: 'public, max-age=86400' },
         ],
       },
@@ -41,7 +47,6 @@ const nextConfig = {
           { key: 'X-Frame-Options',        value: 'DENY' },
           { key: 'X-XSS-Protection',       value: '1; mode=block' },
           { key: 'Referrer-Policy',         value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy',      value: 'camera=(), microphone=(), geolocation=()' },
         ],
       },
       {
@@ -53,17 +58,11 @@ const nextConfig = {
     ];
   },
 
-  // Webpack bundle optimization
   webpack(config, { dev, isServer }) {
     if (!dev && !isServer) {
       config.optimization.splitChunks = {
         chunks: 'all',
         cacheGroups: {
-          vendor: {
-            test: /[\\/]node_modules[\\/]/,
-            name: 'vendors',
-            chunks: 'all',
-          },
           firebase: {
             test: /[\\/]node_modules[\\/]firebase[\\/]/,
             name: 'firebase',

@@ -19,8 +19,5 @@
         { "key": "Content-Type", "value": "application/manifest+json" }
       ]
     }
-  ],
-  "env": {
-    "NEXT_PUBLIC_APP_URL": "@app_url"
-  }
+  ]
 }
