@@ -64,6 +64,7 @@ export default function RootLayout({ children }) {
           name="apple-mobile-web-app-status-bar-style"
           content="black-translucent"
         />
+        <meta name="theme-color" content="#0d1117" />
         <meta name="msapplication-TileColor" content="#3b82f6" />
         <meta name="msapplication-TileImage" content="/icon-144.png" />
 

@@ -1,15 +1,22 @@
 'use client';
+import { useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal';
 import { C } from '@/lib/theme';
 
 const DEF_HOURS = ['08:00', '14:00', '20:00'];
 
-export function MedsScreen({ T, scale, onAdd, onEdit, onView }) {
+export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
   const { meds, history, deleteMed } = useApp();
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const handleDelete = (id) => {
-    if (!confirm('Excluir este medicamento?')) return;
-    deleteMed(id);
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    const nome = deleteTarget.nome;
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
+    await deleteMed(id);
+    if (toast) toast(`🗑 ${nome} excluído`, 'info');
   };
 
   return (
@@ -28,8 +35,23 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView }) {
       {meds.length === 0 ? (
         <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 22, padding: 48, textAlign: 'center' }}>
           <p style={{ fontSize: 48, marginBottom: 12 }}>💊</p>
-          <p style={{ color: T.txt, fontSize: 17 * scale, fontWeight: 700, marginBottom: 6 }}>Nenhum medicamento</p>
-          <p style={{ color: T.sub, fontSize: 14 * scale }}>Toque em "＋ Novo" para adicionar</p>
+          <p style={{ color: T.txt, fontSize: 18 * scale, fontWeight: 800, marginBottom: 8 }}>
+            Nenhum medicamento cadastrado
+          </p>
+          <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 22, lineHeight: 1.6 }}>
+            Adicione seu primeiro medicamento para começar o acompanhamento.
+          </p>
+          <button
+            onClick={onAdd}
+            style={{
+              padding: '14px 26px', borderRadius: 13,
+              background: 'linear-gradient(135deg,#3b82f6,#6366f1)',
+              color: '#fff', fontWeight: 800, fontSize: 15 * scale, border: 'none',
+              boxShadow: '0 4px 20px rgba(59,130,246,.35)',
+            }}
+          >
+            + Adicionar medicamento
+          </button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -62,7 +84,7 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView }) {
                         style={{ width: 34, height: 34, borderRadius: 10, background: T.bg2, border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >✏️</button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleDelete(m.id); }}
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(m); }}
                         aria-label={`Excluir ${m.nome}`}
                         style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.25)', color: C.red, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >🗑</button>
@@ -80,6 +102,16 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView }) {
             );
           })}
         </div>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          medName={deleteTarget.nome}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+          T={T}
+          scale={scale}
+        />
       )}
     </div>
   );

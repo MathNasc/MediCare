@@ -40,6 +40,14 @@ function usePWAInstall() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
+  // Registro incondicional do SW: requisito de instalabilidade do PWA
+  // (sem isso, o Chrome não trata o app como instalável e a barra
+  // de endereço permanece visível mesmo após "Adicionar à tela inicial").
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  }, []);
+
   const install = async () => {
     if (!prompt) return;
     await prompt.prompt();
@@ -136,7 +144,7 @@ function InnerApp() {
       <main role="main" style={{ maxWidth: 480, margin: '0 auto', padding: `${canInstall ? 56 : 22}px 16px 96px`, minHeight: '100vh' }}>
         <Suspense fallback={<ScreenLoader />}>
           {tab === 'home'    && <HomeScreen    {...screenProps} onQuickConfirm={setQuickDose} toggle={toggle} dark={dark} />}
-          {tab === 'meds'    && <MedsScreen    {...screenProps} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
+          {tab === 'meds'    && <MedsScreen    {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
           {tab === 'stats'   && <StatsScreen   {...screenProps} />}
           {tab === 'ai'      && <AIScreen      {...screenProps} />}
           {tab === 'profile' && <ProfileScreen {...screenProps} dark={dark} toggle={toggle} fsSize={fsSize} setFs={setFs} />}

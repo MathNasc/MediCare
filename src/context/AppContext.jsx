@@ -51,10 +51,21 @@ export function AppProvider({ children }) {
     dispatch({ type: 'SET_SYNCING', value: true });
     try {
       let ms = await MedDB.list(userId);
-      if (ms.length === 0) {
+
+      // Seed de demonstração roda apenas UMA VEZ por usuário/dispositivo.
+      // Antes: reseeding ocorria sempre que ms.length === 0, fazendo
+      // medicamentos excluídos voltarem após refresh.
+      const seedKey = `mc_seeded_${userId}`;
+      const alreadySeeded =
+        typeof window !== 'undefined' && localStorage.getItem(seedKey) === '1';
+
+      if (ms.length === 0 && !alreadySeeded) {
         await Promise.all(DEMO_MEDS(userId).map((m) => MedDB.add(m)));
         ms = await MedDB.list(userId);
       }
+
+      if (typeof window !== 'undefined') localStorage.setItem(seedKey, '1');
+
       const hist = await HistDB.list(userId);
       dispatch({ type: 'SET_DATA', meds: ms, history: hist });
     } catch (err) {
