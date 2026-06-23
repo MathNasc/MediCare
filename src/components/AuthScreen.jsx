@@ -10,20 +10,50 @@ export function AuthScreen({ onLogin, T }) {
   const [err, setErr]     = useState('');
   const [load, setLoad]   = useState(false);
 
-  const submit = () => {
-    setErr(''); setLoad(true);
-    setTimeout(() => {
+  // Corrigido: AuthDB.login/register são funções async e retornam uma
+  // Promise. O código anterior chamava AuthDB.login(...) sem "await"
+  // dentro de um setTimeout não-async, então "r" era a própria Promise
+  // (não { user } / { error }). Isso fazia r.error e r.user serem
+  // sempre undefined, onLogin nunca receber um usuário válido, e
+  // setLoad(false) nunca ser chamado no caminho de sucesso — por isso
+  // o botão ficava preso em "Aguarde..." indefinidamente.
+  const submit = async () => {
+    setErr('');
+    setLoad(true);
+
+    // Pequeno delay apenas para manter a transição visual do "Aguarde...",
+    // sem bloquear a Promise real de autenticação.
+    await new Promise((r) => setTimeout(r, 200));
+
+    try {
       if (mode === 'login') {
-        const r = AuthDB.login(email, pass);
-        if (r.error) { setErr(r.error); setLoad(false); }
-        else onLogin(r.user);
+        const r = await AuthDB.login(email, pass);
+        if (r.error) {
+          setErr(r.error);
+          setLoad(false);
+          return;
+        }
+        onLogin(r.user);
       } else {
-        if (!nome.trim()) { setErr('Informe seu nome'); setLoad(false); return; }
-        const r = AuthDB.register(nome, email, pass);
-        if (r.error) { setErr(r.error); setLoad(false); }
-        else onLogin(r.user);
+        if (!nome.trim()) {
+          setErr('Informe seu nome');
+          setLoad(false);
+          return;
+        }
+        const r = await AuthDB.register(nome, email, pass);
+        if (r.error) {
+          setErr(r.error);
+          setLoad(false);
+          return;
+        }
+        onLogin(r.user);
       }
-    }, 350);
+    } catch (e) {
+      setErr('Erro ao autenticar. Tente novamente.');
+      setLoad(false);
+    }
+    // Nota: não chamamos setLoad(false) no caminho de sucesso de propósito —
+    // a troca de tela (onLogin) já desmonta este componente.
   };
 
   const inp = {
@@ -59,12 +89,14 @@ export function AuthScreen({ onLogin, T }) {
                 key={m}
                 onClick={() => { setMode(m); setErr(''); }}
                 aria-pressed={mode === m}
+                disabled={load}
                 style={{
                   flex: 1, padding: '10px', borderRadius: 9, fontSize: 13, fontWeight: 700, border: 'none',
                   background: mode === m ? T.bg1 : 'none',
                   color: mode === m ? T.txt : T.sub,
                   boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,.25)' : 'none',
                   transition: 'all .2s',
+                  opacity: load ? .6 : 1,
                 }}
               >
                 {m === 'login' ? 'Entrar' : 'Cadastrar'}
@@ -74,10 +106,10 @@ export function AuthScreen({ onLogin, T }) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
             {mode === 'register' && (
-              <input style={inp} placeholder="Nome completo" value={nome} onChange={(e) => setNome(e.target.value)} />
+              <input style={inp} placeholder="Nome completo" value={nome} onChange={(e) => setNome(e.target.value)} disabled={load} />
             )}
-            <input type="email" style={inp} placeholder="seu@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <input type="password" style={inp} placeholder="Senha" value={pass} onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <input type="email" style={inp} placeholder="seu@email.com" value={email} onChange={(e) => setEmail(e.target.value)} disabled={load} />
+            <input type="password" style={inp} placeholder="Senha" value={pass} onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !load && submit()} disabled={load} />
           </div>
 
           {err && (
@@ -95,6 +127,7 @@ export function AuthScreen({ onLogin, T }) {
               color: '#fff', fontSize: 16, fontWeight: 800, border: 'none',
               boxShadow: '0 4px 20px rgba(59,130,246,.4)',
               opacity: load ? .7 : 1, letterSpacing: '.3px',
+              cursor: load ? 'not-allowed' : 'pointer',
             }}
           >
             {load ? 'Aguarde…' : mode === 'login' ? 'Entrar com segurança →' : 'Criar minha conta →'}

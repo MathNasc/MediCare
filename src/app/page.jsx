@@ -45,7 +45,21 @@ function usePWAInstall() {
   // de endereço permanece visível mesmo após "Adicionar à tela inicial").
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+
+    // Quando uma nova versão do SW assume o controle (ex: novo deploy),
+    // o JS já carregado nesta aba ainda referencia chunks da build antiga
+    // e pode disparar ChunkLoadError. Recarregar garante que o HTML/JS
+    // atual seja buscado novamente.
+    let reloaded = false;
+    const onControllerChange = () => {
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
   }, []);
 
   const install = async () => {

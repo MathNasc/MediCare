@@ -31,6 +31,7 @@ const nextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
           { key: 'Content-Type',  value: 'application/javascript; charset=utf-8' },
+          { key: 'Service-Worker-Allowed', value: '/' },
         ],
       },
       {
@@ -40,8 +41,20 @@ const nextConfig = {
           { key: 'Cache-Control', value: 'public, max-age=86400' },
         ],
       },
+      // _next/static é imutável e versionado por hash. Definimos
+      // Cache-Control explicitamente aqui e NÃO incluímos esse path
+      // na regra genérica abaixo, para evitar qualquer interferência
+      // no Content-Type servido pela CDN (causa raiz do
+      // "MIME type ('text/plain') is not executable" + ChunkLoadError).
       {
-        source: '/(.*)',
+        source: '/_next/static/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
+        // Tudo exceto /_next/static/* e /sw.js (que já têm regras próprias acima)
+        source: '/((?!_next/static|sw\\.js).*)',
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options',        value: 'DENY' },

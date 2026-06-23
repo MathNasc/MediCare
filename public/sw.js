@@ -1,10 +1,13 @@
-// MediCare Service Worker v2.0
-const CACHE_VERSION = 'medicare-v2';
+// MediCare Service Worker v3 — fix: stale HTML causing ChunkLoadError
+// v2 → v3: bump força a invalidação de todos os caches antigos
+const CACHE_VERSION = 'medicare-v3';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 
+// Apenas assets verdadeiramente estáticos (ícones/manifest).
+// O documento HTML ('/') NUNCA é pré-cacheado: ele precisa sempre
+// vir da rede para referenciar os chunks JS corretos da build atual.
 const STATIC_ASSETS = [
-  '/',
   '/manifest.json',
   '/favicon.ico',
   '/icon-192.png',
@@ -35,7 +38,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// ─── Fetch (Network first → cache fallback) ───────────────────────────────────
+// ─── Fetch ─────────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -48,29 +51,55 @@ self.addEventListener('fetch', (event) => {
   // Skip Next.js HMR
   if (url.pathname.startsWith('/_next/webpack-hmr')) return;
 
-  // Static assets: cache first
-  if (url.pathname.startsWith('/_next/static') || url.pathname.match(/\.(png|ico|svg|woff2?)$/)) {
+  // ── Documentos HTML (navegação) ────────────────────────────────────────────
+  // NUNCA servir do cache. Sempre rede. Isso garante que o HTML carregado
+  // sempre referencia os chunks JS da build atualmente publicada,
+  // evitando ChunkLoadError (404 em chunks de builds anteriores).
+  if (request.mode === 'navigate' || request.destination === 'document') {
     event.respondWith(
-      caches.match(request).then((cached) =>
-        cached || fetch(request).then((res) => {
-          const clone = res.clone();
-          caches.open(STATIC_CACHE).then((c) => c.put(request, clone));
-          return res;
-        })
+      fetch(request).catch(() =>
+        caches.match('/manifest.json').then(() =>
+          new Response(
+            '<h1>Você está offline</h1><p>Verifique sua conexão e tente novamente.</p>',
+            { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+          )
+        )
       )
     );
     return;
   }
 
-  // HTML pages: network first with cache fallback
+  // ── Chunks JS/CSS imutáveis do Next (_next/static) ─────────────────────────
+  // Cache-first, mas NUNCA armazenar respostas de erro (404/5xx) —
+  // isso evita "envenenar" o cache com um chunk que não existe mais
+  // e impede o navegador de tentar buscar novamente na rede.
+  if (url.pathname.startsWith('/_next/static') || url.pathname.match(/\.(png|ico|svg|woff2?)$/)) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((res) => {
+          if (res && res.ok) {
+            const clone = res.clone();
+            caches.open(STATIC_CACHE).then((c) => c.put(request, clone));
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
+
+  // ── Demais requisições: rede primeiro, cache como fallback offline ─────────
   event.respondWith(
     fetch(request)
       .then((res) => {
-        const clone = res.clone();
-        caches.open(DYNAMIC_CACHE).then((c) => c.put(request, clone));
+        if (res && res.ok) {
+          const clone = res.clone();
+          caches.open(DYNAMIC_CACHE).then((c) => c.put(request, clone));
+        }
         return res;
       })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match('/')))
+      .catch(() => caches.match(request))
   );
 });
 
