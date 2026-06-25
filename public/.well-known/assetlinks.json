@@ -1,12 +1,8 @@
-[
-  {
-    "relation": ["delegate_permission/common.handle_all_urls"],
-    "target": {
-      "namespace": "android_app",
-      "package_name": "com.medicare.app",
-      "sha256_cert_fingerprints": [
-        "COLE_AQUI_O_FINGERPRINT_DO_PWABUILDER"
-      ]
-    }
-  }
-]
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.vercel.medicare_amber_five.twa",
+        "sha256_cert_fingerprints": ["4B:1F:8F:84:10:03:8C:C5:ED:79:06:BB:A4:D5:91:21:D1:F4:C1:35:9F:77:1D:DD:7B:D1:4F:A7:C2:CE:C1:62"]
+      }
+    }]
