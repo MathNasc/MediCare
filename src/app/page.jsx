@@ -1,14 +1,15 @@
 'use client';
-import { useState, useMemo, useCallback, useEffect, Suspense } from 'react';
+import { useState, useCallback, useEffect, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { AppProvider, useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useFontScale } from '@/hooks/useFontScale';
 import { useToast } from '@/hooks/useToast';
 import { useNotifications } from '@/hooks/useNotifications';
-import { AuthScreen }  from '@/components/AuthScreen';
-import { BottomNav }   from '@/components/BottomNav';
-import { Toasts }      from '@/components/ui/Toasts';
+import { AuthScreen }       from '@/components/AuthScreen';
+import { BottomNav }        from '@/components/BottomNav';
+import { Toasts }           from '@/components/ui/Toasts';
+import { PWAInstallBanner } from '@/components/PWAInstallBanner';
 
 // ── Lazy-loaded screens ──────────────────────────────────────────────────────
 const HomeScreen    = dynamic(() => import('@/screens/HomeScreen').then(m => ({ default: m.HomeScreen })),    { loading: () => <ScreenLoader /> });
@@ -40,18 +41,14 @@ function usePWAInstall() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  // Registro incondicional do SW: requisito de instalabilidade do PWA
-  // (sem isso, o Chrome não trata o app como instalável e a barra
-  // de endereço permanece visível mesmo após "Adicionar à tela inicial").
+  // Registro incondicional do SW — requisito de instalabilidade PWA.
+  // O listener controllerchange recarrega a aba quando um novo SW assume
+  // o controle, evitando ChunkLoadError após deploys.
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
 
-    // Quando uma nova versão do SW assume o controle (ex: novo deploy),
-    // o JS já carregado nesta aba ainda referencia chunks da build antiga
-    // e pode disparar ChunkLoadError. Recarregar garante que o HTML/JS
-    // atual seja buscado novamente.
     let reloaded = false;
     const onControllerChange = () => {
       if (reloaded) return;
@@ -87,6 +84,15 @@ function InnerApp() {
   const [editMed,   setEditMed]   = useState(null);
   const [viewMed,   setViewMed]   = useState(null);
 
+  // Calcula se o banner PWA está visível (para ajustar padding do main)
+  const [bannerVisible, setBannerVisible] = useState(true);
+
+  // Detecta se já está rodando como PWA standalone
+  const isStandalone =
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true);
+
   // Handle URL action params (from notification click)
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -100,11 +106,9 @@ function InnerApp() {
       const dose   = doses.find((d) => d.hora === hora || d.id === doseId);
       if (dose && dose.status !== 'confirmed') setQuickDose(dose);
     }
-    // Clean URL
     if (action || tabParam) window.history.replaceState({}, '', '/');
   }, [doses]);
 
-  // Notifications
   useNotifications(doses, user?.id);
 
   const handleConfirmDose = useCallback((dose) => {
@@ -126,7 +130,10 @@ function InnerApp() {
   const pendingCount  = doses.filter((d) => ['pending', 'late'].includes(d.status)).length;
   const criticalCount = meds.filter((m) => m.quantidade <= 5).length;
 
-  // Loading splash
+  // Altura do banner para compensar no padding do main
+  const showBanner = !isStandalone && bannerVisible;
+  const bannerHeight = showBanner ? (canInstall ? 56 : 56) : 0;
+
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -147,15 +154,24 @@ function InnerApp() {
     <div style={{ minHeight: '100vh', background: T.bg0 }}>
       <Toasts list={toasts} />
 
-      {/* PWA install banner */}
-      {canInstall && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100, background: '#3b82f6', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <p style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>📲 Instalar MediCare no celular</p>
-          <button onClick={install} style={{ background: '#fff', color: '#3b82f6', border: 'none', borderRadius: 8, padding: '6px 14px', fontWeight: 700, fontSize: 13 }}>Instalar</button>
-        </div>
+      {/* Banner de instalação PWA com instruções */}
+      {!isStandalone && (
+        <PWAInstallBanner
+          canInstall={canInstall}
+          onInstall={install}
+          T={T}
+          scale={scale}
+        />
       )}
 
-      <main role="main" style={{ maxWidth: 480, margin: '0 auto', padding: `${canInstall ? 56 : 22}px 16px 96px`, minHeight: '100vh' }}>
+      <main
+        role="main"
+        style={{
+          maxWidth: 480, margin: '0 auto',
+          padding: `${22 + bannerHeight}px 16px 96px`,
+          minHeight: '100vh',
+        }}
+      >
         <Suspense fallback={<ScreenLoader />}>
           {tab === 'home'    && <HomeScreen    {...screenProps} onQuickConfirm={setQuickDose} toggle={toggle} dark={dark} />}
           {tab === 'meds'    && <MedsScreen    {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}

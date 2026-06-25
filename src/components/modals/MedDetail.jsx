@@ -2,8 +2,6 @@
 import { Ring } from '@/components/ui/Ring';
 import { C } from '@/lib/theme';
 
-const DEF_HOURS = ['08:00', '14:00', '20:00'];
-
 export function MedDetail({ med, history, onClose, T, scale = 1 }) {
   const hist = history.filter((h) => h.med_id === med.id).slice(0, 8);
   const rate =
@@ -12,6 +10,12 @@ export function MedDetail({ med, history, onClose, T, scale = 1 }) {
       : 0;
   const stockPct = Math.min(100, (med.quantidade / 60) * 100);
   const stockCol = med.quantidade <= 5 ? C.red : med.quantidade <= 10 ? C.amber : C.green;
+
+  // Usa os horários reais do medicamento — antes estava usando DEF_HOURS
+  // ['08:00','14:00','20:00'] hardcoded, ignorando o que o usuário salvou.
+  const horarios = Array.isArray(med.horarios) && med.horarios.length > 0
+    ? med.horarios
+    : ['—'];
 
   return (
     <div
@@ -99,12 +103,18 @@ export function MedDetail({ med, history, onClose, T, scale = 1 }) {
             </div>
           </div>
 
-          {/* Horários */}
+          {/* Horários — usa med.horarios reais */}
           <div style={{ marginBottom: 14 }}>
-            <p style={{ color: T.sub, fontSize: 12 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 8 }}>Horários</p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {DEF_HOURS.map((h) => (
-                <div key={h} style={{ flex: 1, background: T.bg2, borderRadius: 12, padding: '10px 6px', textAlign: 'center' }}>
+            <p style={{ color: T.sub, fontSize: 12 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 8 }}>
+              Horários
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {horarios.map((h) => (
+                <div key={h} style={{
+                  background: T.bg2, borderRadius: 12,
+                  padding: '10px 18px', textAlign: 'center',
+                  border: `1px solid ${T.bdr}`,
+                }}>
                   <p style={{ color: T.txt, fontSize: 15 * scale, fontWeight: 800 }}>{h}</p>
                 </div>
               ))}

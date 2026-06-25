@@ -3,7 +3,6 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
 
-  // Safe fallback so build never fails when env var is absent during CI
   env: {
     NEXT_PUBLIC_APP_URL:
       process.env.NEXT_PUBLIC_APP_URL ||
@@ -41,19 +40,24 @@ const nextConfig = {
           { key: 'Cache-Control', value: 'public, max-age=86400' },
         ],
       },
-      // _next/static é imutável e versionado por hash. Definimos
-      // Cache-Control explicitamente aqui e NÃO incluímos esse path
-      // na regra genérica abaixo, para evitar qualquer interferência
-      // no Content-Type servido pela CDN (causa raiz do
-      // "MIME type ('text/plain') is not executable" + ChunkLoadError).
+      // Expõe o assetlinks.json com CORS para o Android verificar
+      {
+        source: '/.well-known/assetlinks.json',
+        headers: [
+          { key: 'Content-Type',  value: 'application/json' },
+          { key: 'Cache-Control', value: 'public, max-age=3600' },
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+        ],
+      },
+      // Chunks imutáveis do Next — nunca interferir no Content-Type
       {
         source: '/_next/static/:path*',
         headers: [
           { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
         ],
       },
+      // Security headers — excluindo _next/static e sw.js
       {
-        // Tudo exceto /_next/static/* e /sw.js (que já têm regras próprias acima)
         source: '/((?!_next/static|sw\\.js).*)',
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },

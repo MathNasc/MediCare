@@ -3,38 +3,51 @@
   "name": "MediCare – Controle de Medicamentos",
   "short_name": "MediCare",
   "description": "Gerencie seus medicamentos com lembretes inteligentes e confirmação de doses",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
   "background_color": "#0d1117",
   "theme_color": "#3b82f6",
   "lang": "pt-BR",
+  "dir": "ltr",
   "categories": ["health", "medical", "lifestyle"],
+  "prefer_related_applications": false,
   "icons": [
     { "src": "/icon-72.png",  "sizes": "72x72",   "type": "image/png", "purpose": "any" },
     { "src": "/icon-96.png",  "sizes": "96x96",   "type": "image/png", "purpose": "any" },
     { "src": "/icon-128.png", "sizes": "128x128", "type": "image/png", "purpose": "any" },
     { "src": "/icon-144.png", "sizes": "144x144", "type": "image/png", "purpose": "any" },
     { "src": "/icon-152.png", "sizes": "152x152", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
     { "src": "/icon-384.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
     {
       "name": "Confirmar dose",
       "short_name": "Tomei",
       "description": "Registrar dose atual",
-      "url": "/?action=confirm",
+      "url": "/?action=confirm&source=shortcut",
       "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
     },
     {
       "name": "Meus medicamentos",
       "short_name": "Meds",
-      "url": "/?tab=meds",
+      "url": "/?tab=meds&source=shortcut",
       "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "MediCare – Tela inicial"
     }
   ]
 }

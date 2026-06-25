@@ -4,7 +4,7 @@ import { useApp } from '@/context/AppContext';
 import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal';
 import { C } from '@/lib/theme';
 
-const DEF_HOURS = ['08:00', '14:00', '20:00'];
+
 
 export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
   const { meds, history, deleteMed } = useApp();
@@ -95,7 +95,7 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
                     <span style={{ fontSize: 12 * scale, fontWeight: 700, padding: '3px 10px', borderRadius: 99, background: m.quantidade <= 5 ? 'rgba(239,68,68,.15)' : m.quantidade <= 10 ? 'rgba(245,158,11,.15)' : 'rgba(34,197,94,.15)', color: m.quantidade <= 5 ? C.red : m.quantidade <= 10 ? C.amber : C.green }}>
                       📦 {m.quantidade} {m.unidade}s
                     </span>
-                    <span style={{ color: T.muted, fontSize: 12 * scale }}>Hoje: {todayDone}/{DEF_HOURS.length}</span>
+                    <span style={{ color: T.muted, fontSize: 12 * scale }}>Hoje: {todayDone}/{(m.horarios || []).length || 1}</span>
                   </div>
                 </div>
               </div>

@@ -9,12 +9,12 @@ export function MedModal({ med, onSave, onClose, T, scale = 1 }) {
     observacoes: '', ativo: true,
   });
 
-  // When editing, restore saved horarios; when adding, start with a single blank slot
+  // Quando editando, restaura horários salvos; ao adicionar, inicia com slot único.
+  // 00:00 é um horário válido (meia-noite) e deve ser preservado.
   const [horarios, setHorarios] = useState(
     med?.horarios && med.horarios.length > 0 ? med.horarios : ['08:00']
   );
 
-  // Restore saved dias_semana when editing
   const [dias, setDias] = useState(
     med?.dias_semana && med.dias_semana.length > 0 ? med.dias_semana : [1, 2, 3, 4, 5, 6, 7]
   );
