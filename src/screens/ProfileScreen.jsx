@@ -1,13 +1,68 @@
 'use client';
+import { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
 
+function useNotificationPermission() {
+  const [permission, setPermission] = useState('default');
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setPermission('unsupported');
+      return;
+    }
+    setPermission(Notification.permission);
+  }, []);
+
+  const request = async () => {
+    if (!('Notification' in window)) return 'unsupported';
+    if (Notification.permission === 'granted') return 'granted';
+    const result = await Notification.requestPermission();
+    setPermission(result);
+    return result;
+  };
+
+  return { permission, request, setPermission };
+}
+
 export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
   const { user, meds, history, logout } = useApp();
+  const { permission, request } = useNotificationPermission();
+
+  // Estado do painel de instruções de reativação
+  const [showDeniedHelp, setShowDeniedHelp] = useState(false);
 
   const histConf = history.filter((h) => h.status === 'confirmed').length;
   const adhesion = history.length > 0 ? Math.round((histConf / history.length) * 100) : 0;
   const critical = meds.filter((m) => m.quantidade <= 5).length;
+
+  const handleNotificationPress = async () => {
+    if (permission === 'unsupported') return;
+
+    if (permission === 'granted') {
+      // Já ativo — não faz nada, o botão já mostra "Ativo"
+      return;
+    }
+
+    if (permission === 'denied') {
+      // Permissão bloqueada pelo usuário — não adianta pedir de novo,
+      // precisa ir nas configurações do dispositivo. Mostra instruções.
+      setShowDeniedHelp(true);
+      return;
+    }
+
+    // permission === 'default' → pede permissão
+    await request();
+  };
+
+  // Visual do botão/status de notificações
+  const notifStatus = () => {
+    if (permission === 'unsupported') return { label: 'Não suportado', color: T.muted, bg: T.bg3, disabled: true };
+    if (permission === 'granted')     return { label: '✓ Ativo',       color: C.green,  bg: 'rgba(34,197,94,.12)', disabled: true };
+    if (permission === 'denied')      return { label: 'Bloqueado',     color: C.red,    bg: 'rgba(239,68,68,.12)', disabled: false };
+    return                                   { label: 'Ativar',        color: C.blue,   bg: C.blueBg,              disabled: false };
+  };
+  const ns = notifStatus();
 
   return (
     <div className="anim-fadeUp">
@@ -87,25 +142,79 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
         </div>
       </div>
 
-      {/* Notifications */}
+      {/* Notificações */}
       <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 14 }}>
-        <div style={{ padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 22 }}>🔔</span>
-          <div style={{ flex: 1 }}>
-            <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Notificações</p>
-            <p style={{ color: T.muted, fontSize: 12 * scale }}>Lembretes automáticos de doses</p>
+        <div style={{ padding: '15px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: permission === 'denied' ? 12 : 0 }}>
+            <span style={{ fontSize: 22 }}>🔔</span>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Notificações</p>
+              <p style={{ color: T.muted, fontSize: 12 * scale }}>
+                {permission === 'granted'     && 'Lembretes ativos — você será avisado no horário'}
+                {permission === 'denied'      && 'Bloqueado — é necessário reativar nas configurações'}
+                {permission === 'default'     && 'Lembretes automáticos de doses'}
+                {permission === 'unsupported' && 'Não suportado neste navegador'}
+              </p>
+            </div>
+            {permission !== 'unsupported' && (
+              <button
+                onClick={handleNotificationPress}
+                disabled={ns.disabled}
+                style={{
+                  padding: '8px 14px', borderRadius: 10,
+                  background: ns.bg, color: ns.color,
+                  fontWeight: 700, fontSize: 12 * scale,
+                  border: `1px solid ${ns.color}30`,
+                  opacity: ns.disabled ? .8 : 1,
+                  cursor: ns.disabled ? 'default' : 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                {ns.label}
+              </button>
+            )}
           </div>
-          <button
-            onClick={async () => {
-              if (!('Notification' in window)) return alert('Notificações não suportadas neste navegador.');
-              const r = await Notification.requestPermission();
-              if (r === 'granted') alert('✓ Notificações ativadas!');
-              else alert('Permissão negada. Ative nas configurações do navegador.');
-            }}
-            style={{ padding: '8px 14px', borderRadius: 10, background: C.blueBg, color: C.blue, fontWeight: 700, fontSize: 12 * scale, border: `1px solid ${C.blue}30` }}
-          >
-            Ativar
-          </button>
+
+          {/* Painel de ajuda quando bloqueado */}
+          {permission === 'denied' && showDeniedHelp && (
+            <div style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', borderRadius: 12, padding: 14 }}>
+              <p style={{ color: '#f87171', fontWeight: 700, fontSize: 13 * scale, marginBottom: 10 }}>
+                Como reativar as notificações
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  { n: '1', t: 'Abra as Configurações do Android' },
+                  { n: '2', t: 'Toque em "Apps" ou "Aplicativos"' },
+                  { n: '3', t: 'Encontre o navegador (Edge ou Chrome)' },
+                  { n: '4', t: 'Toque em "Notificações"' },
+                  { n: '5', t: 'Ative as notificações para o MediCare' },
+                  { n: '6', t: 'Volte ao app e toque em "Ativar" novamente' },
+                ].map((s) => (
+                  <div key={s.n} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(239,68,68,.2)', color: '#f87171', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900, flexShrink: 0 }}>
+                      {s.n}
+                    </div>
+                    <p style={{ color: T.sub, fontSize: 12 * scale }}>{s.t}</p>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowDeniedHelp(false)}
+                style={{ marginTop: 10, background: 'none', color: T.muted, border: 'none', fontSize: 12, textDecoration: 'underline' }}
+              >
+                Fechar
+              </button>
+            </div>
+          )}
+
+          {/* Confirmação quando acabou de ativar */}
+          {permission === 'granted' && (
+            <div style={{ background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.2)', borderRadius: 10, padding: '10px 12px', marginTop: 8 }}>
+              <p style={{ color: C.green, fontSize: 12 * scale, fontWeight: 600 }}>
+                ✓ Você receberá lembretes nos horários dos seus medicamentos
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
