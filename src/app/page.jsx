@@ -12,14 +12,15 @@ import { Toasts }           from '@/components/ui/Toasts';
 import { PWAInstallBanner } from '@/components/PWAInstallBanner';
 
 // ── Lazy-loaded screens ──────────────────────────────────────────────────────
-const HomeScreen    = dynamic(() => import('@/screens/HomeScreen').then(m => ({ default: m.HomeScreen })),    { loading: () => <ScreenLoader /> });
-const MedsScreen    = dynamic(() => import('@/screens/MedsScreen').then(m => ({ default: m.MedsScreen })),    { loading: () => <ScreenLoader /> });
-const StatsScreen   = dynamic(() => import('@/screens/StatsScreen').then(m => ({ default: m.StatsScreen })),   { loading: () => <ScreenLoader /> });
-const AIScreen      = dynamic(() => import('@/screens/AIScreen').then(m => ({ default: m.AIScreen })),          { loading: () => <ScreenLoader /> });
-const ProfileScreen = dynamic(() => import('@/screens/ProfileScreen').then(m => ({ default: m.ProfileScreen })), { loading: () => <ScreenLoader /> });
-const QuickConfirm  = dynamic(() => import('@/components/modals/QuickConfirm').then(m => ({ default: m.QuickConfirm })));
-const MedModal      = dynamic(() => import('@/components/modals/MedModal').then(m => ({ default: m.MedModal })));
-const MedDetail     = dynamic(() => import('@/components/modals/MedDetail').then(m => ({ default: m.MedDetail })));
+const HomeScreen     = dynamic(() => import('@/screens/HomeScreen').then(m => ({ default: m.HomeScreen })),     { loading: () => <ScreenLoader /> });
+const MedsScreen     = dynamic(() => import('@/screens/MedsScreen').then(m => ({ default: m.MedsScreen })),     { loading: () => <ScreenLoader /> });
+const CalendarScreen = dynamic(() => import('@/screens/CalendarScreen').then(m => ({ default: m.CalendarScreen })), { loading: () => <ScreenLoader /> });
+const StatsScreen    = dynamic(() => import('@/screens/StatsScreen').then(m => ({ default: m.StatsScreen })),    { loading: () => <ScreenLoader /> });
+const AIScreen       = dynamic(() => import('@/screens/AIScreen').then(m => ({ default: m.AIScreen })),          { loading: () => <ScreenLoader /> });
+const ProfileScreen  = dynamic(() => import('@/screens/ProfileScreen').then(m => ({ default: m.ProfileScreen })), { loading: () => <ScreenLoader /> });
+const QuickConfirm   = dynamic(() => import('@/components/modals/QuickConfirm').then(m => ({ default: m.QuickConfirm })));
+const MedModal       = dynamic(() => import('@/components/modals/MedModal').then(m => ({ default: m.MedModal })));
+const MedDetail      = dynamic(() => import('@/components/modals/MedDetail').then(m => ({ default: m.MedDetail })));
 
 function ScreenLoader() {
   return (
@@ -84,9 +85,6 @@ function InnerApp() {
   const [editMed,   setEditMed]   = useState(null);
   const [viewMed,   setViewMed]   = useState(null);
 
-  // Calcula se o banner PWA está visível (para ajustar padding do main)
-  const [bannerVisible, setBannerVisible] = useState(true);
-
   // Detecta se já está rodando como PWA standalone
   const isStandalone =
     typeof window !== 'undefined' &&
@@ -97,7 +95,7 @@ function InnerApp() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const action = params.get('action');
+    const action   = params.get('action');
     const tabParam = params.get('tab');
     if (tabParam) setTab(tabParam);
     if (action === 'confirm') {
@@ -131,8 +129,7 @@ function InnerApp() {
   const criticalCount = meds.filter((m) => m.quantidade <= 5).length;
 
   // Altura do banner para compensar no padding do main
-  const showBanner = !isStandalone && bannerVisible;
-  const bannerHeight = showBanner ? (canInstall ? 56 : 56) : 0;
+  const bannerHeight = !isStandalone ? 56 : 0;
 
   if (loading) {
     return (
@@ -154,7 +151,7 @@ function InnerApp() {
     <div style={{ minHeight: '100vh', background: T.bg0 }}>
       <Toasts list={toasts} />
 
-      {/* Banner de instalação PWA com instruções */}
+      {/* Banner de instalação PWA */}
       {!isStandalone && (
         <PWAInstallBanner
           canInstall={canInstall}
@@ -173,11 +170,12 @@ function InnerApp() {
         }}
       >
         <Suspense fallback={<ScreenLoader />}>
-          {tab === 'home'    && <HomeScreen    {...screenProps} onQuickConfirm={setQuickDose} toggle={toggle} dark={dark} />}
-          {tab === 'meds'    && <MedsScreen    {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
-          {tab === 'stats'   && <StatsScreen   {...screenProps} />}
-          {tab === 'ai'      && <AIScreen      {...screenProps} />}
-          {tab === 'profile' && <ProfileScreen {...screenProps} dark={dark} toggle={toggle} fsSize={fsSize} setFs={setFs} />}
+          {tab === 'home'     && <HomeScreen     {...screenProps} onQuickConfirm={setQuickDose} toggle={toggle} dark={dark} />}
+          {tab === 'meds'     && <MedsScreen     {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
+          {tab === 'calendar' && <CalendarScreen {...screenProps} />}
+          {tab === 'stats'    && <StatsScreen    {...screenProps} />}
+          {tab === 'ai'       && <AIScreen       {...screenProps} />}
+          {tab === 'profile'  && <ProfileScreen  {...screenProps} dark={dark} toggle={toggle} fsSize={fsSize} setFs={setFs} />}
         </Suspense>
       </main>
 
