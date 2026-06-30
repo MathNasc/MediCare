@@ -1,109 +1,114 @@
 'use client';
-import { useEffect, useRef, useCallback } from 'react';
-import { minutesTill } from '@/lib/doseUtils';
-import { sendLocalNotification } from '@/lib/firebase';
+import { useEffect, useCallback, useRef } from 'react';
 import { SupaFCM } from '@/lib/supabase';
 
-const SNOOZE_DELAYS = [0, 15 * 60000, 30 * 60000, 60 * 60000]; // initial, +15, +30, +60 min
+const SCHEDULE_KEY = 'mc_notif_schedule';
+
+function minutesTill(hora) {
+  const [h, m] = hora.split(':').map(Number);
+  const now = new Date();
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  return Math.round((target - now) / 60000);
+}
+
+function buildSchedule(doses) {
+  const now = Date.now();
+  const items = [];
+  doses
+    .filter(d => !['confirmed', 'missed'].includes(d.status))
+    .forEach(dose => {
+      const diff = minutesTill(dose.hora);
+      [0, 15, 30].forEach((extra, i) => {
+        const fireAt = now + (diff + extra) * 60000;
+        if (fireAt > now + 30000) {
+          items.push({
+            id:     `${dose.med_id}-${dose.hora}-r${i}`,
+            fireAt,
+            title:  `💊 ${dose.nome}`,
+            body:   `${dose.dosagem} · ${dose.hora}`,
+            tag:    `dose-${dose.med_id}-${dose.hora}`,
+            doseId: dose.id,
+            medId:  dose.med_id,
+            hora:   dose.hora,
+          });
+        }
+      });
+    });
+  return items;
+}
 
 export function useNotifications(doses, userId) {
-  const timers = useRef({});
-  const snoozeCount = useRef({});
+  const tokenSaved = useRef(false);
 
-  const clearAll = useCallback(() => {
-    Object.values(timers.current).forEach(clearTimeout);
-    timers.current = {};
-  }, []);
-
-  // Request permission and register SW
-  const setup = useCallback(async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return false;
-    if (Notification.permission === 'denied') return false;
-
-    let permission = Notification.permission;
-    if (permission === 'default') {
-      permission = await Notification.requestPermission();
-    }
-    if (permission !== 'granted') return false;
-
-    if ('serviceWorker' in navigator) {
-      try {
-        await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-      } catch {}
-    }
-    return true;
-  }, []);
-
-  // Save FCM token for server-side push
-  const saveFCMToken = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const { requestFCMToken } = await import('@/lib/firebase');
-      const token = await requestFCMToken();
-      if (token) await SupaFCM.saveToken(userId, token);
-    } catch {}
-  }, [userId]);
-
-  // Schedule reminder chain for a single dose
-  const scheduleDose = useCallback((dose) => {
-    const key = `${dose.med_id}-${dose.hora}`;
-    if (timers.current[key]) clearTimeout(timers.current[key]);
-
-    const diff = minutesTill(dose.hora); // minutes until dose time
-    const msUntilDose = diff * 60000;
-
-    // Don't schedule if already passed by > 2h or already confirmed
-    if (diff < -120 || dose.status === 'confirmed' || dose.status === 'missed') return;
-
-    const snooze = snoozeCount.current[key] || 0;
-    const extraDelay = snooze < SNOOZE_DELAYS.length ? SNOOZE_DELAYS[snooze] : null;
-    if (extraDelay === null) return; // max reminders reached
-
-    const fireAfterMs = Math.max(0, msUntilDose) + (snooze > 0 ? extraDelay : 0);
-
-    timers.current[key] = setTimeout(async () => {
-      // Re-check status hasn't been confirmed meanwhile
-      if (dose.status === 'confirmed') return;
-      await sendLocalNotification(dose);
-    }, fireAfterMs);
-  }, []);
-
-  // Listen for SW messages (snooze action)
+  // 1. Registra SW + bridge GET_SCHEDULE → SCHEDULE_DATA
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-    const handler = (event) => {
-      if (event.data?.action === 'snooze' && event.data?.doseId) {
-        const key = event.data.doseId;
-        snoozeCount.current[key] = (snoozeCount.current[key] || 0) + 1;
-        // Re-schedule with next snooze delay
-        const dose = doses.find((d) => d.id === key);
-        if (dose) scheduleDose(dose);
-      }
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+
+    const handler = async (event) => {
+      if (event.data?.type !== 'GET_SCHEDULE') return;
+      try {
+        const raw = localStorage.getItem(SCHEDULE_KEY);
+        const schedule = raw ? JSON.parse(raw) : [];
+        const reg = await navigator.serviceWorker.ready;
+        reg.active?.postMessage({ type: 'SCHEDULE_DATA', schedule });
+      } catch {}
     };
+
     navigator.serviceWorker.addEventListener('message', handler);
     return () => navigator.serviceWorker.removeEventListener('message', handler);
-  }, [doses, scheduleDose]);
+  }, []);
 
-  // Main effect: setup + schedule all active doses
-  useEffect(() => {
+  // 2. Salva token FCM no Supabase (somente uma vez por sessão)
+  const saveFCMToken = useCallback(async () => {
+    if (!userId || tokenSaved.current) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const { requestFCMToken } = await import('@/lib/firebase');
+      const token = await requestFCMToken();
+      if (token) {
+        await SupaFCM.saveToken(userId, token);
+        tokenSaved.current = true;
+      }
+    } catch {}
+  }, [userId]);
+
+  // 3. Persiste schedule no localStorage + envia ao SW (fallback local)
+  const syncSchedule = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
     if (!doses?.length) return;
 
-    (async () => {
-      const granted = await setup();
-      if (!granted) return;
+    const schedule = buildSchedule(doses);
+    try { localStorage.setItem(SCHEDULE_KEY, JSON.stringify(schedule)); } catch {}
 
-      clearAll();
-      doses
-        .filter((d) => !['confirmed', 'missed'].includes(d.status))
-        .forEach(scheduleDose);
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        reg.active?.postMessage({ type: 'SCHEDULE_DATA', schedule });
+      } catch {}
+    }
+  }, [doses]);
 
-      // Try to save FCM token (non-blocking)
-      saveFCMToken().catch(() => {});
-    })();
+  useEffect(() => {
+    if (!doses?.length) return;
+    syncSchedule();
+    saveFCMToken();
+  }, [doses, syncSchedule, saveFCMToken]);
 
-    return clearAll;
-  }, [doses, setup, clearAll, scheduleDose, saveFCMToken]);
+  // 4. Pede permissão + salva token FCM
+  const setup = useCallback(async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return false;
+    if (Notification.permission === 'denied') return false;
+    if (Notification.permission === 'default') {
+      const r = await Notification.requestPermission();
+      if (r !== 'granted') return false;
+    }
+    await saveFCMToken();
+    return true;
+  }, [saveFCMToken]);
 
   return { setup };
 }
