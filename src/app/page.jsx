@@ -10,6 +10,8 @@ import { AuthScreen }       from '@/components/AuthScreen';
 import { BottomNav }        from '@/components/BottomNav';
 import { Toasts }           from '@/components/ui/Toasts';
 import { PWAInstallBanner } from '@/components/PWAInstallBanner';
+import { CaregiverDB }      from '@/lib/supabaseCaregiver';
+import { PERMISSION_LEVELS } from '@/hooks/useCaregiver';
 
 // ── Lazy-loaded screens ──────────────────────────────────────────────────────
 const HomeScreen     = dynamic(() => import('@/screens/HomeScreen').then(m => ({ default: m.HomeScreen })),     { loading: () => <ScreenLoader /> });
@@ -71,6 +73,144 @@ function usePWAInstall() {
   return { canInstall: Boolean(prompt) && !installed, install };
 }
 
+// ─── Convite de cuidador: detecta token na URL e gerencia aceite ──────────────
+// Suporta duas rotas: /convite/TOKEN (path) e /?convite=TOKEN (query, fallback)
+function useCaregiverInvite() {
+  const [token, setToken]   = useState(null);
+  const [invite, setInvite] = useState(null);
+  const [status, setStatus] = useState(null); // null|'loading'|'ready'|'accepting'|'done'|'error'
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const path  = window.location.pathname;
+    const match = path.match(/^\/convite\/([a-f0-9]+)$/i);
+    const query = new URLSearchParams(window.location.search).get('convite');
+    const found = match?.[1] || query || null;
+    if (!found) return;
+
+    setToken(found);
+    setStatus('loading');
+    window.history.replaceState({}, '', '/');
+
+    CaregiverDB.getInviteByToken(found).then((data) => {
+      setInvite(data);
+      setStatus(data ? 'ready' : 'error');
+    });
+  }, []);
+
+  const accept = useCallback(async () => {
+    setStatus('accepting');
+    const result = await CaregiverDB.acceptInvite(token);
+    if (result?.success) {
+      setStatus('done');
+    } else {
+      setStatus('error');
+    }
+    return result;
+  }, [token]);
+
+  const dismiss = useCallback(() => setStatus(null), []);
+
+  return { status, invite, accept, dismiss };
+}
+
+// ─── Modal de aceite de convite de cuidador ───────────────────────────────────
+function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
+  if (!status || status === 'done_dismissed') return null;
+
+  const permLabel = {
+    viewer:    '👁 Apenas Visualização',
+    caregiver: '🤝 Cuidador',
+    admin:     '⚙️ Administrador',
+  }[invite?.permission_level] || '';
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Convite de cuidador"
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,.85)',
+        backdropFilter: 'blur(16px)', zIndex: 500,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      }}
+    >
+      <div className="anim-scaleIn" style={{ background: T.bg1, borderRadius: 24, padding: 28, maxWidth: 380, width: '100%' }}>
+
+        {status === 'loading' && (
+          <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <span className="anim-blink" style={{ fontSize: 40 }}>🔗</span>
+            <p style={{ color: T.sub, marginTop: 12, fontSize: 14 }}>Verificando convite…</p>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: 40, marginBottom: 10 }}>❌</p>
+            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Convite inválido</p>
+            <p style={{ color: T.sub, fontSize: 13, marginBottom: 20, lineHeight: 1.5 }}>
+              Este convite expirou, já foi utilizado ou não existe.
+            </p>
+            <button
+              onClick={onDismiss}
+              style={{ width: '100%', padding: 14, borderRadius: 12, background: T.bg3, color: T.sub, border: 'none', cursor: 'pointer', fontWeight: 700 }}
+            >Fechar</button>
+          </div>
+        )}
+
+        {status === 'ready' && invite && (
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: 44, marginBottom: 12 }}>🤝</p>
+            <p style={{ color: T.txt, fontWeight: 900, fontSize: 18, lineHeight: 1.35, marginBottom: 8 }}>
+              {invite.patient?.nome || 'Alguém'} deseja compartilhar o tratamento com você.
+            </p>
+            <p style={{ color: T.sub, fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>
+              Você poderá acompanhar medicamentos, histórico e receber alertas.
+            </p>
+            <div style={{ background: T.bg2, borderRadius: 12, padding: 12, marginBottom: 20, textAlign: 'left' }}>
+              <p style={{ color: T.muted, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
+                Seu nível de acesso
+              </p>
+              <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 }}>{permLabel}</p>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={onDismiss}
+                style={{ flex: 1, padding: 14, borderRadius: 12, background: T.bg3, color: T.sub, border: `1px solid ${T.bdr}`, cursor: 'pointer', fontWeight: 700 }}
+              >Recusar</button>
+              <button
+                onClick={onAccept}
+                style={{ flex: 1, padding: 14, borderRadius: 12, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 800 }}
+              >Aceitar</button>
+            </div>
+          </div>
+        )}
+
+        {status === 'accepting' && (
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <span className="anim-blink" style={{ fontSize: 36 }}>⟳</span>
+            <p style={{ color: T.sub, marginTop: 12, fontSize: 14 }}>Vinculando conta…</p>
+          </div>
+        )}
+
+        {status === 'done' && (
+          <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <p style={{ fontSize: 44, marginBottom: 10 }}>✅</p>
+            <p style={{ color: T.txt, fontWeight: 900, fontSize: 18 }}>Vinculado com sucesso!</p>
+            <p style={{ color: T.sub, fontSize: 13, marginTop: 8, marginBottom: 20, lineHeight: 1.5 }}>
+              Acesse a aba Perfil → "Pacientes que acompanho" para visualizar o tratamento.
+            </p>
+            <button
+              onClick={onDismiss}
+              style={{ width: '100%', padding: 14, borderRadius: 12, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 800 }}
+            >Continuar</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Inner app ────────────────────────────────────────────────────────────────
 function InnerApp() {
   const { user, loading, login, doses, meds, history, confirmDose, saveMed } = useApp();
@@ -78,6 +218,7 @@ function InnerApp() {
   const { size: fsSize, set: setFs, scale } = useFontScale();
   const { list: toasts, show: toast } = useToast();
   const { canInstall, install } = usePWAInstall();
+  const invite = useCaregiverInvite();
 
   const [tab,       setTab]       = useState('home');
   const [quickDose, setQuickDose] = useState(null);
@@ -143,7 +284,24 @@ function InnerApp() {
     );
   }
 
-  if (!user) return <AuthScreen onLogin={login} T={T} />;
+  // Convite de cuidador tem prioridade sobre a tela de login,
+  // pois o cuidador pode precisar criar conta antes de aceitar.
+  if (!user) {
+    return (
+      <>
+        <AuthScreen onLogin={login} T={T} />
+        {invite.status && (
+          <CaregiverInviteModal
+            status={invite.status}
+            invite={invite.invite}
+            onAccept={invite.accept}
+            onDismiss={invite.dismiss}
+            T={T}
+          />
+        )}
+      </>
+    );
+  }
 
   const screenProps = { T, scale };
 
@@ -184,6 +342,17 @@ function InnerApp() {
       {quickDose && <QuickConfirm dose={quickDose} onConfirm={handleConfirmDose} onSnooze={handleSnooze} onClose={() => setQuickDose(null)} T={T} />}
       {showAdd   && <MedModal med={editMed} onSave={handleSaveMed} onClose={() => { setShowAdd(false); setEditMed(null); }} T={T} scale={scale} userId={user?.id} />}
       {viewMed   && <MedDetail med={viewMed} history={history} onClose={() => setViewMed(null)} T={T} scale={scale} />}
+
+      {/* Modal de aceite de convite de cuidador (usuário já logado) */}
+      {invite.status && (
+        <CaregiverInviteModal
+          status={invite.status}
+          invite={invite.invite}
+          onAccept={invite.accept}
+          onDismiss={invite.dismiss}
+          T={T}
+        />
+      )}
     </div>
   );
 }
