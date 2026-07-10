@@ -26,15 +26,16 @@ export function uid() {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const AuthDB = {
-  async register(nome, email, pass) {
+  // `role` — papel RBAC escolhido no cadastro: 'paciente' | 'cuidador' | 'independente'
+  async register(nome, email, pass, role = 'independente') {
     if (isSupabaseEnabled) {
-      const { data, error } = await SupabaseAuth.signUp(email, pass, nome);
+      const { data, error } = await SupabaseAuth.signUp(email, pass, nome, role);
       if (error) return { error: typeof error === 'string' ? error : error.message };
-      return { user: { id: data.user.id, nome, email, created_at: data.user.created_at } };
+      return { user: { id: data.user.id, nome, email, role, created_at: data.user.created_at } };
     }
     const db = getStore();
     if (db.users.find((u) => u.email === email)) return { error: 'E-mail já cadastrado' };
-    const user = { id: uid(), nome, email, pass, created_at: new Date().toISOString() };
+    const user = { id: uid(), nome, email, pass, role, created_at: new Date().toISOString() };
     db.users.push(user); saveStore(db);
     if (typeof window !== 'undefined') localStorage.setItem('mc_uid', user.id);
     return { user };
@@ -45,13 +46,14 @@ export const AuthDB = {
       const { data, error } = await SupabaseAuth.signIn(email, pass);
       if (error) return { error: typeof error === 'string' ? error : error.message };
       const u = data.user;
-      return { user: { id: u.id, nome: u.user_metadata?.nome || email, email: u.email, created_at: u.created_at } };
+      const role = await SupabaseAuth.getProfileRole(u.id);
+      return { user: { id: u.id, nome: u.user_metadata?.nome || email, email: u.email, role, created_at: u.created_at } };
     }
     const db = getStore();
     const user = db.users.find((u) => u.email === email && u.pass === pass);
     if (!user) return { error: 'E-mail ou senha inválidos' };
     if (typeof window !== 'undefined') localStorage.setItem('mc_uid', user.id);
-    return { user };
+    return { user: { ...user, role: user.role || 'independente' } };
   },
 
   async logout() {
@@ -66,12 +68,14 @@ export const AuthDB = {
         const session = await SupabaseAuth.getSession();
         if (!session) return null;
         const u = session.user;
-        return { id: u.id, nome: u.user_metadata?.nome || u.email, email: u.email, created_at: u.created_at };
+        const role = await SupabaseAuth.getProfileRole(u.id);
+        return { id: u.id, nome: u.user_metadata?.nome || u.email, email: u.email, role, created_at: u.created_at };
       } catch { return null; }
     }
     const id = localStorage.getItem('mc_uid');
     if (!id) return null;
-    return getStore().users.find((u) => u.id === id) || null;
+    const user = getStore().users.find((u) => u.id === id) || null;
+    return user ? { ...user, role: user.role || 'independente' } : null;
   },
 
   async resetPassword(email) {
@@ -80,6 +84,23 @@ export const AuthDB = {
       return { error: error?.message || null };
     }
     return { error: null };
+  },
+
+  /**
+   * Atualiza o papel (role) do usuário — usado na tela de Perfil caso o
+   * usuário deseje trocar de "Independente" para "Paciente"/"Cuidador" etc.
+   */
+  async updateRole(userId, role) {
+    if (isSupabaseEnabled) {
+      const { supabase } = await import('./supabase');
+      if (!supabase) return false;
+      const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
+      return !error;
+    }
+    const db = getStore();
+    db.users = db.users.map((u) => (u.id === userId ? { ...u, role } : u));
+    saveStore(db);
+    return true;
   },
 };
 

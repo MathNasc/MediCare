@@ -1,8 +1,11 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '@/context/AppContext';
+import { usePermissions } from '@/hooks/usePermissions';
 import { C } from '@/lib/theme';
 import { NotesDB, EventsDB, ObsDB } from '@/lib/supabaseCalendar';
+import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
+import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -97,10 +100,16 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
 }
 
 // ─── Painel de detalhes do dia ────────────────────────────────────────────────
-function DayPanel({ dateStr, history, meds, notes, events, obs, user, onAddNote, onEditNote, onDeleteNote, onAddEvent, onDeleteEvent, onClose, T, scale }) {
+function DayPanel({
+  dateStr, history, meds, notes, events, obs, user, role,
+  onAddNote, onEditNote, onDeleteNote, onAddEvent, onDeleteEvent,
+  onConfirmRetroactive, onClose, T, scale,
+}) {
   const [filter, setFilter] = useState('todos');
   const [obsText, setObsText] = useState('');
   const [obsTarget, setObsTarget] = useState(null);
+  // Dose selecionada para correção retroativa: { med, hora }
+  const [retroTarget, setRetroTarget] = useState(null);
 
   const date = new Date(dateStr + 'T12:00:00');
   const label = date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -126,6 +135,34 @@ function DayPanel({ dateStr, history, meds, notes, events, obs, user, onAddNote,
     { id: 'anotacoes',    label: '📝 Notas' },
     { id: 'eventos',      label: '📅 Eventos' },
   ];
+
+  // Verifica se o próprio usuário ainda pode corrigir esta dose:
+  // - independente: sempre
+  // - paciente: apenas nas primeiras 24h e se não foi registrada por um cuidador
+  // A validação definitiva é sempre feita no servidor (RPC confirm_dose_retroactive).
+  const isEditableBySelf = (hora, hist) => {
+    if (hist?.performed_by && hist.performed_by !== user.id) return false;
+    if (role === 'independente') return true;
+    if (role === 'paciente') {
+      const doseDateTime = new Date(`${dateStr}T${hora}:00`);
+      const hoursElapsed = (Date.now() - doseDateTime.getTime()) / 36e5;
+      return hoursElapsed <= 24;
+    }
+    return false;
+  };
+
+  const handleRetroConfirm = async (reason) => {
+    if (!retroTarget) return { success: false };
+    const result = await onConfirmRetroactive({
+      medId: retroTarget.med.id,
+      hora: retroTarget.hora,
+      doseDate: dateStr,
+      newStatus: 'confirmed',
+      reason,
+    });
+    if (result?.success) setRetroTarget(null);
+    return result;
+  };
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(14px)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -160,10 +197,14 @@ function DayPanel({ dateStr, history, meds, notes, events, obs, user, onAddNote,
               {scheduledDoses.map(({ med, hora, hist, obs: obsEntry }) => {
                 const confirmed = hist?.status === 'confirmed';
                 const missed    = !hist && !isFuture;
-                const future    = isFuture;
                 const color     = confirmed ? C.green : missed ? C.red : T.muted;
                 const icon      = confirmed ? '✓' : missed ? '✕' : '○';
                 const bgColor   = confirmed ? 'rgba(34,197,94,.08)' : missed ? 'rgba(239,68,68,.08)' : T.bg2;
+
+                // Correção retroativa: só faz sentido para dias não-futuros e doses não confirmadas
+                const canOfferRetro = !isFuture && !confirmed;
+                const editableNow   = canOfferRetro && isEditableBySelf(hora, hist);
+                const correctedByOther = Boolean(hist?.performed_by && hist.performed_by !== user.id);
 
                 return (
                   <div key={`${med.id}-${hora}`} style={{ background: bgColor, border: `1px solid ${color}22`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
@@ -183,6 +224,39 @@ function DayPanel({ dateStr, history, meds, notes, events, obs, user, onAddNote,
                         )}
                       </div>
                     </div>
+
+                    {/* Indicador de transparência: dose confirmada/corrigida por um cuidador */}
+                    {hist?.performed_by && (
+                      <CaregiverBadge
+                        correctedByOther={correctedByOther}
+                        isRetroactive={hist.is_retroactive}
+                        correctedAt={hist.corrected_at}
+                        scale={scale}
+                      />
+                    )}
+
+                    {/* Correção retroativa: dose não confirmada em dia passado (ou hoje já vencido) */}
+                    {canOfferRetro && editableNow && (
+                      <button
+                        onClick={() => setRetroTarget({ med, hora })}
+                        style={{
+                          marginTop: 8, width: '100%', padding: '9px 10px', borderRadius: 10,
+                          background: 'rgba(59,130,246,.1)', color: '#3b82f6',
+                          border: '1px solid rgba(59,130,246,.3)', fontWeight: 700, fontSize: 12 * scale,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        🕐 Confirmar retroativamente
+                      </button>
+                    )}
+                    {canOfferRetro && !editableNow && (
+                      <p style={{ marginTop: 8, color: T.muted, fontSize: 10.5 * scale, textAlign: 'center' }}>
+                        {correctedByOther
+                          ? 'Este registro foi feito por um cuidador'
+                          : 'Prazo de 24 horas para correção expirado'}
+                      </p>
+                    )}
+
                     {/* Observação da dose */}
                     {obsEntry && (
                       <div style={{ marginTop: 8, background: T.bg3, borderRadius: 8, padding: '8px 10px' }}>
@@ -287,13 +361,31 @@ function DayPanel({ dateStr, history, meds, notes, events, obs, user, onAddNote,
           )}
         </div>
       </div>
+
+      {/* Modal de correção retroativa — motivo opcional (o próprio usuário está corrigindo) */}
+      {retroTarget && (
+        <RetroactiveConfirmModal
+          dose={{
+            nome: retroTarget.med.nome,
+            dosagem: retroTarget.med.dosagem,
+            hora: retroTarget.hora,
+            date: dateStr,
+          }}
+          requireReason={false}
+          onConfirm={handleRetroConfirm}
+          onClose={() => setRetroTarget(null)}
+          T={T}
+          scale={scale}
+        />
+      )}
     </div>
   );
 }
 
 // ─── CalendarScreen principal ─────────────────────────────────────────────────
 export function CalendarScreen({ T, scale }) {
-  const { user, history, meds } = useApp();
+  const { user, history, meds, confirmDoseRetroactive } = useApp();
+  const { role } = usePermissions();
 
   const now = new Date();
   const [viewYear,  setViewYear]  = useState(now.getFullYear());
@@ -579,11 +671,13 @@ export function CalendarScreen({ T, scale }) {
           events={events}
           obs={obs}
           user={user}
+          role={role}
           onAddNote={(date) => setNoteModal({ date })}
           onEditNote={(note) => setNoteModal({ date: note.date, note })}
           onDeleteNote={handleDeleteNote}
           onAddEvent={(date) => setEventModal({ date })}
           onDeleteEvent={handleDeleteEvent}
+          onConfirmRetroactive={confirmDoseRetroactive}
           onClose={() => setSelected(null)}
           T={T}
           scale={scale}

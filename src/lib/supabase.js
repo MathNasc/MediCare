@@ -13,13 +13,17 @@ export const isSupabaseEnabled = Boolean(supabase);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const SupabaseAuth = {
-  async signUp(email, password, nome) {
+  // `role` define o papel RBAC do usuário: 'paciente' | 'cuidador' | 'independente'
+  async signUp(email, password, nome, role = 'independente') {
     if (!supabase) return { error: 'Supabase não configurado' };
     const { data, error } = await supabase.auth.signUp({
-      email, password, options: { data: { nome } },
+      email, password, options: { data: { nome, role } },
     });
     if (!error && data.user) {
-      await supabase.from('profiles').upsert({ id: data.user.id, nome, email });
+      // Upsert de segurança — o trigger handle_new_user já cria o perfil,
+      // isto garante que o role escolhido na tela seja respeitado mesmo
+      // se o trigger rodar antes deste ponto.
+      await supabase.from('profiles').upsert({ id: data.user.id, nome, email, role });
     }
     return { data, error };
   },
@@ -38,6 +42,23 @@ export const SupabaseAuth = {
     if (!supabase) return null;
     const { data } = await supabase.auth.getSession();
     return data.session;
+  },
+  /**
+   * Busca o papel (role) do perfil do usuário — usado para hidratar o
+   * objeto `user` do contexto global com a informação de RBAC.
+   */
+  async getProfileRole(userId) {
+    if (!supabase || !userId) return 'independente';
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
+      return data?.role || 'independente';
+    } catch {
+      return 'independente';
+    }
   },
   onAuthStateChange(cb) {
     if (!supabase) return { data: { subscription: { unsubscribe: () => {} } } };

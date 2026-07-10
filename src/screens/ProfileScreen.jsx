@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
+import { ROLES, getRoleMeta } from '@/lib/permissions';
 
 // ─── Lazy: telas de cuidador (só carregam quando abertas) ─────────────────────
 const CaregiversScreen = dynamic(
@@ -25,28 +26,95 @@ function LoadingScreen({ icon }) {
 // ─── Overlay de sub-tela ──────────────────────────────────────────────────────
 function SubScreen({ title, onBack, bg, children }) {
   return (
-    <div className="anim-fadeUp" style={{
-      position: 'fixed', inset: 0,
-      background: bg,
-      zIndex: 200, overflowY: 'auto',
-    }}>
+    <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: bg, zIndex: 200, overflowY: 'auto' }}>
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '0 16px 96px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
           <button
             onClick={onBack}
             aria-label="Voltar"
-            style={{
-              width: 40, height: 40, borderRadius: '50%',
-              background: 'rgba(255,255,255,.08)',
-              border: 'none', color: '#f0f4f8',
-              fontSize: 20, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
-            }}
+            style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,.08)', border: 'none', color: '#f0f4f8', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
           >‹</button>
           <p style={{ color: '#f0f4f8', fontWeight: 800, fontSize: 18 }}>{title}</p>
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+// ─── Seção: Tipo de Perfil (RBAC) ──────────────────────────────────────────────
+function RoleSection({ user, T, scale, updateRole }) {
+  const [expanded, setExpanded] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [toast, setToast]       = useState('');
+  const current = getRoleMeta(user?.role);
+
+  const handleChange = async (code) => {
+    if (code === user?.role) { setExpanded(false); return; }
+    setSaving(true);
+    const ok = await updateRole(code);
+    setSaving(false);
+    setToast(ok ? '✓ Tipo de perfil atualizado!' : 'Erro ao atualizar. Tente novamente.');
+    setTimeout(() => setToast(''), 2500);
+    if (ok) setExpanded(false);
+  };
+
+  return (
+    <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 14 }}>
+      <button
+        onClick={() => setExpanded(e => !e)}
+        style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
+      >
+        <span style={{ fontSize: 22 }}>{current.icon}</span>
+        <div style={{ flex: 1 }}>
+          <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Tipo de Perfil</p>
+          <p style={{ color: current.color, fontSize: 12 * scale, fontWeight: 700, marginTop: 1 }}>{current.label}</p>
+        </div>
+        <span style={{ color: T.muted, fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
+      </button>
+
+      {!expanded && (
+        <p style={{ color: T.muted, fontSize: 11 * scale, padding: '0 16px 14px', lineHeight: 1.5 }}>
+          {current.description}
+        </p>
+      )}
+
+      {expanded && (
+        <div style={{ padding: '0 16px 16px', borderTop: `1px solid ${T.bdr}` }}>
+          <p style={{ color: T.sub, fontSize: 10 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', margin: '14px 0 10px' }}>
+            Escolha como você usa o MediCare
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {Object.values(ROLES).map(r => (
+              <button
+                key={r.code}
+                disabled={saving}
+                onClick={() => handleChange(r.code)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                  padding: '12px 14px', borderRadius: 12,
+                  border: `2px solid ${user?.role === r.code ? r.color : T.bdr}`,
+                  background: user?.role === r.code ? `${r.color}12` : T.bg2,
+                  cursor: saving ? 'wait' : 'pointer', opacity: saving ? .7 : 1,
+                }}
+              >
+                <span style={{ fontSize: 20, flexShrink: 0 }}>{r.icon}</span>
+                <div style={{ flex: 1 }}>
+                  <p style={{ color: user?.role === r.code ? r.color : T.txt, fontWeight: 700, fontSize: 13 * scale }}>{r.label}</p>
+                  <p style={{ color: T.muted, fontSize: 10.5 * scale, marginTop: 2, lineHeight: 1.4 }}>{r.description}</p>
+                </div>
+                {user?.role === r.code && <span style={{ color: r.color, fontSize: 16, flexShrink: 0 }}>✓</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ padding: '0 16px 14px' }}>
+          <p style={{ color: toast.startsWith('✓') ? C.green : C.red, fontSize: 12 * scale, fontWeight: 600 }}>{toast}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -76,7 +144,7 @@ function useNotificationPermission() {
 
 // ─── ProfileScreen ─────────────────────────────────────────────────────────────
 export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
-  const { user, meds, history, logout } = useApp();
+  const { user, meds, history, logout, updateRole } = useApp();
   const { permission, request } = useNotificationPermission();
 
   const [showDeniedHelp,    setShowDeniedHelp]    = useState(false);
@@ -128,10 +196,15 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
           {user?.nome?.[0]?.toUpperCase() || '👤'}
         </div>
         <p style={{ color: T.txt, fontSize: 20 * scale, fontWeight: 800, marginBottom: 2 }}>{user?.nome}</p>
-        <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 14 }}>{user?.email}</p>
-        <span style={{ fontSize: 13 * scale, fontWeight: 700, padding: '6px 16px', borderRadius: 99, background: adhesion >= 80 ? C.greenBg : C.amberBg, color: adhesion >= 80 ? C.green : C.amber, border: `1px solid ${adhesion >= 80 ? 'rgba(34,197,94,.3)' : 'rgba(245,158,11,.3)'}` }}>
-          {adhesion}% de adesão ao tratamento
-        </span>
+        <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 10 }}>{user?.email}</p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13 * scale, fontWeight: 700, padding: '6px 16px', borderRadius: 99, background: adhesion >= 80 ? C.greenBg : C.amberBg, color: adhesion >= 80 ? C.green : C.amber, border: `1px solid ${adhesion >= 80 ? 'rgba(34,197,94,.3)' : 'rgba(245,158,11,.3)'}` }}>
+            {adhesion}% de adesão ao tratamento
+          </span>
+          <span style={{ fontSize: 13 * scale, fontWeight: 700, padding: '6px 16px', borderRadius: 99, background: `${getRoleMeta(user?.role).color}15`, color: getRoleMeta(user?.role).color, border: `1px solid ${getRoleMeta(user?.role).color}30` }}>
+            {getRoleMeta(user?.role).icon} {getRoleMeta(user?.role).label}
+          </span>
+        </div>
       </div>
 
       {/* Quick stats */}
@@ -148,6 +221,9 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
           </div>
         ))}
       </div>
+
+      {/* ── TIPO DE PERFIL (RBAC) ── */}
+      <RoleSection user={user} T={T} scale={scale} updateRole={updateRole} />
 
       {/* Settings card */}
       <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 14 }}>
@@ -201,12 +277,7 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
         <button
           onClick={() => setShowCaregivers(true)}
           aria-label="Gerenciar cuidadores"
-          style={{
-            width: '100%', background: 'none', border: 'none',
-            padding: '15px 16px', borderBottom: `1px solid ${T.bdr}`,
-            display: 'flex', alignItems: 'center', gap: 12,
-            cursor: 'pointer', textAlign: 'left',
-          }}
+          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
         >
           <span style={{ fontSize: 22 }}>🤝</span>
           <div style={{ flex: 1 }}>
@@ -220,12 +291,7 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
         <button
           onClick={() => setShowCaregiverDash(true)}
           aria-label="Ver painel do cuidador"
-          style={{
-            width: '100%', background: 'none', border: 'none',
-            padding: '15px 16px',
-            display: 'flex', alignItems: 'center', gap: 12,
-            cursor: 'pointer', textAlign: 'left',
-          }}
+          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
         >
           <span style={{ fontSize: 22 }}>👁</span>
           <div style={{ flex: 1 }}>

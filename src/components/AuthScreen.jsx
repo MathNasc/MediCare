@@ -1,22 +1,49 @@
 'use client';
 import { useState } from 'react';
 import { AuthDB } from '@/lib/db';
+import { ROLES } from '@/lib/permissions';
+
+// ─── Seletor de papel (RBAC) exibido apenas no cadastro ───────────────────────
+function RoleSelector({ value, onChange, T }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+      <p style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 2 }}>
+        Como você vai usar o MediCare?
+      </p>
+      {Object.values(ROLES).map((r) => (
+        <button
+          key={r.code}
+          type="button"
+          onClick={() => onChange(r.code)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 14px', borderRadius: 12, textAlign: 'left',
+            border: `2px solid ${value === r.code ? r.color : T.inpB}`,
+            background: value === r.code ? `${r.color}12` : T.inp,
+            cursor: 'pointer', transition: 'all .15s',
+          }}
+        >
+          <span style={{ fontSize: 22, flexShrink: 0 }}>{r.icon}</span>
+          <div style={{ flex: 1 }}>
+            <p style={{ color: value === r.code ? r.color : T.txt, fontWeight: 700, fontSize: 14 }}>{r.label}</p>
+            <p style={{ color: T.muted, fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>{r.description}</p>
+          </div>
+          {value === r.code && <span style={{ color: r.color, fontSize: 16, flexShrink: 0 }}>✓</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function AuthScreen({ onLogin, T }) {
   const [mode, setMode]   = useState('login');
   const [nome, setNome]   = useState('');
   const [email, setEmail] = useState('');
   const [pass, setPass]   = useState('');
+  const [role, setRole]   = useState('independente');
   const [err, setErr]     = useState('');
   const [load, setLoad]   = useState(false);
 
-  // Corrigido: AuthDB.login/register são funções async e retornam uma
-  // Promise. O código anterior chamava AuthDB.login(...) sem "await"
-  // dentro de um setTimeout não-async, então "r" era a própria Promise
-  // (não { user } / { error }). Isso fazia r.error e r.user serem
-  // sempre undefined, onLogin nunca receber um usuário válido, e
-  // setLoad(false) nunca ser chamado no caminho de sucesso — por isso
-  // o botão ficava preso em "Aguarde..." indefinidamente.
   const submit = async () => {
     setErr('');
     setLoad(true);
@@ -40,7 +67,7 @@ export function AuthScreen({ onLogin, T }) {
           setLoad(false);
           return;
         }
-        const r = await AuthDB.register(nome, email, pass);
+        const r = await AuthDB.register(nome, email, pass, role);
         if (r.error) {
           setErr(r.error);
           setLoad(false);
@@ -111,6 +138,16 @@ export function AuthScreen({ onLogin, T }) {
             <input type="email" style={inp} placeholder="seu@email.com" value={email} onChange={(e) => setEmail(e.target.value)} disabled={load} />
             <input type="password" style={inp} placeholder="Senha" value={pass} onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !load && submit()} disabled={load} />
           </div>
+
+          {/* Seletor de papel — apenas no cadastro */}
+          {mode === 'register' && (
+            <div style={{ marginTop: 16 }}>
+              <RoleSelector value={role} onChange={setRole} T={T} />
+              <p style={{ color: T.muted, fontSize: 10, lineHeight: 1.5, marginTop: -4, marginBottom: 4 }}>
+                Você poderá alterar isso depois em Perfil → Tipo de Perfil.
+              </p>
+            </div>
+          )}
 
           {err && (
             <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 10, background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.3)' }}>

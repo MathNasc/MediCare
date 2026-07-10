@@ -2,10 +2,11 @@
 import { createContext, useContext, useEffect, useReducer, useCallback, useMemo } from 'react';
 import { AuthDB, MedDB, HistDB } from '@/lib/db';
 import { buildDoses } from '@/lib/doseUtils';
+import { AuditDB } from '@/lib/supabaseAudit';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 const initialState = {
-  user:        null,
+  user:        null, // inclui { id, nome, email, role, created_at }
   meds:        [],
   history:     [],
   doses:       [],
@@ -26,6 +27,8 @@ function reducer(state, action) {
       return { ...state, syncing: action.value };
     case 'SET_ERROR':
       return { ...state, error: action.error, syncing: false };
+    case 'SET_ROLE':
+      return { ...state, user: state.user ? { ...state.user, role: action.role } : state.user };
     case 'LOGOUT':
       return { ...initialState, loading: false };
     default:
@@ -53,8 +56,6 @@ export function AppProvider({ children }) {
       let ms = await MedDB.list(userId);
 
       // Seed de demonstração roda apenas UMA VEZ por usuário/dispositivo.
-      // Antes: reseeding ocorria sempre que ms.length === 0, fazendo
-      // medicamentos excluídos voltarem após refresh.
       const seedKey = `mc_seeded_${userId}`;
       const alreadySeeded =
         typeof window !== 'undefined' && localStorage.getItem(seedKey) === '1';
@@ -96,7 +97,15 @@ export function AppProvider({ children }) {
     if (state.user) loadAll(state.user.id);
   }, [state.user, loadAll]);
 
-  // ── Dose actions ────────────────────────────────────────────────────────────
+  // ── RBAC: atualizar papel do usuário ────────────────────────────────────────
+  const updateRole = useCallback(async (role) => {
+    if (!state.user) return false;
+    const ok = await AuthDB.updateRole(state.user.id, role);
+    if (ok) dispatch({ type: 'SET_ROLE', role });
+    return ok;
+  }, [state.user]);
+
+  // ── Dose actions (confirmação em tempo real) ────────────────────────────────
   const confirmDose = useCallback(async (dose, toastFn) => {
     const now = new Date();
     const [h, m] = dose.hora.split(':').map(Number);
@@ -110,6 +119,7 @@ export function AppProvider({ children }) {
         hora:           dose.hora,
         status:         'confirmed',
         atraso_minutos: delay,
+        performed_by:   state.user.id,
       });
 
       const med = state.meds.find((m) => m.id === dose.med_id);
@@ -131,6 +141,24 @@ export function AppProvider({ children }) {
     }
   }, [state.user, state.meds, loadAll]);
 
+  // ── Dose actions (correção retroativa — RBAC + auditoria) ──────────────────
+  // Único caminho para alterar doses de datas passadas. Sempre passa pela
+  // função security definer `confirm_dose_retroactive` no Supabase, que
+  // valida papel (paciente/cuidador/independente), janela de 24h e registra
+  // o motivo em audit_logs. `reason` é obrigatório apenas quando quem age
+  // é um cuidador (validado também no banco, nunca somente no cliente).
+  const confirmDoseRetroactive = useCallback(async ({ medId, hora, doseDate, newStatus = 'confirmed', reason = null, patientId }) => {
+    const targetPatientId = patientId || state.user?.id;
+    const result = await AuditDB.confirmRetroactive({
+      patientId: targetPatientId,
+      medId, hora, doseDate, newStatus, reason,
+    });
+    if (result?.success && targetPatientId === state.user?.id) {
+      await loadAll(state.user.id);
+    }
+    return result;
+  }, [state.user, loadAll]);
+
   // ── Med actions ─────────────────────────────────────────────────────────────
   const saveMed = useCallback(async (form, horarios, dias, editingId) => {
     const payload = {
@@ -149,7 +177,6 @@ export function AppProvider({ children }) {
   }, [state.user, loadAll]);
 
   // ── Caregiver alert ─────────────────────────────────────────────────────────
-  // Called when a dose is 30min overdue — alerts caregiver
   const alertCaregiver = useCallback(async (dose) => {
     if (!state.user) return;
     try {
@@ -157,7 +184,6 @@ export function AppProvider({ children }) {
       const caregivers = await SupaCaregivers.list(state.user.id);
       if (!caregivers.length) return;
 
-      // Send notification via Supabase Edge Function (if configured)
       const { supabase } = await import('@/lib/supabase');
       if (supabase) {
         await supabase.functions.invoke('alert-caregiver', {
@@ -174,9 +200,10 @@ export function AppProvider({ children }) {
 
   const value = useMemo(() => ({
     ...state,
-    login, logout, refresh,
-    confirmDose, saveMed, deleteMed, alertCaregiver,
-  }), [state, login, logout, refresh, confirmDose, saveMed, deleteMed, alertCaregiver]);
+    login, logout, refresh, updateRole,
+    confirmDose, confirmDoseRetroactive,
+    saveMed, deleteMed, alertCaregiver,
+  }), [state, login, logout, refresh, updateRole, confirmDose, confirmDoseRetroactive, saveMed, deleteMed, alertCaregiver]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
