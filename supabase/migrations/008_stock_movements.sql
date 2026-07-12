@@ -181,12 +181,17 @@ returns table (
   forecast_depletion_date  date
 ) language sql stable security definer as $$
   select
-    m.id, m.nome, m.unidade, m.quantidade,
-    coalesce(dr.rate, 0),
-    case when coalesce(dr.rate,0) > 0 then round(m.quantidade / dr.rate) end,
+    m.id                                as medication_id,
+    m.nome                              as nome,
+    m.unidade                           as unidade,
+    m.quantidade                        as current_quantity,
+    coalesce(dr.rate, 0)                as daily_consumption_rate,
+    case when coalesce(dr.rate,0) > 0
+      then round(m.quantidade / dr.rate)
+    end                                  as days_remaining,
     case when coalesce(dr.rate,0) > 0
       then (now() + (round(m.quantidade / dr.rate) || ' days')::interval)::date
-    end
+    end                                  as forecast_depletion_date
   from public.medicamentos m
   left join lateral (
     select count(*)::numeric / 30 as rate
