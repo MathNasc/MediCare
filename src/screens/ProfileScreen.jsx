@@ -5,7 +5,7 @@ import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
 import { ROLES, getRoleMeta } from '@/lib/permissions';
 
-// ─── Lazy: telas de cuidador (só carregam quando abertas) ─────────────────────
+// ─── Lazy: telas de cuidador e estoque (só carregam quando abertas) ───────────
 const CaregiversScreen = dynamic(
   () => import('@/screens/CaregiversScreen').then(m => ({ default: m.CaregiversScreen })),
   { loading: () => <LoadingScreen icon="🤝" /> }
@@ -13,6 +13,10 @@ const CaregiversScreen = dynamic(
 const CaregiverDashboard = dynamic(
   () => import('@/screens/CaregiverDashboard').then(m => ({ default: m.CaregiverDashboard })),
   { loading: () => <LoadingScreen icon="👤" /> }
+);
+const StockHistoryScreen = dynamic(
+  () => import('@/screens/StockHistoryScreen').then(m => ({ default: m.StockHistoryScreen })),
+  { loading: () => <LoadingScreen icon="📦" /> }
 );
 
 function LoadingScreen({ icon }) {
@@ -150,6 +154,7 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
   const [showDeniedHelp,    setShowDeniedHelp]    = useState(false);
   const [showCaregivers,    setShowCaregivers]    = useState(false);
   const [showCaregiverDash, setShowCaregiverDash] = useState(false);
+  const [showStockHistory,  setShowStockHistory]  = useState(false);
 
   const histConf = history.filter(h => h.status === 'confirmed').length;
   const adhesion = history.length > 0 ? Math.round((histConf / history.length) * 100) : 0;
@@ -182,6 +187,14 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
     return (
       <SubScreen title="Painel do cuidador" onBack={() => setShowCaregiverDash(false)} bg={T.bg0}>
         <CaregiverDashboard user={user} T={T} scale={scale} />
+      </SubScreen>
+    );
+  }
+
+  if (showStockHistory) {
+    return (
+      <SubScreen title="Histórico de Estoque" onBack={() => setShowStockHistory(false)} bg={T.bg0}>
+        <StockHistoryScreen T={T} scale={scale} />
       </SubScreen>
     );
   }
@@ -291,12 +304,26 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
         <button
           onClick={() => setShowCaregiverDash(true)}
           aria-label="Ver painel do cuidador"
-          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
+          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
         >
           <span style={{ fontSize: 22 }}>👁</span>
           <div style={{ flex: 1 }}>
             <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Pacientes que acompanho</p>
             <p style={{ color: T.muted, fontSize: 12 * scale }}>Visualizar tratamento de quem você cuida</p>
+          </div>
+          <span style={{ color: T.muted, fontSize: 18 }}>›</span>
+        </button>
+
+        {/* ── HISTÓRICO DE ESTOQUE ── */}
+        <button
+          onClick={() => setShowStockHistory(true)}
+          aria-label="Ver histórico de estoque"
+          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
+        >
+          <span style={{ fontSize: 22 }}>📦</span>
+          <div style={{ flex: 1 }}>
+            <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Histórico de Estoque</p>
+            <p style={{ color: T.muted, fontSize: 12 * scale }}>Compras, ajustes e previsão de reposição</p>
           </div>
           <span style={{ color: T.muted, fontSize: 18 }}>›</span>
         </button>

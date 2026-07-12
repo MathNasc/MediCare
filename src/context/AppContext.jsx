@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useReducer, useCallback, useMemo 
 import { AuthDB, MedDB, HistDB } from '@/lib/db';
 import { buildDoses } from '@/lib/doseUtils';
 import { AuditDB } from '@/lib/supabaseAudit';
+import { StockDB } from '@/lib/supabaseStock';
 import { computeEndDate, isTemporaryExpired } from '@/lib/treatmentTypes';
 import { supabase } from '@/lib/supabase';
 
@@ -52,14 +53,11 @@ export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   // ── Encerramento automático de tratamentos temporários vencidos ────────────
-  // Tenta primeiro a RPC segura no Supabase (fonte de verdade); em modo
-  // localStorage/demo, faz a checagem e atualização diretamente no cliente.
   const checkExpiredTreatments = useCallback(async (userId, medsList) => {
     if (supabase) {
       try { await supabase.rpc('finish_expired_treatments'); } catch {}
       return;
     }
-    // Fallback localStorage: finaliza tratamentos temporários vencidos
     const expired = medsList.filter((m) => m.treatment_type === 'temporary' && m.status === 'ativo' && isTemporaryExpired(m));
     for (const m of expired) {
       await MedDB.update(m.id, { status: 'concluido', finished_at: new Date().toISOString(), ativo: false });
@@ -72,7 +70,6 @@ export function AppProvider({ children }) {
     try {
       let ms = await MedDB.list(userId);
 
-      // Seed de demonstração roda apenas UMA VEZ por usuário/dispositivo.
       const seedKey = `mc_seeded_${userId}`;
       const alreadySeeded =
         typeof window !== 'undefined' && localStorage.getItem(seedKey) === '1';
@@ -84,7 +81,6 @@ export function AppProvider({ children }) {
 
       if (typeof window !== 'undefined') localStorage.setItem(seedKey, '1');
 
-      // Verifica e encerra tratamentos temporários vencidos antes de montar as doses do dia
       await checkExpiredTreatments(userId, ms);
       ms = await MedDB.list(userId);
 
@@ -127,6 +123,8 @@ export function AppProvider({ children }) {
   }, [state.user]);
 
   // ── Dose actions (confirmação em tempo real — uso contínuo/temporário) ─────
+  // Consumo por confirmação de dose NÃO gera movimentação de estoque nem
+  // evento de calendário — apenas reduz a quantidade normalmente.
   const confirmDose = useCallback(async (dose, toastFn) => {
     const now = new Date();
     const [h, m] = dose.hora.split(':').map(Number);
@@ -176,8 +174,8 @@ export function AppProvider({ children }) {
   }, [state.user, loadAll]);
 
   // ── SOS: registrar uso sob demanda ──────────────────────────────────────────
-  // Diferente de confirmDose: não há horário "programado" nem atraso.
-  // Registra imediatamente no histórico com o motivo informado (opcional).
+  // Assim como confirmDose, é consumo — não gera movimentação de estoque
+  // nem evento de calendário, apenas reduz a quantidade e registra o histórico.
   const registerSOSUse = useCallback(async (med, { hora, motivo, quantidade = 1, toastFn } = {}) => {
     const usedAt = hora || new Date().toTimeString().slice(0, 5);
     try {
@@ -218,7 +216,6 @@ export function AppProvider({ children }) {
         await loadAll(state.user.id);
         return { success: true, id: data };
       }
-      // Fallback localStorage
       const days = med.treatment_days || 7;
       const endDate = computeEndDate(newStartDate, days);
       const newMed = await MedDB.add({
@@ -261,6 +258,25 @@ export function AppProvider({ children }) {
     await loadAll(state.user.id);
   }, [state.user, loadAll]);
 
+  // ── Estoque: registrar movimentação (reposição/ajuste/correção) ────────────
+  // Único caminho para logar mudanças manuais de quantidade. Diferente de
+  // confirmDose/registerSOSUse (consumo silencioso), toda chamada aqui
+  // grava em stock_movements e — quando a quantidade aumenta — cria
+  // automaticamente um evento "📦 Estoque" no calendário (ver RPC no banco).
+  const recordStockMovement = useCallback(async ({
+    medicationId, movementType, quantityBefore, quantityAfter,
+    purchasePrice, purchaseLocation, batch, expirationDate, notes,
+  }) => {
+    const result = await StockDB.recordMovement({
+      medicationId, movementType, quantityBefore, quantityAfter,
+      purchasePrice, purchaseLocation, batch, expirationDate, notes,
+    });
+    if (result?.success && state.user) {
+      await loadAll(state.user.id);
+    }
+    return result;
+  }, [state.user, loadAll]);
+
   // ── Caregiver alert ─────────────────────────────────────────────────────────
   const alertCaregiver = useCallback(async (dose) => {
     if (!state.user) return;
@@ -292,7 +308,6 @@ export function AppProvider({ children }) {
         return data;
       } catch { /* fallback abaixo */ }
     }
-    // Fallback client-side (localStorage ou erro na RPC)
     const monthPrefix = new Date().toISOString().slice(0, 7);
     return {
       continuous_count:    state.meds.filter(m => (m.treatment_type || 'continuous') === 'continuous' && m.ativo).length,
@@ -310,11 +325,13 @@ export function AppProvider({ children }) {
     login, logout, refresh, updateRole,
     confirmDose, confirmDoseRetroactive,
     registerSOSUse, repeatTreatment, setTreatmentStatus, getTreatmentDashboard,
+    recordStockMovement,
     saveMed, deleteMed, alertCaregiver,
   }), [
     state, login, logout, refresh, updateRole,
     confirmDose, confirmDoseRetroactive,
     registerSOSUse, repeatTreatment, setTreatmentStatus, getTreatmentDashboard,
+    recordStockMovement,
     saveMed, deleteMed, alertCaregiver,
   ]);
 

@@ -1,17 +1,24 @@
 'use client';
 // src/components/modals/MedModal.jsx
-// Modal de cadastro de medicamento com catálogo + tipo de tratamento.
+// Modal de cadastro/edição de medicamento com catálogo + tipo de tratamento
+// + detecção automática de reposição/ajuste de estoque.
 //
-// Fluxo:
-//   STEP 1 (SEARCH)     → Pesquisa no catálogo (pulado se estiver editando)
-//   STEP 2 (TREATMENT)  → Escolha do tipo de tratamento (pulado se estiver editando)
+// Fluxo (novo cadastro):
+//   STEP 1 (SEARCH)     → Pesquisa no catálogo
+//   STEP 2 (TREATMENT)  → Escolha do tipo de tratamento
 //   STEP 3 (FORM)       → Campos finais, condicionais ao tipo escolhido
+//
+// Fluxo (edição de medicamento existente):
+//   STEP 3 (FORM) direto → se a quantidade foi alterada ao salvar,
+//   exibe StockMovementModal antes de confirmar (compra/ajuste/correção).
 
 import { useState } from 'react';
 import { PILL_COLORS, UNITS, WEEK_S, C } from '@/lib/theme';
 import { MEDICINE_TYPES } from '@/data/medicationCatalog';
 import { MedicationSearchInput } from '@/components/medications/MedicationSearchInput';
 import { TREATMENT_TYPES, computeEndDate, calcTreatmentDays } from '@/lib/treatmentTypes';
+import { StockMovementModal } from '@/components/modals/StockMovementModal';
+import { useApp } from '@/context/AppContext';
 import { supabase } from '@/lib/supabase';
 
 const STEPS = { SEARCH: 'search', TREATMENT: 'treatment', FORM: 'form' };
@@ -66,6 +73,7 @@ function TreatmentTypeSelector({ value, onChange, T, scale }) {
 
 // ─── Componente principal ──────────────────────────────────────────────────────
 export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
+  const { recordStockMovement } = useApp();
   const isEditing = Boolean(med);
 
   const [step, setStep] = useState(isEditing ? STEPS.FORM : STEPS.SEARCH);
@@ -90,6 +98,10 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
   const [dias, setDias] = useState(
     med?.dias_semana?.length > 0 ? med.dias_semana : [1, 2, 3, 4, 5, 6, 7]
   );
+
+  // Movimentação de estoque pendente — exibida antes de confirmar o salvamento
+  // quando a quantidade de um medicamento já existente é alterada.
+  const [pendingPayload, setPendingPayload] = useState(null);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const toggleDia = (d) => setDias(ds => ds.includes(d) ? ds.filter(x => x !== d) : [...ds, d]);
@@ -117,9 +129,28 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
     setStep(STEPS.TREATMENT);
   };
 
-  // ── Salvar ─────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (!form.nome.trim()) return;
+  // ── Construção do payload final ────────────────────────────────────────────
+  const buildPayload = () => {
+    const isTemporary = treatmentType === 'temporary';
+    const isSOS       = treatmentType === 'sos';
+    const endDate = isTemporary ? computeEndDate(startDate, durationDays) : null;
+
+    return {
+      nome: form.nome, dosagem: form.dosagem, quantidade: form.quantidade,
+      unidade: form.unidade, cor: form.cor, observacoes: form.observacoes,
+      ativo: form.ativo !== false,
+      horarios: isSOS ? [] : (horarios.length > 0 ? horarios : ['08:00']),
+      dias_semana: isSOS ? [] : (dias.length > 0 ? dias : [1,2,3,4,5,6,7]),
+      treatment_type: treatmentType,
+      start_date: isTemporary ? startDate : null,
+      end_date: endDate,
+      treatment_days: isTemporary ? durationDays : null,
+      status: med?.status || 'ativo',
+    };
+  };
+
+  // ── Confirma efetivamente o salvamento (após eventual modal de estoque) ────
+  const commitSave = async (payload, movementDetails = null) => {
     setSaving(true);
 
     if (selectedCatalog?.is_custom && supabase && userId && !isEditing) {
@@ -134,26 +165,43 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
       } catch {}
     }
 
-    const isTemporary = treatmentType === 'temporary';
-    const isSOS       = treatmentType === 'sos';
-    const endDate = isTemporary ? computeEndDate(startDate, durationDays) : null;
+    onSave(payload, payload.horarios, payload.dias_semana);
 
-    const payload = {
-      nome: form.nome, dosagem: form.dosagem, quantidade: form.quantidade,
-      unidade: form.unidade, cor: form.cor, observacoes: form.observacoes,
-      ativo: form.ativo !== false,
-      // SOS não tem agenda fixa — horarios/dias ficam vazios/irrelevantes
-      horarios: isSOS ? [] : (horarios.length > 0 ? horarios : ['08:00']),
-      dias_semana: isSOS ? [] : (dias.length > 0 ? dias : [1,2,3,4,5,6,7]),
-      treatment_type: treatmentType,
-      start_date: isTemporary ? startDate : null,
-      end_date: endDate,
-      treatment_days: isTemporary ? durationDays : null,
-      status: 'ativo',
-    };
+    if (movementDetails && med) {
+      await recordStockMovement({
+        medicationId: med.id,
+        movementType: movementDetails.movementType,
+        quantityBefore: med.quantidade,
+        quantityAfter: payload.quantidade,
+        purchasePrice: movementDetails.purchasePrice,
+        purchaseLocation: movementDetails.purchaseLocation,
+        batch: movementDetails.batch,
+        expirationDate: movementDetails.expirationDate,
+        notes: movementDetails.notes,
+      });
+    }
 
     setSaving(false);
-    onSave(payload, payload.horarios, payload.dias_semana);
+    setPendingPayload(null);
+  };
+
+  // ── Salvar: detecta alteração de estoque antes de confirmar ────────────────
+  const handleSave = async () => {
+    if (!form.nome.trim()) return;
+    const payload = buildPayload();
+
+    const quantityChanged = isEditing && Number(payload.quantidade) !== Number(med.quantidade);
+    if (quantityChanged) {
+      // Aguarda confirmação no StockMovementModal antes de persistir
+      setPendingPayload(payload);
+      return;
+    }
+
+    await commitSave(payload);
+  };
+
+  const handleStockMovementConfirm = async (movementDetails) => {
+    await commitSave(pendingPayload, movementDetails);
   };
 
   const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '13px 15px', color: T.txt, fontSize: 15 * scale, width: '100%', outline: 'none' };
@@ -274,7 +322,9 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
                 <input style={inp} placeholder="Ex: 500mg" value={form.dosagem} onChange={e => set('dosagem', e.target.value)} />
               </div>
               <div>
-                <label style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', display: 'block', marginBottom: 6 }}>Qtd. disponível</label>
+                <label style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', display: 'block', marginBottom: 6 }}>
+                  Qtd. disponível {isEditing && <span title="Alterar este valor registra automaticamente uma movimentação de estoque" style={{ cursor: 'help' }}>ℹ️</span>}
+                </label>
                 <input type="number" min="0" style={inp} value={form.quantidade} onChange={e => set('quantidade', Math.max(0, +e.target.value))} />
               </div>
             </div>
@@ -376,6 +426,19 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
           </button>
         </div>
       </div>
+
+      {/* Modal de movimentação de estoque — aparece quando a quantidade muda */}
+      {pendingPayload && med && (
+        <StockMovementModal
+          med={med}
+          quantityBefore={med.quantidade}
+          quantityAfter={pendingPayload.quantidade}
+          onConfirm={handleStockMovementConfirm}
+          onClose={() => setPendingPayload(null)}
+          T={T}
+          scale={scale}
+        />
+      )}
     </div>
   );
 }

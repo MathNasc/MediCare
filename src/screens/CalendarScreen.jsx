@@ -21,8 +21,10 @@ function getFirstWeekday(year, month) {
   return new Date(year, month, 1).getDay();
 }
 
-const EVENT_ICONS = { consulta: '👨‍⚕️', exame: '🧪', procedimento: '💉', outro: '📌' };
-const EVENT_LABELS = { consulta: 'Consulta', exame: 'Exame', procedimento: 'Procedimento', outro: 'Evento' };
+// 'estoque' é criado automaticamente pelo sistema (reposição de estoque) —
+// não aparece como opção no EventModal manual, apenas na visualização/filtro.
+const EVENT_ICONS = { consulta: '👨‍⚕️', exame: '🧪', procedimento: '💉', outro: '📌', estoque: '📦' };
+const EVENT_LABELS = { consulta: 'Consulta', exame: 'Exame', procedimento: 'Procedimento', outro: 'Evento', estoque: 'Estoque' };
 
 // ─── Modal de nova nota ───────────────────────────────────────────────────────
 function NoteModal({ date, note, onSave, onClose, T, scale }) {
@@ -56,8 +58,9 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
 }
 
 // ─── Modal de novo evento ─────────────────────────────────────────────────────
+// (tipo 'estoque' não é selecionável manualmente — é gerado automaticamente)
 function EventModal({ date, event, onSave, onClose, T, scale }) {
-  const [type, setType]         = useState(event?.type || 'consulta');
+  const [type, setType]         = useState(event?.type && event.type !== 'estoque' ? event.type : 'consulta');
   const [title, setTitle]       = useState(event?.title || '');
   const [description, setDesc]  = useState(event?.description || '');
   const [time, setTime]         = useState(event?.time || '');
@@ -65,6 +68,7 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
   const [location, setLocation] = useState(event?.location || '');
 
   const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
+  const manualTypes = ['consulta', 'exame', 'procedimento', 'outro'];
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(12px)', zIndex: 400, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -75,9 +79,9 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
         </div>
         {/* Type selector */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-          {Object.entries(EVENT_ICONS).map(([k, icon]) => (
+          {manualTypes.map(k => (
             <button key={k} onClick={() => setType(k)} style={{ flex: 1, padding: '8px 4px', borderRadius: 10, border: 'none', background: type === k ? '#3b82f6' : T.bg3, color: type === k ? '#fff' : T.sub, fontSize: 11, fontWeight: 700, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-              <span style={{ fontSize: 16 }}>{icon}</span>
+              <span style={{ fontSize: 16 }}>{EVENT_ICONS[k]}</span>
               <span>{EVENT_LABELS[k]}</span>
             </button>
           ))}
@@ -109,7 +113,6 @@ function DayPanel({
   const [filter, setFilter] = useState('todos');
   const [obsText, setObsText] = useState('');
   const [obsTarget, setObsTarget] = useState(null);
-  // Dose selecionada para correção retroativa: { med, hora }
   const [retroTarget, setRetroTarget] = useState(null);
 
   const date = new Date(dateStr + 'T12:00:00');
@@ -118,8 +121,6 @@ function DayPanel({
 
   const dayHistory = history.filter(h => new Date(h.created_at).toISOString().slice(0, 10) === dateStr);
 
-  // Doses programadas para o dia — apenas medicamentos contínuos e temporários
-  // (SOS nunca tem agenda fixa; é tratado separadamente logo abaixo)
   const scheduledDoses = meds
     .filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos')
     .flatMap(m =>
@@ -130,8 +131,6 @@ function DayPanel({
       })
     ).sort((a, b) => a.hora.localeCompare(b.hora));
 
-  // Usos SOS registrados neste dia (não têm horário agendado — só aparecem
-  // se o usuário efetivamente registrou o uso no histórico)
   const sosUsages = dayHistory
     .map(h => {
       const med = meds.find(m => m.id === h.med_id && m.treatment_type === 'sos');
@@ -140,20 +139,19 @@ function DayPanel({
     .filter(Boolean)
     .sort((a, b) => a.hist.hora.localeCompare(b.hist.hora));
 
-  const dayNotes  = notes.filter(n => n.date === dateStr);
-  const dayEvents = events.filter(e => e.date === dateStr);
+  const dayNotes     = notes.filter(n => n.date === dateStr);
+  const dayAllEvents = events.filter(e => e.date === dateStr);
+  const dayEvents    = dayAllEvents.filter(e => e.type !== 'estoque');
+  const dayStock     = dayAllEvents.filter(e => e.type === 'estoque');
 
   const filters = [
     { id: 'todos',        label: 'Todos' },
     { id: 'medicamentos', label: '💊 Meds' },
     { id: 'anotacoes',    label: '📝 Notas' },
     { id: 'eventos',      label: '📅 Eventos' },
+    { id: 'estoque',      label: '📦 Estoque' },
   ];
 
-  // Verifica se o próprio usuário ainda pode corrigir esta dose:
-  // - independente: sempre
-  // - paciente: apenas nas primeiras 24h e se não foi registrada por um cuidador
-  // A validação definitiva é sempre feita no servidor (RPC confirm_dose_retroactive).
   const isEditableBySelf = (hora, hist) => {
     if (hist?.performed_by && hist.performed_by !== user.id) return false;
     if (role === 'independente') return true;
@@ -215,7 +213,6 @@ function DayPanel({
                 const icon      = confirmed ? '✓' : missed ? '✕' : '○';
                 const bgColor   = confirmed ? 'rgba(34,197,94,.08)' : missed ? 'rgba(239,68,68,.08)' : T.bg2;
 
-                // Correção retroativa: só faz sentido para dias não-futuros e doses não confirmadas
                 const canOfferRetro = !isFuture && !confirmed;
                 const editableNow   = canOfferRetro && isEditableBySelf(hora, hist);
                 const correctedByOther = Boolean(hist?.performed_by && hist.performed_by !== user.id);
@@ -242,7 +239,6 @@ function DayPanel({
                       </div>
                     </div>
 
-                    {/* Indicador de transparência: dose confirmada/corrigida por um cuidador */}
                     {hist?.performed_by && (
                       <CaregiverBadge
                         correctedByOther={correctedByOther}
@@ -252,29 +248,20 @@ function DayPanel({
                       />
                     )}
 
-                    {/* Correção retroativa: dose não confirmada em dia passado (ou hoje já vencido) */}
                     {canOfferRetro && editableNow && (
                       <button
                         onClick={() => setRetroTarget({ med, hora })}
-                        style={{
-                          marginTop: 8, width: '100%', padding: '9px 10px', borderRadius: 10,
-                          background: 'rgba(59,130,246,.1)', color: '#3b82f6',
-                          border: '1px solid rgba(59,130,246,.3)', fontWeight: 700, fontSize: 12 * scale,
-                          cursor: 'pointer',
-                        }}
+                        style={{ marginTop: 8, width: '100%', padding: '9px 10px', borderRadius: 10, background: 'rgba(59,130,246,.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.3)', fontWeight: 700, fontSize: 12 * scale, cursor: 'pointer' }}
                       >
                         🕐 Confirmar retroativamente
                       </button>
                     )}
                     {canOfferRetro && !editableNow && (
                       <p style={{ marginTop: 8, color: T.muted, fontSize: 10.5 * scale, textAlign: 'center' }}>
-                        {correctedByOther
-                          ? 'Este registro foi feito por um cuidador'
-                          : 'Prazo de 24 horas para correção expirado'}
+                        {correctedByOther ? 'Este registro foi feito por um cuidador' : 'Prazo de 24 horas para correção expirado'}
                       </p>
                     )}
 
-                    {/* Observação da dose */}
                     {obsEntry && (
                       <div style={{ marginTop: 8, background: T.bg3, borderRadius: 8, padding: '8px 10px' }}>
                         <p style={{ color: T.sub, fontSize: 11 * scale }}>📝 {obsEntry.observation}</p>
@@ -316,7 +303,6 @@ function DayPanel({
                 );
               })}
 
-              {/* Uso sob demanda (SOS) registrado neste dia */}
               {sosUsages.map(({ med, hist }) => (
                 <div key={`sos-${hist.id}`} style={{ background: 'rgba(59,130,246,.06)', border: '1px solid rgba(59,130,246,.25)', borderRadius: 14, padding: 14, marginBottom: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -366,7 +352,7 @@ function DayPanel({
             </div>
           )}
 
-          {/* Eventos */}
+          {/* Eventos de Saúde (consulta/exame/procedimento/outro) */}
           {(filter === 'todos' || filter === 'eventos') && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -396,18 +382,34 @@ function DayPanel({
               ))}
             </div>
           )}
+
+          {/* 📦 Estoque — gerado automaticamente ao repor um medicamento */}
+          {(filter === 'todos' || filter === 'estoque') && (
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 10 }}>📦 Estoque</p>
+              {dayStock.length === 0 && (
+                <p style={{ color: T.muted, fontSize: 13 * scale }}>Nenhuma reposição de estoque neste dia</p>
+              )}
+              {dayStock.map(ev => (
+                <div key={ev.id} style={{ background: 'rgba(34,197,94,.06)', borderRadius: 14, padding: 14, marginBottom: 8, border: '1px solid rgba(34,197,94,.2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 10, background: 'rgba(34,197,94,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>📦</div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 * scale }}>{ev.title}</p>
+                      {ev.time && <p style={{ color: T.muted, fontSize: 11 * scale }}>🕐 {ev.time}</p>}
+                      {ev.description && <p style={{ color: T.sub, fontSize: 12 * scale, marginTop: 4, lineHeight: 1.5 }}>{ev.description}</p>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Modal de correção retroativa — motivo opcional (o próprio usuário está corrigindo) */}
       {retroTarget && (
         <RetroactiveConfirmModal
-          dose={{
-            nome: retroTarget.med.nome,
-            dosagem: retroTarget.med.dosagem,
-            hora: retroTarget.hora,
-            date: dateStr,
-          }}
+          dose={{ nome: retroTarget.med.nome, dosagem: retroTarget.med.dosagem, hora: retroTarget.hora, date: dateStr }}
           requireReason={false}
           onConfirm={handleRetroConfirm}
           onClose={() => setRetroTarget(null)}
@@ -434,11 +436,9 @@ export function CalendarScreen({ T, scale }) {
   const [search,    setSearch]    = useState('');
   const [showSearch, setShowSearch] = useState(false);
 
-  // Modais
-  const [noteModal,  setNoteModal]  = useState(null);  // { date, note? }
-  const [eventModal, setEventModal] = useState(null);  // { date, event? }
+  const [noteModal,  setNoteModal]  = useState(null);
+  const [eventModal, setEventModal] = useState(null);
 
-  // ── Carrega dados do mês ────────────────────────────────────────────────────
   const loadMonth = useCallback(async (year, month) => {
     if (!user) return;
     const from = `${year}-${String(month + 1).padStart(2, '0')}-01`;
@@ -465,18 +465,19 @@ export function CalendarScreen({ T, scale }) {
     else setViewMonth(m => m + 1);
   };
 
-  // ── Indicadores por dia ─────────────────────────────────────────────────────
   const getDayIndicator = (dateStr) => {
     const dayHist   = history.filter(h => new Date(h.created_at).toISOString().slice(0, 10) === dateStr);
     const dayNotes  = notes.filter(n => n.date === dateStr);
-    const dayEvents = events.filter(e => e.date === dateStr);
+    const dayAllEvents = events.filter(e => e.date === dateStr);
+    const dayStock  = dayAllEvents.filter(e => e.type === 'estoque');
+    const dayEvents = dayAllEvents.filter(e => e.type !== 'estoque');
     const isPast    = dateStr < today();
     const isToday   = dateStr === today();
 
+    if (dayStock.length  > 0) return 'stock';
     if (dayEvents.length > 0) return 'event';
     if (dayNotes.length  > 0) return 'note';
     if (isPast || isToday) {
-      // Apenas medicamentos com agenda (contínuo/temporário) contam para o indicador de adesão do dia
       const activeMeds  = meds.filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos');
       if (activeMeds.length === 0) return null;
       const confirmed = dayHist.filter(h => h.status === 'confirmed').length;
@@ -489,10 +490,9 @@ export function CalendarScreen({ T, scale }) {
     return null;
   };
 
-  const indicatorColor = { done: C.green, partial: C.amber, missed: C.red, note: C.blue, event: '#8b5cf6' };
-  const indicatorDot   = { done: '●', partial: '◐', missed: '●', note: '●', event: '●' };
+  const indicatorColor = { done: C.green, partial: C.amber, missed: C.red, note: C.blue, event: '#8b5cf6', stock: '#22c55e' };
+  const indicatorDot   = { done: '●', partial: '◐', missed: '●', note: '●', event: '●', stock: '●' };
 
-  // ── Resumo mensal ───────────────────────────────────────────────────────────
   const monthPrefix = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
   const monthHist   = history.filter(h => new Date(h.created_at).toISOString().startsWith(monthPrefix));
   const monthConf   = monthHist.filter(h => h.status === 'confirmed').length;
@@ -502,15 +502,14 @@ export function CalendarScreen({ T, scale }) {
   const monthAdh    = monthTotal > 0 ? Math.round((monthConf / monthTotal) * 100) : 0;
   const monthNotes  = notes.length;
   const monthEvents = events.filter(e => e.type === 'consulta').length;
+  const monthStock  = events.filter(e => e.type === 'estoque').length;
   const monthSOS    = monthHist.filter(h => {
     const med = meds.find(m => m.id === h.med_id);
     return med?.treatment_type === 'sos';
   }).length;
 
-  // ── Próximos eventos ────────────────────────────────────────────────────────
-  const upcomingEvents = events.filter(e => e.date >= today()).slice(0, 3);
+  const upcomingEvents = events.filter(e => e.date >= today() && e.type !== 'estoque').slice(0, 3);
 
-  // ── Handlers CRUD ───────────────────────────────────────────────────────────
   const handleSaveNote = async (data) => {
     if (noteModal.note) {
       await NotesDB.update(noteModal.note.id, { ...data, updated_at: new Date().toISOString() });
@@ -541,13 +540,11 @@ export function CalendarScreen({ T, scale }) {
     await loadMonth(viewYear, viewMonth);
   };
 
-  // ── Pesquisa ────────────────────────────────────────────────────────────────
   const searchResults = search.length > 1 ? [
     ...notes.filter(n  => n.title?.toLowerCase().includes(search.toLowerCase()) || n.description?.toLowerCase().includes(search.toLowerCase())),
     ...events.filter(e => e.title?.toLowerCase().includes(search.toLowerCase()) || e.doctor?.toLowerCase().includes(search.toLowerCase())),
   ] : [];
 
-  // ── Renderização do calendário ──────────────────────────────────────────────
   const firstWeekday = getFirstWeekday(viewYear, viewMonth);
   const daysInMonth  = getDaysInMonth(viewYear, viewMonth);
   const cells        = [...Array(firstWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
@@ -560,7 +557,6 @@ export function CalendarScreen({ T, scale }) {
         <button onClick={() => setShowSearch(s => !s)} style={{ width: 40, height: 40, borderRadius: 12, background: T.bg1, border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔍</button>
       </div>
 
-      {/* Pesquisa */}
       {showSearch && (
         <div style={{ marginBottom: 14 }}>
           <input
@@ -585,7 +581,6 @@ export function CalendarScreen({ T, scale }) {
 
       {/* Mini-calendário */}
       <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 22, padding: 16, marginBottom: 14 }}>
-        {/* Nav mês */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <button onClick={prevMonth} style={{ width: 36, height: 36, borderRadius: 10, background: T.bg3, border: 'none', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>‹</button>
           <div style={{ textAlign: 'center' }}>
@@ -595,14 +590,12 @@ export function CalendarScreen({ T, scale }) {
           <button onClick={nextMonth} style={{ width: 36, height: 36, borderRadius: 10, background: T.bg3, border: 'none', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>›</button>
         </div>
 
-        {/* Dias da semana */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: 6 }}>
           {WEEK_LABELS.map(d => (
             <div key={d} style={{ textAlign: 'center', color: T.muted, fontSize: 10 * scale, fontWeight: 700, padding: '2px 0' }}>{d}</div>
           ))}
         </div>
 
-        {/* Células */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
           {cells.map((day, idx) => {
             if (!day) return <div key={`e-${idx}`} />;
@@ -616,13 +609,10 @@ export function CalendarScreen({ T, scale }) {
                 key={dateStr}
                 onClick={() => setSelected(isSel ? null : dateStr)}
                 style={{
-                  padding: '6px 2px 4px',
-                  borderRadius: 10,
-                  border: 'none',
+                  padding: '6px 2px 4px', borderRadius: 10, border: 'none',
                   background: isSel ? '#3b82f6' : isToday ? 'rgba(59,130,246,.15)' : 'transparent',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                  cursor: 'pointer',
-                  outline: isToday && !isSel ? `2px solid rgba(59,130,246,.4)` : 'none',
+                  cursor: 'pointer', outline: isToday && !isSel ? `2px solid rgba(59,130,246,.4)` : 'none',
                 }}
               >
                 <span style={{ color: isSel ? '#fff' : isToday ? C.blue : T.txt, fontSize: 13 * scale, fontWeight: isToday || isSel ? 900 : 500, lineHeight: 1 }}>{day}</span>
@@ -634,7 +624,6 @@ export function CalendarScreen({ T, scale }) {
           })}
         </div>
 
-        {/* Legenda */}
         <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
           {[
             { color: C.green,   label: 'Tomado' },
@@ -642,6 +631,7 @@ export function CalendarScreen({ T, scale }) {
             { color: C.red,     label: 'Perdido' },
             { color: C.blue,    label: 'Nota' },
             { color: '#8b5cf6', label: 'Evento' },
+            { color: '#22c55e', label: 'Estoque' },
           ].map(l => (
             <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <div style={{ width: 7, height: 7, borderRadius: '50%', background: l.color }} />
@@ -688,13 +678,14 @@ export function CalendarScreen({ T, scale }) {
         <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 700, marginBottom: 14 }}>📊 Resumo — {MONTHS[viewMonth]} {viewYear}</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           {[
-            { label: 'Adesão',    value: `${monthAdh}%`, color: monthAdh >= 80 ? C.green : C.amber },
-            { label: 'Tomadas',   value: monthConf,      color: C.green  },
-            { label: 'Atrasos',   value: monthLate,      color: C.amber  },
-            { label: 'Perdidas',  value: monthMissed,    color: C.red    },
-            { label: 'Anotações', value: monthNotes,     color: C.blue   },
-            { label: 'Consultas', value: monthEvents,    color: '#8b5cf6'},
-            { label: 'Uso SOS',   value: monthSOS,        color: '#3b82f6'},
+            { label: 'Adesão',     value: `${monthAdh}%`, color: monthAdh >= 80 ? C.green : C.amber },
+            { label: 'Tomadas',    value: monthConf,      color: C.green  },
+            { label: 'Atrasos',    value: monthLate,      color: C.amber  },
+            { label: 'Perdidas',   value: monthMissed,    color: C.red    },
+            { label: 'Anotações',  value: monthNotes,     color: C.blue   },
+            { label: 'Consultas',  value: monthEvents,    color: '#8b5cf6'},
+            { label: 'Uso SOS',    value: monthSOS,        color: '#3b82f6'},
+            { label: 'Reposições', value: monthStock,      color: '#22c55e'},
           ].map(s => (
             <div key={s.label} style={{ background: T.bg2, borderRadius: 12, padding: '12px 8px', textAlign: 'center' }}>
               <p style={{ color: s.color, fontSize: 22 * scale, fontWeight: 900, lineHeight: 1 }}>{s.value}</p>
@@ -727,26 +718,11 @@ export function CalendarScreen({ T, scale }) {
         />
       )}
 
-      {/* Modais */}
       {noteModal && (
-        <NoteModal
-          date={noteModal.date}
-          note={noteModal.note}
-          onSave={handleSaveNote}
-          onClose={() => setNoteModal(null)}
-          T={T}
-          scale={scale}
-        />
+        <NoteModal date={noteModal.date} note={noteModal.note} onSave={handleSaveNote} onClose={() => setNoteModal(null)} T={T} scale={scale} />
       )}
       {eventModal && (
-        <EventModal
-          date={eventModal.date}
-          event={eventModal.event}
-          onSave={handleSaveEvent}
-          onClose={() => setEventModal(null)}
-          T={T}
-          scale={scale}
-        />
+        <EventModal date={eventModal.date} event={eventModal.event} onSave={handleSaveEvent} onClose={() => setEventModal(null)} T={T} scale={scale} />
       )}
     </div>
   );

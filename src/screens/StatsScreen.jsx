@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Ring } from '@/components/ui/Ring';
 import { StockBar } from '@/components/Dashboard';
+import { StockDB } from '@/lib/supabaseStock';
 import { C, WEEK } from '@/lib/theme';
 
 // ─── Indicadores de tratamento (contínuos, ativos, concluídos, SOS do mês) ────
@@ -38,6 +39,47 @@ function TreatmentDashboard({ T, scale }) {
             <p style={{ color: c.color, fontSize: 24 * scale, fontWeight: 900 }}>{c.value}</p>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Card: próxima reposição prevista ─────────────────────────────────────────
+function NextReplenishmentCard({ T, scale }) {
+  const [forecasts, setForecasts] = useState([]);
+  const [loading, setLoading]     = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    StockDB.getAllForecasts().then(f => { if (mounted) { setForecasts(f); setLoading(false); } });
+    return () => { mounted = false; };
+  }, []);
+
+  if (loading) return null;
+
+  const withForecast = forecasts.filter(f => f.days_remaining != null);
+  if (withForecast.length === 0) return null;
+
+  const next = withForecast[0]; // já vem ordenado por days_remaining asc
+  const isAlert = next.days_remaining <= 7;
+  const isWarning = next.days_remaining > 7 && next.days_remaining <= 14;
+  const color = isAlert ? C.red : isWarning ? C.amber : C.green;
+  const bg = isAlert ? 'rgba(239,68,68,.08)' : isWarning ? 'rgba(245,158,11,.08)' : 'rgba(34,197,94,.08)';
+  const border = isAlert ? 'rgba(239,68,68,.25)' : isWarning ? 'rgba(245,158,11,.25)' : 'rgba(34,197,94,.25)';
+
+  return (
+    <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 20, padding: 16, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div style={{ width: 46, height: 46, borderRadius: 13, background: `${color}20`, border: `2px solid ${color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
+        {isAlert ? '🚨' : '📦'}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ color: T.muted, fontSize: 10 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 3 }}>
+          Próxima reposição prevista
+        </p>
+        <p style={{ color: T.txt, fontSize: 15 * scale, fontWeight: 800 }}>{next.nome}</p>
+        <p style={{ color, fontSize: 13 * scale, fontWeight: 700, marginTop: 2 }}>
+          Em aproximadamente {next.days_remaining} dia{next.days_remaining !== 1 ? 's' : ''}
+        </p>
       </div>
     </div>
   );
@@ -97,6 +139,9 @@ export function StatsScreen({ T, scale }) {
           </div>
         ))}
       </div>
+
+      {/* Próxima reposição prevista */}
+      <NextReplenishmentCard T={T} scale={scale} />
 
       {/* Indicadores de tratamento (contínuo/temporário/SOS) */}
       <TreatmentDashboard T={T} scale={scale} />
