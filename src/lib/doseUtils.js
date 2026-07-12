@@ -26,19 +26,38 @@ export function getDoseStatus(hora, confirmed) {
   return 'missed';
 }
 
+// ─── Construção da lista de doses do dia ──────────────────────────────────────
+// Considera o tipo de tratamento de cada medicamento:
+//   - continuous: sempre gera doses programadas (comportamento original)
+//   - temporary:  só gera doses se a data de hoje estiver dentro de
+//                 [start_date, end_date] e o status ainda for 'ativo'
+//   - sos:        NUNCA gera doses programadas/lembretes. Só aparece no
+//                 histórico quando o próprio usuário registra o uso
+//                 manualmente (ver AppContext.registerSOSUse).
 export function buildDoses(medList, history) {
   const today = new Date().toDateString();
+  const todayISO = new Date().toISOString().slice(0, 10);
   const result = [];
 
   medList
     .filter((m) => m.ativo)
+    .filter((m) => {
+      const type = m.treatment_type || 'continuous';
+      if (type === 'sos') return false; // SOS nunca entra na agenda do dia
+      if (type === 'temporary') {
+        if (m.status && m.status !== 'ativo') return false;
+        if (m.start_date && todayISO < m.start_date) return false;
+        if (m.end_date && todayISO > m.end_date) return false;
+      }
+      return true;
+    })
     .forEach((m) => {
-      // Use the medication's own saved horarios; fall back to a single default only if missing
+      // Use a medicação's own saved horarios; fall back to a single default only if missing
       const horarios = Array.isArray(m.horarios) && m.horarios.length > 0
         ? m.horarios
         : ['08:00'];
 
-      horarios.forEach((hora, i) => {
+      horarios.forEach((hora) => {
         const done = history.find(
           (h) =>
             h.med_id === m.id &&
@@ -47,12 +66,13 @@ export function buildDoses(medList, history) {
             h.status === 'confirmed'
         );
         result.push({
-          id:      `${m.id}-${hora.replace(':', '')}`,
-          med_id:  m.id,
-          nome:    m.nome,
-          dosagem: m.dosagem,
-          unidade: m.unidade,
-          cor:     m.cor,
+          id:              `${m.id}-${hora.replace(':', '')}`,
+          med_id:          m.id,
+          nome:            m.nome,
+          dosagem:         m.dosagem,
+          unidade:         m.unidade,
+          cor:             m.cor,
+          treatment_type:  m.treatment_type || 'continuous',
           hora,
           status:  getDoseStatus(hora, !!done),
         });

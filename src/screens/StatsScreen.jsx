@@ -1,8 +1,47 @@
 'use client';
+import { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Ring } from '@/components/ui/Ring';
 import { StockBar } from '@/components/Dashboard';
 import { C, WEEK } from '@/lib/theme';
+
+// ─── Indicadores de tratamento (contínuos, ativos, concluídos, SOS do mês) ────
+function TreatmentDashboard({ T, scale }) {
+  const { getTreatmentDashboard } = useApp();
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    getTreatmentDashboard().then(d => { if (mounted) setData(d); });
+    return () => { mounted = false; };
+  }, [getTreatmentDashboard]);
+
+  if (!data) return null;
+
+  const cards = [
+    { icon: '🟢', label: 'Medicamentos contínuos', value: data.continuous_count,    color: '#22c55e' },
+    { icon: '🟡', label: 'Tratamentos ativos',      value: data.active_treatments,  color: '#f59e0b' },
+    { icon: '✓',  label: 'Tratamentos concluídos',  value: data.finished_treatments, color: T.sub     },
+    { icon: '🔵', label: 'SOS utilizados este mês',  value: data.sos_uses_this_month, color: '#3b82f6' },
+  ];
+
+  return (
+    <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 16, marginBottom: 14 }}>
+      <p style={{ color: T.txt, fontSize: 15 * scale, fontWeight: 700, marginBottom: 14 }}>💊 Tratamentos</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {cards.map(c => (
+          <div key={c.label} style={{ background: T.bg2, borderRadius: 14, padding: '12px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <span style={{ fontSize: 15 }}>{c.icon}</span>
+              <p style={{ color: T.muted, fontSize: 10 * scale, fontWeight: 700, lineHeight: 1.3 }}>{c.label}</p>
+            </div>
+            <p style={{ color: c.color, fontSize: 24 * scale, fontWeight: 900 }}>{c.value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function StatsScreen({ T, scale }) {
   const { meds, history, doses } = useApp();
@@ -59,6 +98,9 @@ export function StatsScreen({ T, scale }) {
         ))}
       </div>
 
+      {/* Indicadores de tratamento (contínuo/temporário/SOS) */}
+      <TreatmentDashboard T={T} scale={scale} />
+
       {/* Weekly chart */}
       <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 16, marginBottom: 14 }}>
         <p style={{ color: T.txt, fontSize: 15 * scale, fontWeight: 700, marginBottom: 14 }}>Doses confirmadas — semana</p>
@@ -94,8 +136,14 @@ export function StatsScreen({ T, scale }) {
                   {ok ? '✓' : '✕'}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{med?.nome || 'Medicamento'}</p>
-                  <p style={{ color: T.muted, fontSize: 11 * scale }}>{new Date(h.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} às {h.hora}{h.atraso_minutos > 0 ? ` · +${h.atraso_minutos}min` : ''}</p>
+                  <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {med?.nome || 'Medicamento'}
+                    {med?.treatment_type === 'sos' && <span style={{ color: '#3b82f6', fontWeight: 700 }}> · SOS</span>}
+                  </p>
+                  <p style={{ color: T.muted, fontSize: 11 * scale }}>
+                    {new Date(h.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} às {h.hora}{h.atraso_minutos > 0 ? ` · +${h.atraso_minutos}min` : ''}
+                  </p>
+                  {h.motivo && <p style={{ color: T.muted, fontSize: 11 * scale, fontStyle: 'italic' }}>Motivo: {h.motivo}</p>}
                 </div>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: ok ? C.green : C.red, flexShrink: 0 }} />
               </div>

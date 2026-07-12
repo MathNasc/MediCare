@@ -3,6 +3,8 @@ import { createContext, useContext, useEffect, useReducer, useCallback, useMemo 
 import { AuthDB, MedDB, HistDB } from '@/lib/db';
 import { buildDoses } from '@/lib/doseUtils';
 import { AuditDB } from '@/lib/supabaseAudit';
+import { computeEndDate, isTemporaryExpired } from '@/lib/treatmentTypes';
+import { supabase } from '@/lib/supabase';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 const initialState = {
@@ -38,9 +40,9 @@ function reducer(state, action) {
 
 // ─── Demo seeds ───────────────────────────────────────────────────────────────
 const DEMO_MEDS = (userId) => [
-  { user_id:userId, nome:'Aspirina',   dosagem:'100mg',  quantidade:28, unidade:'comprimido', cor:'#ef4444', observacoes:'Após café da manhã', ativo:true, horarios:['08:00'],        dias_semana:[1,2,3,4,5,6,7] },
-  { user_id:userId, nome:'Losartana',  dosagem:'50mg',   quantidade:9,  unidade:'comprimido', cor:'#3b82f6', observacoes:'Tomar em jejum',      ativo:true, horarios:['08:00','20:00'], dias_semana:[1,2,3,4,5,6,7] },
-  { user_id:userId, nome:'Vitamina D', dosagem:'2000UI', quantidade:4,  unidade:'cápsula',    cor:'#f59e0b', observacoes:'Com refeição',        ativo:true, horarios:['14:00'],        dias_semana:[1,2,3,4,5,6,7] },
+  { user_id:userId, nome:'Aspirina',   dosagem:'100mg',  quantidade:28, unidade:'comprimido', cor:'#ef4444', observacoes:'Após café da manhã', ativo:true, horarios:['08:00'],        dias_semana:[1,2,3,4,5,6,7], treatment_type:'continuous', status:'ativo' },
+  { user_id:userId, nome:'Losartana',  dosagem:'50mg',   quantidade:9,  unidade:'comprimido', cor:'#3b82f6', observacoes:'Tomar em jejum',      ativo:true, horarios:['08:00','20:00'], dias_semana:[1,2,3,4,5,6,7], treatment_type:'continuous', status:'ativo' },
+  { user_id:userId, nome:'Vitamina D', dosagem:'2000UI', quantidade:4,  unidade:'cápsula',    cor:'#f59e0b', observacoes:'Com refeição',        ativo:true, horarios:['14:00'],        dias_semana:[1,2,3,4,5,6,7], treatment_type:'continuous', status:'ativo' },
 ];
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -48,6 +50,21 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // ── Encerramento automático de tratamentos temporários vencidos ────────────
+  // Tenta primeiro a RPC segura no Supabase (fonte de verdade); em modo
+  // localStorage/demo, faz a checagem e atualização diretamente no cliente.
+  const checkExpiredTreatments = useCallback(async (userId, medsList) => {
+    if (supabase) {
+      try { await supabase.rpc('finish_expired_treatments'); } catch {}
+      return;
+    }
+    // Fallback localStorage: finaliza tratamentos temporários vencidos
+    const expired = medsList.filter((m) => m.treatment_type === 'temporary' && m.status === 'ativo' && isTemporaryExpired(m));
+    for (const m of expired) {
+      await MedDB.update(m.id, { status: 'concluido', finished_at: new Date().toISOString(), ativo: false });
+    }
+  }, []);
 
   // ── Load data ───────────────────────────────────────────────────────────────
   const loadAll = useCallback(async (userId) => {
@@ -67,12 +84,16 @@ export function AppProvider({ children }) {
 
       if (typeof window !== 'undefined') localStorage.setItem(seedKey, '1');
 
+      // Verifica e encerra tratamentos temporários vencidos antes de montar as doses do dia
+      await checkExpiredTreatments(userId, ms);
+      ms = await MedDB.list(userId);
+
       const hist = await HistDB.list(userId);
       dispatch({ type: 'SET_DATA', meds: ms, history: hist });
     } catch (err) {
       dispatch({ type: 'SET_ERROR', error: err.message });
     }
-  }, []);
+  }, [checkExpiredTreatments]);
 
   // ── Boot ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -105,7 +126,7 @@ export function AppProvider({ children }) {
     return ok;
   }, [state.user]);
 
-  // ── Dose actions (confirmação em tempo real) ────────────────────────────────
+  // ── Dose actions (confirmação em tempo real — uso contínuo/temporário) ─────
   const confirmDose = useCallback(async (dose, toastFn) => {
     const now = new Date();
     const [h, m] = dose.hora.split(':').map(Number);
@@ -142,11 +163,6 @@ export function AppProvider({ children }) {
   }, [state.user, state.meds, loadAll]);
 
   // ── Dose actions (correção retroativa — RBAC + auditoria) ──────────────────
-  // Único caminho para alterar doses de datas passadas. Sempre passa pela
-  // função security definer `confirm_dose_retroactive` no Supabase, que
-  // valida papel (paciente/cuidador/independente), janela de 24h e registra
-  // o motivo em audit_logs. `reason` é obrigatório apenas quando quem age
-  // é um cuidador (validado também no banco, nunca somente no cliente).
   const confirmDoseRetroactive = useCallback(async ({ medId, hora, doseDate, newStatus = 'confirmed', reason = null, patientId }) => {
     const targetPatientId = patientId || state.user?.id;
     const result = await AuditDB.confirmRetroactive({
@@ -157,6 +173,75 @@ export function AppProvider({ children }) {
       await loadAll(state.user.id);
     }
     return result;
+  }, [state.user, loadAll]);
+
+  // ── SOS: registrar uso sob demanda ──────────────────────────────────────────
+  // Diferente de confirmDose: não há horário "programado" nem atraso.
+  // Registra imediatamente no histórico com o motivo informado (opcional).
+  const registerSOSUse = useCallback(async (med, { hora, motivo, quantidade = 1, toastFn } = {}) => {
+    const usedAt = hora || new Date().toTimeString().slice(0, 5);
+    try {
+      await HistDB.add({
+        med_id:           med.id,
+        user_id:          state.user.id,
+        hora:             usedAt,
+        status:           'confirmed',
+        atraso_minutos:   0,
+        performed_by:     state.user.id,
+        motivo:           motivo || null,
+        quantidade_usada: quantidade,
+      });
+
+      if (med.quantidade > 0) {
+        await MedDB.update(med.id, { quantidade: Math.max(0, med.quantidade - quantidade) });
+      }
+
+      if (toastFn) toastFn(`✓ ${med.nome} registrado!`, 'ok');
+      await loadAll(state.user.id);
+      return { success: true };
+    } catch (err) {
+      if (toastFn) toastFn('Erro ao registrar uso', 'err');
+      return { success: false, error: err.message };
+    }
+  }, [state.user, loadAll]);
+
+  // ── Tratamentos temporários: repetir após conclusão ─────────────────────────
+  const repeatTreatment = useCallback(async (med, newStartDate) => {
+    if (!state.user) return { success: false, error: 'Sem sessão ativa' };
+    try {
+      if (supabase) {
+        const { data, error } = await supabase.rpc('repeat_treatment', {
+          p_med_id: med.id,
+          p_new_start_date: newStartDate,
+        });
+        if (error) throw error;
+        await loadAll(state.user.id);
+        return { success: true, id: data };
+      }
+      // Fallback localStorage
+      const days = med.treatment_days || 7;
+      const endDate = computeEndDate(newStartDate, days);
+      const newMed = await MedDB.add({
+        user_id: state.user.id,
+        nome: med.nome, dosagem: med.dosagem, quantidade: med.quantidade,
+        unidade: med.unidade, cor: med.cor, observacoes: med.observacoes,
+        horarios: med.horarios, dias_semana: med.dias_semana, ativo: true,
+        treatment_type: 'temporary', start_date: newStartDate, end_date: endDate,
+        treatment_days: days, status: 'ativo',
+      });
+      await loadAll(state.user.id);
+      return { success: true, id: newMed.id };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }, [state.user, loadAll]);
+
+  // ── Tratamentos: pausar / retomar / cancelar ────────────────────────────────
+  const setTreatmentStatus = useCallback(async (medId, status) => {
+    const patch = { status, ativo: status === 'ativo' };
+    if (status === 'concluido' || status === 'cancelado') patch.finished_at = new Date().toISOString();
+    await MedDB.update(medId, patch);
+    await loadAll(state.user.id);
   }, [state.user, loadAll]);
 
   // ── Med actions ─────────────────────────────────────────────────────────────
@@ -184,7 +269,6 @@ export function AppProvider({ children }) {
       const caregivers = await SupaCaregivers.list(state.user.id);
       if (!caregivers.length) return;
 
-      const { supabase } = await import('@/lib/supabase');
       if (supabase) {
         await supabase.functions.invoke('alert-caregiver', {
           body: {
@@ -198,12 +282,41 @@ export function AppProvider({ children }) {
     } catch {}
   }, [state.user]);
 
+  // ── Dashboard de tratamentos (indicadores) ──────────────────────────────────
+  const getTreatmentDashboard = useCallback(async () => {
+    if (!state.user) return null;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.rpc('get_treatment_dashboard');
+        if (error) throw error;
+        return data;
+      } catch { /* fallback abaixo */ }
+    }
+    // Fallback client-side (localStorage ou erro na RPC)
+    const monthPrefix = new Date().toISOString().slice(0, 7);
+    return {
+      continuous_count:    state.meds.filter(m => (m.treatment_type || 'continuous') === 'continuous' && m.ativo).length,
+      active_treatments:   state.meds.filter(m => m.treatment_type === 'temporary' && m.status === 'ativo').length,
+      finished_treatments: state.meds.filter(m => m.treatment_type === 'temporary' && m.status === 'concluido').length,
+      sos_uses_this_month: state.history.filter(h => {
+        const med = state.meds.find(m => m.id === h.med_id);
+        return med?.treatment_type === 'sos' && h.created_at?.startsWith(monthPrefix);
+      }).length,
+    };
+  }, [state.user, state.meds, state.history]);
+
   const value = useMemo(() => ({
     ...state,
     login, logout, refresh, updateRole,
     confirmDose, confirmDoseRetroactive,
+    registerSOSUse, repeatTreatment, setTreatmentStatus, getTreatmentDashboard,
     saveMed, deleteMed, alertCaregiver,
-  }), [state, login, logout, refresh, updateRole, confirmDose, confirmDoseRetroactive, saveMed, deleteMed, alertCaregiver]);
+  }), [
+    state, login, logout, refresh, updateRole,
+    confirmDose, confirmDoseRetroactive,
+    registerSOSUse, repeatTreatment, setTreatmentStatus, getTreatmentDashboard,
+    saveMed, deleteMed, alertCaregiver,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

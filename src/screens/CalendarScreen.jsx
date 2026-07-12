@@ -6,6 +6,7 @@ import { C } from '@/lib/theme';
 import { NotesDB, EventsDB, ObsDB } from '@/lib/supabaseCalendar';
 import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
 import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
+import { TreatmentBadge } from '@/components/ui/TreatmentBadge';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -117,14 +118,27 @@ function DayPanel({
 
   const dayHistory = history.filter(h => new Date(h.created_at).toISOString().slice(0, 10) === dateStr);
 
-  // Doses programadas para o dia (meds ativos)
-  const scheduledDoses = meds.filter(m => m.ativo).flatMap(m =>
-    (m.horarios || ['08:00']).map(hora => {
-      const hist = dayHistory.find(h => h.med_id === m.id && h.hora === hora);
-      const obsEntry = obs.find(o => o.med_id === m.id && o.hora === hora);
-      return { med: m, hora, hist, obs: obsEntry };
+  // Doses programadas para o dia — apenas medicamentos contínuos e temporários
+  // (SOS nunca tem agenda fixa; é tratado separadamente logo abaixo)
+  const scheduledDoses = meds
+    .filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos')
+    .flatMap(m =>
+      (m.horarios || ['08:00']).map(hora => {
+        const hist = dayHistory.find(h => h.med_id === m.id && h.hora === hora);
+        const obsEntry = obs.find(o => o.med_id === m.id && o.hora === hora);
+        return { med: m, hora, hist, obs: obsEntry };
+      })
+    ).sort((a, b) => a.hora.localeCompare(b.hora));
+
+  // Usos SOS registrados neste dia (não têm horário agendado — só aparecem
+  // se o usuário efetivamente registrou o uso no histórico)
+  const sosUsages = dayHistory
+    .map(h => {
+      const med = meds.find(m => m.id === h.med_id && m.treatment_type === 'sos');
+      return med ? { med, hist: h } : null;
     })
-  ).sort((a, b) => a.hora.localeCompare(b.hora));
+    .filter(Boolean)
+    .sort((a, b) => a.hist.hora.localeCompare(b.hist.hora));
 
   const dayNotes  = notes.filter(n => n.date === dateStr);
   const dayEvents = events.filter(e => e.date === dateStr);
@@ -191,7 +205,7 @@ function DayPanel({
           {(filter === 'todos' || filter === 'medicamentos') && (
             <div style={{ marginBottom: 20 }}>
               <p style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 10 }}>Medicamentos</p>
-              {scheduledDoses.length === 0 && (
+              {scheduledDoses.length === 0 && sosUsages.length === 0 && (
                 <p style={{ color: T.muted, fontSize: 13 * scale }}>Nenhum medicamento ativo</p>
               )}
               {scheduledDoses.map(({ med, hora, hist, obs: obsEntry }) => {
@@ -211,8 +225,11 @@ function DayPanel({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div style={{ width: 32, height: 32, borderRadius: '50%', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontWeight: 900, fontSize: 14, flexShrink: 0 }}>{icon}</div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 * scale }}>{med.nome}</p>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 * scale }}>{med.nome}</p>
+                            <TreatmentBadge med={med} scale={scale} showProgress />
+                          </div>
                           <p style={{ color, fontWeight: 800, fontSize: 13 * scale }}>{hora}</p>
                         </div>
                         <p style={{ color: T.muted, fontSize: 12 * scale }}>{med.dosagem} · {med.unidade}</p>
@@ -298,6 +315,26 @@ function DayPanel({
                   </div>
                 );
               })}
+
+              {/* Uso sob demanda (SOS) registrado neste dia */}
+              {sosUsages.map(({ med, hist }) => (
+                <div key={`sos-${hist.id}`} style={{ background: 'rgba(59,130,246,.06)', border: '1px solid rgba(59,130,246,.25)', borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(59,130,246,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6', fontWeight: 900, fontSize: 14, flexShrink: 0 }}>✓</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 * scale }}>{med.nome}</p>
+                          <TreatmentBadge med={med} scale={scale} />
+                        </div>
+                        <p style={{ color: '#3b82f6', fontWeight: 800, fontSize: 13 * scale }}>{hist.hora}</p>
+                      </div>
+                      <p style={{ color: T.muted, fontSize: 12 * scale }}>{med.dosagem} · {med.unidade}</p>
+                      {hist.motivo && <p style={{ color: T.sub, fontSize: 11 * scale, marginTop: 2 }}>📝 {hist.motivo}</p>}
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
@@ -439,7 +476,8 @@ export function CalendarScreen({ T, scale }) {
     if (dayEvents.length > 0) return 'event';
     if (dayNotes.length  > 0) return 'note';
     if (isPast || isToday) {
-      const activeMeds  = meds.filter(m => m.ativo);
+      // Apenas medicamentos com agenda (contínuo/temporário) contam para o indicador de adesão do dia
+      const activeMeds  = meds.filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos');
       if (activeMeds.length === 0) return null;
       const confirmed = dayHist.filter(h => h.status === 'confirmed').length;
       const total     = activeMeds.reduce((acc, m) => acc + (m.horarios?.length || 1), 0);
@@ -464,6 +502,10 @@ export function CalendarScreen({ T, scale }) {
   const monthAdh    = monthTotal > 0 ? Math.round((monthConf / monthTotal) * 100) : 0;
   const monthNotes  = notes.length;
   const monthEvents = events.filter(e => e.type === 'consulta').length;
+  const monthSOS    = monthHist.filter(h => {
+    const med = meds.find(m => m.id === h.med_id);
+    return med?.treatment_type === 'sos';
+  }).length;
 
   // ── Próximos eventos ────────────────────────────────────────────────────────
   const upcomingEvents = events.filter(e => e.date >= today()).slice(0, 3);
@@ -652,6 +694,7 @@ export function CalendarScreen({ T, scale }) {
             { label: 'Perdidas',  value: monthMissed,    color: C.red    },
             { label: 'Anotações', value: monthNotes,     color: C.blue   },
             { label: 'Consultas', value: monthEvents,    color: '#8b5cf6'},
+            { label: 'Uso SOS',   value: monthSOS,        color: '#3b82f6'},
           ].map(s => (
             <div key={s.label} style={{ background: T.bg2, borderRadius: 12, padding: '12px 8px', textAlign: 'center' }}>
               <p style={{ color: s.color, fontSize: 22 * scale, fontWeight: 900, lineHeight: 1 }}>{s.value}</p>
