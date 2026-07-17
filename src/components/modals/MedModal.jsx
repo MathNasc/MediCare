@@ -11,6 +11,11 @@
 // Fluxo (edição de medicamento existente):
 //   STEP 3 (FORM) direto → se a quantidade foi alterada ao salvar,
 //   exibe StockMovementModal antes de confirmar (compra/ajuste/correção).
+//
+// NOTA DE DEBUG: este arquivo contém console.log temporários para
+// diagnosticar por que a movimentação de estoque não estava sendo
+// gravada. Remova-os (marcados com "Diagnóstico temporário") assim que
+// confirmar que tudo está funcionando.
 
 import { useState } from 'react';
 import { PILL_COLORS, UNITS, WEEK_S, C } from '@/lib/theme';
@@ -72,7 +77,7 @@ function TreatmentTypeSelector({ value, onChange, T, scale }) {
 }
 
 // ─── Componente principal ──────────────────────────────────────────────────────
-export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
+export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) {
   const { recordStockMovement } = useApp();
   const isEditing = Boolean(med);
 
@@ -150,6 +155,12 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
   };
 
   // ── Confirma efetivamente o salvamento (após eventual modal de estoque) ────
+  // IMPORTANTE: a movimentação de estoque é registrada ANTES de onSave().
+  // onSave() dispara setShowAdd(false) no componente pai, o que desmonta
+  // este modal imediatamente — se recordStockMovement rodasse depois,
+  // qualquer erro retornado pela RPC seria descartado sem chance de aviso.
+  // Registrando antes, conseguimos exibir o erro real (via toast) caso a
+  // movimentação falhe, em vez de falhar em silêncio.
   const commitSave = async (payload, movementDetails = null) => {
     setSaving(true);
 
@@ -165,10 +176,16 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
       } catch {}
     }
 
-    onSave(payload, payload.horarios, payload.dias_semana);
-
     if (movementDetails && med) {
-      await recordStockMovement({
+      // ─── Diagnóstico temporário ─────────────────────────────────────────
+      console.log('[MedModal] chamando recordStockMovement com:', {
+        medicationId: med.id,
+        movementType: movementDetails.movementType,
+        quantityBefore: med.quantidade,
+        quantityAfter: payload.quantidade,
+      });
+      // ────────────────────────────────────────────────────────────────────
+      const movementResult = await recordStockMovement({
         medicationId: med.id,
         movementType: movementDetails.movementType,
         quantityBefore: med.quantidade,
@@ -179,7 +196,18 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
         expirationDate: movementDetails.expirationDate,
         notes: movementDetails.notes,
       });
+
+      console.log('[MedModal] resultado de recordStockMovement:', movementResult);
+
+      if (movementResult?.success === false) {
+        console.error('[MedModal] recordStockMovement falhou:', movementResult.error);
+        if (toast) {
+          toast(`⚠️ Medicamento salvo, mas a movimentação de estoque falhou: ${movementResult.error || 'erro desconhecido'}`, 'err', 6000);
+        }
+      }
     }
+
+    onSave(payload, payload.horarios, payload.dias_semana);
 
     setSaving(false);
     setPendingPayload(null);
@@ -191,6 +219,12 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
     const payload = buildPayload();
 
     const quantityChanged = isEditing && Number(payload.quantidade) !== Number(med.quantidade);
+    // ─── Diagnóstico temporário ───────────────────────────────────────────
+    console.log('[MedModal] handleSave', {
+      isEditing, medQuantidade: med?.quantidade, payloadQuantidade: payload.quantidade, quantityChanged,
+    });
+    // ───────────────────────────────────────────────────────────────────────
+
     if (quantityChanged) {
       // Aguarda confirmação no StockMovementModal antes de persistir
       setPendingPayload(payload);
@@ -201,6 +235,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId }) {
   };
 
   const handleStockMovementConfirm = async (movementDetails) => {
+    console.log('[MedModal] handleStockMovementConfirm', { pendingPayload, movementDetails });
     await commitSave(pendingPayload, movementDetails);
   };
 

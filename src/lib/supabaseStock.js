@@ -27,7 +27,10 @@ export const StockDB = {
     purchasePrice = null, purchaseLocation = null, batch = null,
     expirationDate = null, notes = null,
   }) {
-    if (!supabase) return { success: false, error: 'Supabase não configurado' };
+    if (!supabase) {
+      console.warn('[StockDB.recordMovement] Supabase não configurado — nada foi gravado.');
+      return { success: false, error: 'Supabase não configurado' };
+    }
     try {
       const { data, error } = await supabase.rpc('record_stock_movement', {
         p_medication_id: medicationId,
@@ -40,9 +43,19 @@ export const StockDB = {
         p_expiration_date: expirationDate,
         p_notes: notes,
       });
+      // ─── Diagnóstico temporário ───────────────────────────────────────────
+      // Remova este console.log assim que confirmar que o fluxo está
+      // funcionando corretamente em produção. Ele mostra exatamente o que
+      // a RPC retornou (ou o erro do PostgREST, se houver).
+      console.log('[StockDB.recordMovement] params ->', {
+        medicationId, movementType, quantityBefore, quantityAfter,
+      });
+      console.log('[StockDB.recordMovement] rpc result ->', { data, error });
+      // ────────────────────────────────────────────────────────────────────
       if (error) return { success: false, error: error.message };
       return data;
     } catch (err) {
+      console.error('[StockDB.recordMovement] exceção inesperada:', err);
       return { success: false, error: err.message };
     }
   },

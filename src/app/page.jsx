@@ -44,9 +44,6 @@ function usePWAInstall() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  // Registro incondicional do SW — requisito de instalabilidade PWA.
-  // O listener controllerchange recarrega a aba quando um novo SW assume
-  // o controle, evitando ChunkLoadError após deploys.
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
@@ -74,11 +71,10 @@ function usePWAInstall() {
 }
 
 // ─── Convite de cuidador: detecta token na URL e gerencia aceite ──────────────
-// Suporta duas rotas: /convite/TOKEN (path) e /?convite=TOKEN (query, fallback)
 function useCaregiverInvite() {
   const [token, setToken]   = useState(null);
   const [invite, setInvite] = useState(null);
-  const [status, setStatus] = useState(null); // null|'loading'|'ready'|'accepting'|'done'|'error'
+  const [status, setStatus] = useState(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -101,11 +97,7 @@ function useCaregiverInvite() {
   const accept = useCallback(async () => {
     setStatus('accepting');
     const result = await CaregiverDB.acceptInvite(token);
-    if (result?.success) {
-      setStatus('done');
-    } else {
-      setStatus('error');
-    }
+    setStatus(result?.success ? 'done' : 'error');
     return result;
   }, [token]);
 
@@ -116,7 +108,7 @@ function useCaregiverInvite() {
 
 // ─── Modal de aceite de convite de cuidador ───────────────────────────────────
 function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
-  if (!status || status === 'done_dismissed') return null;
+  if (!status) return null;
 
   const permLabel = {
     viewer:    '👁 Apenas Visualização',
@@ -129,11 +121,7 @@ function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
       role="dialog"
       aria-modal="true"
       aria-label="Convite de cuidador"
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,.85)',
-        backdropFilter: 'blur(16px)', zIndex: 500,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-      }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.85)', backdropFilter: 'blur(16px)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
     >
       <div className="anim-scaleIn" style={{ background: T.bg1, borderRadius: 24, padding: 28, maxWidth: 380, width: '100%' }}>
 
@@ -226,13 +214,11 @@ function InnerApp() {
   const [editMed,   setEditMed]   = useState(null);
   const [viewMed,   setViewMed]   = useState(null);
 
-  // Detecta se já está rodando como PWA standalone
   const isStandalone =
     typeof window !== 'undefined' &&
     (window.matchMedia('(display-mode: standalone)').matches ||
       window.navigator.standalone === true);
 
-  // Handle URL action params (from notification click)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
@@ -269,7 +255,6 @@ function InnerApp() {
   const pendingCount  = doses.filter((d) => ['pending', 'late'].includes(d.status)).length;
   const criticalCount = meds.filter((m) => m.quantidade <= 5).length;
 
-  // Altura do banner para compensar no padding do main
   const bannerHeight = !isStandalone ? 56 : 0;
 
   if (loading) {
@@ -284,8 +269,6 @@ function InnerApp() {
     );
   }
 
-  // Convite de cuidador tem prioridade sobre a tela de login,
-  // pois o cuidador pode precisar criar conta antes de aceitar.
   if (!user) {
     return (
       <>
@@ -309,7 +292,6 @@ function InnerApp() {
     <div style={{ minHeight: '100vh', background: T.bg0 }}>
       <Toasts list={toasts} />
 
-      {/* Banner de instalação PWA */}
       {!isStandalone && (
         <PWAInstallBanner
           canInstall={canInstall}
@@ -340,10 +322,11 @@ function InnerApp() {
       <BottomNav tab={tab} setTab={setTab} T={T} pendingCount={pendingCount} criticalCount={criticalCount} />
 
       {quickDose && <QuickConfirm dose={quickDose} onConfirm={handleConfirmDose} onSnooze={handleSnooze} onClose={() => setQuickDose(null)} T={T} />}
-      {showAdd   && <MedModal med={editMed} onSave={handleSaveMed} onClose={() => { setShowAdd(false); setEditMed(null); }} T={T} scale={scale} userId={user?.id} />}
+      {/* NOVO: prop `toast` adicionada — permite ao MedModal avisar o usuário
+          caso a movimentação de estoque falhe ao salvar (ver correção de bug). */}
+      {showAdd   && <MedModal med={editMed} onSave={handleSaveMed} onClose={() => { setShowAdd(false); setEditMed(null); }} T={T} scale={scale} userId={user?.id} toast={toast} />}
       {viewMed   && <MedDetail med={viewMed} history={history} onClose={() => setViewMed(null)} T={T} scale={scale} />}
 
-      {/* Modal de aceite de convite de cuidador (usuário já logado) */}
       {invite.status && (
         <CaregiverInviteModal
           status={invite.status}
