@@ -44,10 +44,36 @@ function usePWAInstall() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
+  // ── Registro do SW + verificação PROATIVA de atualizações ──────────────────
+  // Antes, o app dependia do ciclo padrão do navegador para checar se havia
+  // um sw.js novo (geralmente só a cada ~24h ou em navegações completas).
+  // Isso fazia deploys novos demorarem a "aparecer" para quem já tinha o
+  // app aberto ou instalado como PWA. Agora forçamos reg.update() em três
+  // momentos: logo após o registro, sempre que a aba volta a ficar visível
+  // (o usuário reabre o app), e a cada 5 minutos enquanto o app está aberto.
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    let registration = null;
+
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then((reg) => {
+        registration = reg;
+        // Verifica imediatamente se já existe uma versão mais nova publicada
+        reg.update().catch(() => {});
+      })
+      .catch(() => {});
+
+    const checkForUpdate = () => {
+      registration?.update().catch(() => {});
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkForUpdate();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const intervalId = setInterval(checkForUpdate, 5 * 60 * 1000);
 
     let reloaded = false;
     const onControllerChange = () => {
@@ -56,7 +82,12 @@ function usePWAInstall() {
       window.location.reload();
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
-    return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      clearInterval(intervalId);
+    };
   }, []);
 
   const install = async () => {

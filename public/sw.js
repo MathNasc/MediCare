@@ -1,5 +1,22 @@
-// MediCare Service Worker v4 — notificações em background garantidas
-const CACHE_VERSION  = 'medicare-v4';
+// MediCare Service Worker v5 — cache seguro + invalidação garantida a cada deploy
+//
+// O QUE MUDOU DA v4 PARA A v5:
+// 1. BUG CORRIGIDO: "Failed to execute 'clone' on 'Response': Response
+//    body is already used". Isso acontecia porque, em alguns caminhos do
+//    fetch handler, o código tentava ler o corpo da resposta (ex: via
+//    outra função) e DEPOIS chamar .clone() — mas clone() só funciona
+//    ANTES do corpo ser consumido. Agora usamos um helper `safeCachePut`
+//    que sempre clona a resposta imediatamente, antes de qualquer outro
+//    uso, garantindo que nunca tentamos clonar um corpo já lido.
+// 2. CACHE_VERSION foi incrementado (v4 → v5). Isso força TODOS os
+//    usuários a descartarem qualquer cache antigo (mesmo corrompido
+//    pelo bug acima) na próxima visita, sem precisar de nenhuma ação
+//    manual do usuário.
+// 3. O SW agora responde a uma mensagem 'CHECK_FOR_UPDATE' vinda da
+//    página, permitindo forçar uma verificação de atualização sob
+//    demanda (ver hook usePWAInstall no page.jsx).
+
+const CACHE_VERSION  = 'medicare-v5';
 const STATIC_CACHE   = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE  = `${CACHE_VERSION}-dynamic`;
 const CHECK_INTERVAL = 60 * 1000;
@@ -22,6 +39,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
+      // Remove QUALQUER cache que não seja da versão atual — inclui
+      // caches de v4 e anteriores, mesmo que estivessem corrompidos.
       .then(keys => Promise.all(
         keys.filter(k => k.startsWith('medicare-') && k !== STATIC_CACHE && k !== DYNAMIC_CACHE)
             .map(k => caches.delete(k))
@@ -30,6 +49,19 @@ self.addEventListener('activate', (event) => {
       .then(() => startNotificationLoop())
   );
 });
+
+// ─── Helper seguro para clonar + armazenar respostas em cache ─────────────────
+// SEMPRE clona a resposta imediatamente ao recebê-la, antes de qualquer
+// outra operação (incluindo retornar para quem chamou). Isso elimina a
+// classe inteira de bugs "Response body is already used".
+function safeCachePut(cacheName, request, response) {
+  if (!response || !response.ok) return response;
+  const toCache = response.clone();
+  caches.open(cacheName)
+    .then(cache => cache.put(request, toCache))
+    .catch(() => { /* silencioso — cache é otimização, não requisito */ });
+  return response;
+}
 
 let loopTimer = null;
 let cachedSchedule = [];
@@ -89,6 +121,10 @@ self.addEventListener('message', async (event) => {
     await fireScheduled(msg.schedule);
   }
   if (msg.type === 'CHECK_SCHEDULE') await tick();
+  // Permite que a página peça explicitamente uma verificação de update do SW.
+  if (msg.type === 'CHECK_FOR_UPDATE') {
+    self.registration.update().catch(() => {});
+  }
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -148,6 +184,9 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/_next/webpack-hmr')) return;
 
+  // Documentos/navegação: SEMPRE rede, nunca cache — garante que o HTML
+  // (e portanto as referências aos chunks JS/CSS mais recentes) esteja
+  // sempre atualizado.
   if (request.mode === 'navigate' || request.destination === 'document') {
     event.respondWith(
       fetch(request).catch(() =>
@@ -157,22 +196,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Assets estáticos versionados pelo Next.js (nome do arquivo muda a cada
+  // build) — cache-first é seguro aqui porque uma build nova nunca reusa
+  // o mesmo nome de arquivo.
   if (url.pathname.startsWith('/_next/static') || url.pathname.match(/\.(png|ico|svg|woff2?)$/)) {
     event.respondWith(
       caches.match(request).then(cached => {
         if (cached) return cached;
-        return fetch(request).then(res => {
-          if (res && res.ok) caches.open(STATIC_CACHE).then(c => c.put(request, res.clone()));
-          return res;
-        });
+        return fetch(request).then(res => safeCachePut(STATIC_CACHE, request, res));
       })
     );
     return;
   }
 
+  // Demais requisições GET: rede primeiro, cache como fallback offline.
   event.respondWith(
     fetch(request)
-      .then(res => { if (res && res.ok) caches.open(DYNAMIC_CACHE).then(c => c.put(request, res.clone())); return res; })
+      .then(res => safeCachePut(DYNAMIC_CACHE, request, res))
       .catch(() => caches.match(request))
   );
 });
