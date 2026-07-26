@@ -1,25 +1,18 @@
-// MediCare Service Worker v5 — cache seguro + invalidação garantida a cada deploy
+// MediCare Service Worker v6 — notificações via Web Push (VAPID)
 //
-// O QUE MUDOU DA v4 PARA A v5:
-// 1. BUG CORRIGIDO: "Failed to execute 'clone' on 'Response': Response
-//    body is already used". Isso acontecia porque, em alguns caminhos do
-//    fetch handler, o código tentava ler o corpo da resposta (ex: via
-//    outra função) e DEPOIS chamar .clone() — mas clone() só funciona
-//    ANTES do corpo ser consumido. Agora usamos um helper `safeCachePut`
-//    que sempre clona a resposta imediatamente, antes de qualquer outro
-//    uso, garantindo que nunca tentamos clonar um corpo já lido.
-// 2. CACHE_VERSION foi incrementado (v4 → v5). Isso força TODOS os
-//    usuários a descartarem qualquer cache antigo (mesmo corrompido
-//    pelo bug acima) na próxima visita, sem precisar de nenhuma ação
-//    manual do usuário.
-// 3. O SW agora responde a uma mensagem 'CHECK_FOR_UPDATE' vinda da
-//    página, permitindo forçar uma verificação de atualização sob
-//    demanda (ver hook usePWAInstall no page.jsx).
+// Removido nesta versão: o loop `setInterval` que tentava disparar
+// lembretes localmente (startNotificationLoop/tick/fireScheduled).
+// Isso NUNCA foi confiável — o navegador encerra Service Workers ociosos
+// (geralmente em ~30s), então o setInterval parava de rodar assim que o
+// app saía de primeiro plano, e cachedSchedule (em memória) se perdia
+// toda vez que o SW reiniciava. Quem dispara os lembretes agora é a
+// Edge Function `send-medication-reminders` via pg_cron, chegando aqui
+// como um evento `push` real — isso funciona mesmo com o app fechado,
+// porque o navegador acorda o SW especificamente para entregar o push.
 
-const CACHE_VERSION  = 'medicare-v5';
-const STATIC_CACHE   = `${CACHE_VERSION}-static`;
-const DYNAMIC_CACHE  = `${CACHE_VERSION}-dynamic`;
-const CHECK_INTERVAL = 60 * 1000;
+const CACHE_VERSION = 'medicare-v6';
+const STATIC_CACHE  = `${CACHE_VERSION}-static`;
+const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 
 const STATIC_ASSETS = [
   '/manifest.json',
@@ -39,123 +32,15 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      // Remove QUALQUER cache que não seja da versão atual — inclui
-      // caches de v4 e anteriores, mesmo que estivessem corrompidos.
       .then(keys => Promise.all(
         keys.filter(k => k.startsWith('medicare-') && k !== STATIC_CACHE && k !== DYNAMIC_CACHE)
             .map(k => caches.delete(k))
       ))
       .then(() => self.clients.claim())
-      .then(() => startNotificationLoop())
   );
 });
 
-// ─── Helper seguro para clonar + armazenar respostas em cache ─────────────────
-// SEMPRE clona a resposta imediatamente ao recebê-la, antes de qualquer
-// outra operação (incluindo retornar para quem chamou). Isso elimina a
-// classe inteira de bugs "Response body is already used".
-function safeCachePut(cacheName, request, response) {
-  if (!response || !response.ok) return response;
-  const toCache = response.clone();
-  caches.open(cacheName)
-    .then(cache => cache.put(request, toCache))
-    .catch(() => { /* silencioso — cache é otimização, não requisito */ });
-  return response;
-}
-
-let loopTimer = null;
-let cachedSchedule = [];
-let firedIds = new Set();
-
-function startNotificationLoop() {
-  if (loopTimer) clearInterval(loopTimer);
-  loopTimer = setInterval(tick, CHECK_INTERVAL);
-  tick();
-}
-
-async function tick() {
-  const clientList = await self.clients.matchAll({ includeUncontrolled: true });
-  if (clientList.length > 0) {
-    clientList[0].postMessage({ type: 'GET_SCHEDULE' });
-  } else {
-    await fireScheduled(cachedSchedule);
-  }
-}
-
-async function fireScheduled(schedule) {
-  if (!Array.isArray(schedule) || !schedule.length) return;
-  const now = Date.now();
-  const WINDOW = 90 * 1000;
-
-  for (const item of schedule) {
-    if (item.fireAt <= now + 5000 && item.fireAt > now - WINDOW && !firedIds.has(item.id)) {
-      firedIds.add(item.id);
-      try {
-        await self.registration.showNotification(item.title, {
-          body: item.body,
-          icon: '/icon-192.png',
-          badge: '/icon-96.png',
-          vibrate: [200, 100, 200, 100, 200],
-          tag: item.tag,
-          renotify: true,
-          requireInteraction: true,
-          data: {
-            doseId: item.doseId, medId: item.medId, hora: item.hora,
-            title: item.title, body: item.body, tag: item.tag,
-            url: `/?action=confirm&doseId=${item.doseId}&hora=${item.hora}`,
-          },
-          actions: [
-            { action: 'confirm', title: '✓ Tomei agora' },
-            { action: 'snooze',  title: '⏰ 15 minutos' },
-          ],
-        });
-      } catch (e) { firedIds.delete(item.id); }
-    }
-  }
-}
-
-self.addEventListener('message', async (event) => {
-  const msg = event.data || {};
-  if (msg.type === 'SCHEDULE_DATA' && Array.isArray(msg.schedule)) {
-    cachedSchedule = msg.schedule;
-    await fireScheduled(msg.schedule);
-  }
-  if (msg.type === 'CHECK_SCHEDULE') await tick();
-  // Permite que a página peça explicitamente uma verificação de update do SW.
-  if (msg.type === 'CHECK_FOR_UPDATE') {
-    self.registration.update().catch(() => {});
-  }
-});
-
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const { action } = event;
-  const d = event.notification.data || {};
-
-  if (action === 'snooze') {
-    cachedSchedule = [...cachedSchedule, {
-      id: `${d.tag}-snooze-${Date.now()}`,
-      fireAt: Date.now() + 15 * 60 * 1000,
-      title: `⏰ Lembrete: ${d.title || 'Medicamento'}`,
-      body: d.body || 'Hora de tomar seu medicamento',
-      tag: `${d.tag}-snooze`,
-      doseId: d.doseId, medId: d.medId, hora: d.hora,
-    }];
-    return;
-  }
-
-  let url = d.url || '/';
-  if (action === 'confirm') url = `/?action=confirm&doseId=${d.doseId || ''}&hora=${d.hora || ''}`;
-
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      const existing = list.find(c => c.url.includes(self.location.origin));
-      if (existing) return existing.focus().then(c => c.navigate(url));
-      return self.clients.openWindow(url);
-    })
-  );
-});
-
+// ─── Web Push — entregue pelo navegador quando a Edge Function envia ────────
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   let data = {};
@@ -177,6 +62,25 @@ self.addEventListener('push', (event) => {
   );
 });
 
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const { action } = event;
+  const d = event.notification.data || {};
+
+  let url = d.url || '/';
+  if (action === 'confirm') url = `/?action=confirm&doseId=${d.doseId || ''}&hora=${d.hora || ''}`;
+  if (action === 'snooze')  url = `/?action=snooze&doseId=${d.doseId || ''}&hora=${d.hora || ''}`;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      const existing = list.find(c => c.url.includes(self.location.origin));
+      if (existing) return existing.focus().then(c => c.navigate(url));
+      return self.clients.openWindow(url);
+    })
+  );
+});
+
+// ─── Fetch strategy (inalterado da v5) ───────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -184,9 +88,6 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/_next/webpack-hmr')) return;
 
-  // Documentos/navegação: SEMPRE rede, nunca cache — garante que o HTML
-  // (e portanto as referências aos chunks JS/CSS mais recentes) esteja
-  // sempre atualizado.
   if (request.mode === 'navigate' || request.destination === 'document') {
     event.respondWith(
       fetch(request).catch(() =>
@@ -196,25 +97,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets estáticos versionados pelo Next.js (nome do arquivo muda a cada
-  // build) — cache-first é seguro aqui porque uma build nova nunca reusa
-  // o mesmo nome de arquivo.
   if (url.pathname.startsWith('/_next/static') || url.pathname.match(/\.(png|ico|svg|woff2?)$/)) {
     event.respondWith(
       caches.match(request).then(cached => {
         if (cached) return cached;
-        return fetch(request).then(res => safeCachePut(STATIC_CACHE, request, res));
+        return fetch(request).then(res => {
+          if (res && res.ok) caches.open(STATIC_CACHE).then(c => c.put(request, res.clone()));
+          return res;
+        });
       })
     );
     return;
   }
 
-  // Demais requisições GET: rede primeiro, cache como fallback offline.
   event.respondWith(
     fetch(request)
-      .then(res => safeCachePut(DYNAMIC_CACHE, request, res))
+      .then(res => { if (res && res.ok) caches.open(DYNAMIC_CACHE).then(c => c.put(request, res.clone())); return res; })
       .catch(() => caches.match(request))
   );
 });
-
-startNotificationLoop();

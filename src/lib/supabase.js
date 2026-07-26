@@ -13,17 +13,13 @@ export const isSupabaseEnabled = Boolean(supabase);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const SupabaseAuth = {
-  // `role` define o papel RBAC do usuário: 'paciente' | 'cuidador' | 'independente'
-  async signUp(email, password, nome, role = 'independente') {
+  async signUp(email, password, nome) {
     if (!supabase) return { error: 'Supabase não configurado' };
     const { data, error } = await supabase.auth.signUp({
-      email, password, options: { data: { nome, role } },
+      email, password, options: { data: { nome } },
     });
     if (!error && data.user) {
-      // Upsert de segurança — o trigger handle_new_user já cria o perfil,
-      // isto garante que o role escolhido na tela seja respeitado mesmo
-      // se o trigger rodar antes deste ponto.
-      await supabase.from('profiles').upsert({ id: data.user.id, nome, email, role });
+      await supabase.from('profiles').upsert({ id: data.user.id, nome, email });
     }
     return { data, error };
   },
@@ -42,23 +38,6 @@ export const SupabaseAuth = {
     if (!supabase) return null;
     const { data } = await supabase.auth.getSession();
     return data.session;
-  },
-  /**
-   * Busca o papel (role) do perfil do usuário — usado para hidratar o
-   * objeto `user` do contexto global com a informação de RBAC.
-   */
-  async getProfileRole(userId) {
-    if (!supabase || !userId) return 'independente';
-    try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .maybeSingle();
-      return data?.role || 'independente';
-    } catch {
-      return 'independente';
-    }
   },
   onAuthStateChange(cb) {
     if (!supabase) return { data: { subscription: { unsubscribe: () => {} } } };
@@ -134,10 +113,34 @@ export const SupaCaregivers = {
   },
 };
 
-// ─── FCM Tokens ───────────────────────────────────────────────────────────────
-export const SupaFCM = {
-  async saveToken(userId, token) {
-    if (!supabase) return;
-    await supabase.from('fcm_tokens').upsert({ user_id: userId, token, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+// ─── Push Subscriptions (Web Push / VAPID) ────────────────────────────────────
+// Substitui o antigo SupaFCM (que salvava um único token por usuário, ligado
+// à API legada do FCM). Agora salvamos a subscription completa do navegador
+// (endpoint + chaves de criptografia), uma por dispositivo — o `endpoint` é
+// único, então um mesmo usuário pode ter várias linhas (celular + tablet etc).
+export const SupaPush = {
+  async saveSubscription(userId, subscription) {
+    if (!supabase || !subscription?.endpoint) return;
+    const { endpoint, keys } = subscription;
+    await supabase.from('push_subscriptions').upsert(
+      {
+        user_id:    userId,
+        endpoint,
+        p256dh:     keys?.p256dh,
+        auth:       keys?.auth,
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'endpoint' }
+    );
+  },
+  async removeSubscription(endpoint) {
+    if (!supabase || !endpoint) return;
+    await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
+  },
+  async list(userId) {
+    if (!supabase) return [];
+    const { data } = await supabase.from('push_subscriptions').select('*').eq('user_id', userId);
+    return data || [];
   },
 };
