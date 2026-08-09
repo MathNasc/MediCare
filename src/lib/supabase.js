@@ -11,6 +11,24 @@ export const supabase = supabaseUrl && supabaseKey
 
 export const isSupabaseEnabled = Boolean(supabase);
 
+// ─── Alerta de configuração ───────────────────────────────────────────────────
+// Se isso disparar em produção, o app caiu no modo local (localStorage) sem
+// ninguém perceber — dados de usuários e medicamentos ficam presos no
+// navegador de cada pessoa, sem sincronizar nem persistir de verdade.
+// Causa mais comum: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
+// foram salvas na Vercel, mas nenhum novo deploy foi gerado depois disso
+// (essas variáveis são embutidas no build, não lidas em tempo real).
+if (typeof window !== 'undefined' && !isSupabaseEnabled) {
+  console.error(
+    '[MediCare] ⚠ Supabase NÃO configurado neste build — o app está rodando ' +
+    'em modo local (localStorage). Contas e dados criados agora NÃO são ' +
+    'salvos no banco e não aparecem em outro dispositivo/navegador. ' +
+    'Verifique NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no ' +
+    'ambiente de deploy e gere um novo deploy (essas variáveis só entram ' +
+    'em vigor em builds novos).'
+  );
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const SupabaseAuth = {
   async signUp(email, password, nome) {
