@@ -58,28 +58,35 @@ export default function RootLayout({ children }) {
   return (
     <html lang="pt-BR">
       <head>
-        <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta
-          name="apple-mobile-web-app-status-bar-style"
-          content="black-translucent"
-        />
-        <meta name="theme-color" content="#0d1117" />
+        <script dangerouslySetInnerHTML={{ __html: `
+          if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+              navigator.serviceWorker.register('/sw.js').then(function(registration) {
+                console.log('ServiceWorker registration successful with scope: ', registration.scope);
+              }, function(err) {
+                console.log('ServiceWorker registration failed: ', err);
+              });
+            });
+          }
+        `}} />
         <meta name="msapplication-TileColor" content="#3b82f6" />
         <meta name="msapplication-TileImage" content="/icon-144.png" />
 
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link
           rel="preconnect"
           href="https://fonts.gstatic.com"
           crossOrigin="anonymous"
         />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body><div id="root">{children}</div></body>
     </html>
   );
 }

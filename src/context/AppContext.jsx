@@ -39,12 +39,6 @@ function reducer(state, action) {
   }
 }
 
-// ─── Demo seeds ───────────────────────────────────────────────────────────────
-const DEMO_MEDS = (userId) => [
-  { user_id:userId, nome:'Aspirina',   dosagem:'100mg',  quantidade:28, unidade:'comprimido', cor:'#ef4444', observacoes:'Após café da manhã', ativo:true, horarios:['08:00'],        dias_semana:[1,2,3,4,5,6,7], treatment_type:'continuous', status:'ativo' },
-  { user_id:userId, nome:'Losartana',  dosagem:'50mg',   quantidade:9,  unidade:'comprimido', cor:'#3b82f6', observacoes:'Tomar em jejum',      ativo:true, horarios:['08:00','20:00'], dias_semana:[1,2,3,4,5,6,7], treatment_type:'continuous', status:'ativo' },
-  { user_id:userId, nome:'Vitamina D', dosagem:'2000UI', quantidade:4,  unidade:'cápsula',    cor:'#f59e0b', observacoes:'Com refeição',        ativo:true, horarios:['14:00'],        dias_semana:[1,2,3,4,5,6,7], treatment_type:'continuous', status:'ativo' },
-];
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 const AppContext = createContext(null);
@@ -69,17 +63,6 @@ export function AppProvider({ children }) {
     dispatch({ type: 'SET_SYNCING', value: true });
     try {
       let ms = await MedDB.list(userId);
-
-      const seedKey = `mc_seeded_${userId}`;
-      const alreadySeeded =
-        typeof window !== 'undefined' && localStorage.getItem(seedKey) === '1';
-
-      if (ms.length === 0 && !alreadySeeded) {
-        await Promise.all(DEMO_MEDS(userId).map((m) => MedDB.add(m)));
-        ms = await MedDB.list(userId);
-      }
-
-      if (typeof window !== 'undefined') localStorage.setItem(seedKey, '1');
 
       await checkExpiredTreatments(userId, ms);
       ms = await MedDB.list(userId);
@@ -156,7 +139,7 @@ export function AppProvider({ children }) {
       if (toastFn) toastFn(`✓ ${dose.nome} confirmada!`, 'ok');
       await loadAll(state.user.id);
     } catch (err) {
-      if (toastFn) toastFn('Erro ao confirmar dose', 'err');
+      if (toastFn) toastFn(err.message || 'Erro ao confirmar dose', 'err');
     }
   }, [state.user, state.meds, loadAll]);
 
@@ -198,7 +181,7 @@ export function AppProvider({ children }) {
       await loadAll(state.user.id);
       return { success: true };
     } catch (err) {
-      if (toastFn) toastFn('Erro ao registrar uso', 'err');
+      if (toastFn) toastFn(err.message || 'Erro ao registrar uso', 'err');
       return { success: false, error: err.message };
     }
   }, [state.user, loadAll]);

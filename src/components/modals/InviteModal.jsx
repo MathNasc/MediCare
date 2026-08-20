@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 // src/components/modals/InviteModal.jsx
 // Modal de criação e compartilhamento de convite para cuidadores.

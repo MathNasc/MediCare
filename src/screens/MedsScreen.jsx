@@ -85,8 +85,12 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
     const nome = deleteTarget.nome;
     const id = deleteTarget.id;
     setDeleteTarget(null);
-    await deleteMed(id);
-    if (toast) toast(`🗑 ${nome} excluído`, 'info');
+    try {
+      await deleteMed(id);
+      if (toast) toast(`🗑 ${nome} excluído`, 'info');
+    } catch (err) {
+      if (toast) toast(err.message || 'Erro ao excluir medicamento', 'err');
+    }
   };
 
   const handleRegisterSOS = async (med, payload) => {

@@ -1,6 +1,5 @@
 'use client';
 import { useState, useCallback, useEffect, Suspense } from 'react';
-import dynamic from 'next/dynamic';
 import { AppProvider, useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useFontScale } from '@/hooks/useFontScale';
@@ -14,23 +13,17 @@ import { CaregiverDB }      from '@/lib/supabaseCaregiver';
 import { PERMISSION_LEVELS } from '@/hooks/useCaregiver';
 
 // ── Lazy-loaded screens ──────────────────────────────────────────────────────
-const HomeScreen     = dynamic(() => import('@/screens/HomeScreen').then(m => ({ default: m.HomeScreen })),     { loading: () => <ScreenLoader /> });
-const MedsScreen     = dynamic(() => import('@/screens/MedsScreen').then(m => ({ default: m.MedsScreen })),     { loading: () => <ScreenLoader /> });
-const CalendarScreen = dynamic(() => import('@/screens/CalendarScreen').then(m => ({ default: m.CalendarScreen })), { loading: () => <ScreenLoader /> });
-const StatsScreen    = dynamic(() => import('@/screens/StatsScreen').then(m => ({ default: m.StatsScreen })),    { loading: () => <ScreenLoader /> });
-const AIScreen       = dynamic(() => import('@/screens/AIScreen').then(m => ({ default: m.AIScreen })),          { loading: () => <ScreenLoader /> });
-const ProfileScreen  = dynamic(() => import('@/screens/ProfileScreen').then(m => ({ default: m.ProfileScreen })), { loading: () => <ScreenLoader /> });
-const QuickConfirm   = dynamic(() => import('@/components/modals/QuickConfirm').then(m => ({ default: m.QuickConfirm })));
-const MedModal       = dynamic(() => import('@/components/modals/MedModal').then(m => ({ default: m.MedModal })));
-const MedDetail      = dynamic(() => import('@/components/modals/MedDetail').then(m => ({ default: m.MedDetail })));
+import { HomeScreen     } from '@/screens/HomeScreen';
+import { MedsScreen     } from '@/screens/MedsScreen';
+import { CalendarScreen } from '@/screens/CalendarScreen';
+import { StatsScreen    } from '@/screens/StatsScreen';
+import { AIScreen       } from '@/screens/AIScreen';
+import { ProfileScreen  } from '@/screens/ProfileScreen';
 
-function ScreenLoader() {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}>
-      <div className="anim-blink" style={{ fontSize: 36 }}>💊</div>
-    </div>
-  );
-}
+import { QuickConfirm   } from '@/components/modals/QuickConfirm';
+import { MedModal       } from '@/components/modals/MedModal';
+import { MedDetail      } from '@/components/modals/MedDetail';
+
 
 // ─── PWA installer hook ───────────────────────────────────────────────────────
 function usePWAInstall() {
@@ -53,41 +46,9 @@ function usePWAInstall() {
   // (o usuário reabre o app), e a cada 5 minutos enquanto o app está aberto.
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
-
-    let registration = null;
-
-    navigator.serviceWorker.register('/sw.js', { scope: '/' })
-      .then((reg) => {
-        registration = reg;
-        // Verifica imediatamente se já existe uma versão mais nova publicada
-        reg.update().catch(() => {});
-      })
-      .catch(() => {});
-
-    const checkForUpdate = () => {
-      registration?.update().catch(() => {});
-    };
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') checkForUpdate();
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
-    const intervalId = setInterval(checkForUpdate, 5 * 60 * 1000);
-
-    let reloaded = false;
-    const onControllerChange = () => {
-      if (reloaded) return;
-      reloaded = true;
-      window.location.reload();
-    };
-    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
-
-    return () => {
-      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      clearInterval(intervalId);
-    };
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (let reg of registrations) reg.unregister();
+    });
   }, []);
 
   const install = async () => {
@@ -217,7 +178,7 @@ function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
             <p style={{ fontSize: 44, marginBottom: 10 }}>✅</p>
             <p style={{ color: T.txt, fontWeight: 900, fontSize: 18 }}>Vinculado com sucesso!</p>
             <p style={{ color: T.sub, fontSize: 13, marginTop: 8, marginBottom: 20, lineHeight: 1.5 }}>
-              Acesse a aba Perfil → "Pacientes que acompanho" para visualizar o tratamento.
+              Acesse a aba Perfil → &quot;Pacientes que acompanho&quot; para visualizar o tratamento.
             </p>
             <button
               onClick={onDismiss}
@@ -275,12 +236,16 @@ function InnerApp() {
     toast(`⏰ Lembrete de ${dose.nome} em 15 minutos`, 'info');
   }, [toast]);
 
-  const handleSaveMed = useCallback((form, horarios, dias) => {
+  const handleSaveMed = useCallback(async (form, horarios, dias) => {
     if (!form.nome.trim()) { toast('Informe o nome do medicamento', 'err'); return; }
-    saveMed(form, horarios, dias, editMed?.id);
-    toast(editMed ? `✓ ${form.nome} atualizado!` : `✓ ${form.nome} adicionado!`);
-    setShowAdd(false);
-    setEditMed(null);
+    try {
+      await saveMed(form, horarios, dias, editMed?.id);
+      toast(editMed ? `✓ ${form.nome} atualizado!` : `✓ ${form.nome} adicionado!`);
+      setShowAdd(false);
+      setEditMed(null);
+    } catch (err) {
+      toast(err.message || 'Não foi possível salvar o medicamento. Tente novamente.', 'err');
+    }
   }, [saveMed, editMed, toast]);
 
   const pendingCount  = doses.filter((d) => ['pending', 'late'].includes(d.status)).length;
@@ -371,10 +336,17 @@ function InnerApp() {
   );
 }
 
-export default function Page() {
+export default function MainApp() {
   return (
     <AppProvider>
       <InnerApp />
     </AppProvider>
+  );
+}
+function ScreenLoader() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}>
+      <div className="anim-blink" style={{ fontSize: 36 }}>💊</div>
+    </div>
   );
 }

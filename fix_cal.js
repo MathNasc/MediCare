@@ -1,4 +1,5 @@
-import { supabase } from './supabase';
+const fs = require('fs');
+const content = `import { supabase } from './supabase';
 
 // ─── Notes ────────────────────────────────────────────────────────────────────
 export const NotesDB = {
@@ -89,3 +90,5 @@ export const ObsDB = {
     await supabase.from('dose_observations').delete().eq('id', id);
   },
 };
+`;
+fs.writeFileSync('src/lib/supabaseCalendar.js', content);

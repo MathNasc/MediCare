@@ -440,7 +440,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
           {isSOS && (
             <div style={{ marginTop: 20, marginBottom: 20, padding: 14, borderRadius: 12, background: `${TREATMENT_TYPES.sos.color}08`, border: `1px solid ${TREATMENT_TYPES.sos.color}25` }}>
               <p style={{ color: TREATMENT_TYPES.sos.color, fontSize: 12 * scale, fontWeight: 700, lineHeight: 1.5 }}>
-                🔵 Este medicamento não terá horários fixos. Ele ficará disponível na lista rápida de "Medicamentos SOS" para registro manual sempre que for utilizado.
+                🔵 Este medicamento não terá horários fixos. Ele ficará disponível na lista rápida de &quot;Medicamentos SOS&quot; para registro manual sempre que for utilizado.
               </p>
             </div>
           )}

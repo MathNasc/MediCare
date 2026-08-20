@@ -67,7 +67,7 @@ export function AuthScreen({ onLogin, T }) {
     <div style={{ minHeight: '100vh', background: T.bg0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div className="anim-scaleIn" style={{ width: '100%', maxWidth: 380 }}>
         {/* Aviso: Supabase não configurado neste build.
-            Sem isso, o app cai silenciosamente em modo local (localStorage)
+
             e ninguém percebe até um usuário perder acesso após logout/troca
             de dispositivo. Ver src/lib/supabase.js para o log detalhado. */}
         {!isSupabaseEnabled && (

@@ -1,4 +1,5 @@
-// ─── Unified DB Layer ─────────────────────────────────────────────────────────
+const fs = require('fs');
+const content = `// ─── Unified DB Layer ─────────────────────────────────────────────────────────
 import { isSupabaseEnabled, SupabaseAuth, SupaMeds, SupaHist } from './supabase';
 
 export function uid() {
@@ -90,3 +91,5 @@ export const HistDB = {
     return SupaHist.add(row);
   },
 };
+`;
+fs.writeFileSync('src/lib/db.js', content);

@@ -1,32 +1,12 @@
 'use client';
 import { useState, useEffect } from 'react';
-import dynamic from 'next/dynamic';
+
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
 import { ROLES, getRoleMeta } from '@/lib/permissions';
-
-// ─── Lazy: telas de cuidador e estoque (só carregam quando abertas) ───────────
-const CaregiversScreen = dynamic(
-  () => import('@/screens/CaregiversScreen').then(m => ({ default: m.CaregiversScreen })),
-  { loading: () => <LoadingScreen icon="🤝" /> }
-);
-const CaregiverDashboard = dynamic(
-  () => import('@/screens/CaregiverDashboard').then(m => ({ default: m.CaregiverDashboard })),
-  { loading: () => <LoadingScreen icon="👤" /> }
-);
-const StockHistoryScreen = dynamic(
-  () => import('@/screens/StockHistoryScreen').then(m => ({ default: m.StockHistoryScreen })),
-  { loading: () => <LoadingScreen icon="📦" /> }
-);
-
-function LoadingScreen({ icon }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}>
-      <span className="anim-blink" style={{ fontSize: 36 }}>{icon}</span>
-    </div>
-  );
-}
-
+import { CaregiversScreen } from '@/screens/CaregiversScreen';
+import { CaregiverDashboard } from '@/screens/CaregiverDashboard';
+import { StockHistoryScreen } from '@/screens/StockHistoryScreen';
 // ─── Overlay de sub-tela ──────────────────────────────────────────────────────
 function SubScreen({ title, onBack, bg, children }) {
   return (
