@@ -155,6 +155,7 @@ export const SupaPush = {
         endpoint,
         p256dh:     keys?.p256dh,
         auth:       keys?.auth,
+        timezone:   Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
         user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
         updated_at: new Date().toISOString(),
       },
