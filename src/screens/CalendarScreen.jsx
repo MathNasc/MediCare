@@ -146,7 +146,7 @@ function DayPanel({
 
   const filters = [
     { id: 'todos',        label: 'Todos' },
-    { id: 'medicamentos', label: '💊 Meds' },
+    { id: 'medicamentos', label: '💊 Medicamentos' },
     { id: 'anotacoes',    label: '📝 Notas' },
     { id: 'eventos',      label: '📅 Eventos' },
     { id: 'estoque',      label: '📦 Estoque' },

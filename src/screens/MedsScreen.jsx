@@ -43,42 +43,12 @@ function RepeatTreatmentModal({ med, onConfirm, onClose, T, scale }) {
   );
 }
 
-// ─── Seção: Medicamentos SOS ────────────────────────────────────────────────
-function SOSSection({ sosMeds, onRegister, T, scale }) {
-  if (sosMeds.length === 0) return null;
-  return (
-    <div style={{ background: 'linear-gradient(135deg,rgba(59,130,246,.08),rgba(99,102,241,.08))', border: '1px solid rgba(59,130,246,.2)', borderRadius: 20, padding: 16, marginBottom: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <span style={{ fontSize: 18 }}>🔵</span>
-        <p style={{ color: T.txt, fontWeight: 800, fontSize: 14 * scale }}>Medicamentos SOS</p>
-        <span style={{ color: T.muted, fontSize: 11 * scale }}>· uso quando necessário</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {sosMeds.map(m => (
-          <div key={m.id} style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: `${m.cor}22`, border: `2px solid ${m.cor}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>💊</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ color: T.txt, fontWeight: 700, fontSize: 13 * scale, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.nome}</p>
-              <p style={{ color: T.muted, fontSize: 11 * scale }}>{m.dosagem} · {m.quantidade} {m.unidade}s em estoque</p>
-            </div>
-            <button
-              onClick={() => onRegister(m)}
-              style={{ padding: '8px 14px', borderRadius: 10, background: '#3b82f6', color: '#fff', fontWeight: 700, fontSize: 12 * scale, border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}
-            >
-              + Registrar uso
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
   const { meds, history, deleteMed, registerSOSUse, repeatTreatment } = useApp();
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [sosTarget, setSosTarget]       = useState(null);
   const [repeatTarget, setRepeatTarget] = useState(null);
+  const [activeTab, setActiveTab] = useState("continuous");
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
@@ -105,9 +75,36 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
   };
 
   // Separa medicamentos por tipo de tratamento
+  const continuousMeds = meds.filter(m => (m.treatment_type || 'continuous') === 'continuous');
+  const temporaryMeds  = meds.filter(m => m.treatment_type === 'temporary');
   const sosMeds        = meds.filter(m => m.treatment_type === 'sos' && m.ativo !== false);
-  const regularMeds     = meds.filter(m => (m.treatment_type || 'continuous') !== 'sos');
-  const finishedTreatments = meds.filter(m => m.treatment_type === 'temporary' && m.status === 'concluido');
+
+  const tabs = [
+    { id: 'continuous', label: '💊 Contínuos', count: continuousMeds.length },
+    { id: 'temporary',  label: '📅 Temporários', count: temporaryMeds.length },
+    { id: 'sos',        label: '🚨 SOS', count: sosMeds.length }
+  ];
+
+  let activeList = [];
+  let emptyIcon = '💊';
+  let emptyTitle = '';
+  let emptyDesc = '';
+
+  if (activeTab === 'continuous') {
+    activeList = continuousMeds;
+    emptyTitle = 'Nenhum medicamento contínuo';
+    emptyDesc = 'Você não possui medicamentos de uso contínuo.';
+  } else if (activeTab === 'temporary') {
+    activeList = temporaryMeds;
+    emptyIcon = '📅';
+    emptyTitle = 'Nenhum medicamento temporário';
+    emptyDesc = 'Você não possui tratamentos com data de fim programada.';
+  } else if (activeTab === 'sos') {
+    activeList = sosMeds;
+    emptyIcon = '🚨';
+    emptyTitle = 'Nenhum medicamento SOS';
+    emptyDesc = 'Você não possui medicamentos para uso eventual cadastrados.';
+  }
 
   return (
     <div className="anim-fadeUp">
@@ -122,17 +119,54 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
         </button>
       </div>
 
-      {/* Medicamentos SOS — lista rápida */}
-      <SOSSection sosMeds={sosMeds} onRegister={setSosTarget} T={T} scale={scale} />
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {tabs.map(tab => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: '1 0 auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '12px 16px',
+                borderRadius: 14,
+                background: isActive ? 'linear-gradient(135deg,#3b82f6,#6366f1)' : T.bg1,
+                color: isActive ? '#fff' : T.sub,
+                fontWeight: isActive ? 800 : 600,
+                fontSize: 14 * scale,
+                border: `1px solid ${isActive ? 'transparent' : T.bdr}`,
+                boxShadow: isActive ? '0 4px 16px rgba(59,130,246,.25)' : 'none',
+                cursor: 'pointer',
+                transition: 'none'
+              }}
+            >
+              <span>{tab.label}</span>
+              <span style={{
+                background: isActive ? 'rgba(255,255,255,.2)' : T.bg2,
+                padding: '2px 8px',
+                borderRadius: 99,
+                fontSize: 12 * scale,
+                color: isActive ? '#fff' : T.muted
+              }}>
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-      {meds.length === 0 ? (
-        <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 22, padding: 48, textAlign: 'center' }}>
-          <p style={{ fontSize: 48, marginBottom: 12 }}>💊</p>
+      {activeList.length === 0 ? (
+        <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 22, padding: 48, textAlign: 'center', marginTop: 12 }}>
+          <p style={{ fontSize: 48, marginBottom: 12 }}>{emptyIcon}</p>
           <p style={{ color: T.txt, fontSize: 18 * scale, fontWeight: 800, marginBottom: 8 }}>
-            Nenhum medicamento cadastrado
+            {emptyTitle}
           </p>
           <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 22, lineHeight: 1.6 }}>
-            Adicione seu primeiro medicamento para começar o acompanhamento.
+            {emptyDesc}
           </p>
           <button
             onClick={onAdd}
@@ -143,7 +177,8 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {regularMeds.map((m) => {
+          {activeList.map((m) => {
+            const isSOS = m.treatment_type === 'sos';
             const todayDone = history.filter(
               (h) => h.med_id === m.id && new Date(h.created_at).toDateString() === new Date().toDateString() && h.status === 'confirmed'
             ).length;
@@ -186,21 +221,35 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
                       >🗑</button>
                     </div>
                   </div>
-
-                  {m.observacoes && <p style={{ color: T.muted, fontSize: 12 * scale, marginBottom: 8, lineHeight: 1.4 }}>{m.observacoes}</p>}
+                  
+                  {isSOS ? (
+                     <p style={{ color: T.muted, fontSize: 12 * scale, marginBottom: 8, lineHeight: 1.4 }}>Uso conforme necessidade</p>
+                  ) : (
+                     m.observacoes && <p style={{ color: T.muted, fontSize: 12 * scale, marginBottom: 8, lineHeight: 1.4 }}>{m.observacoes}</p>
+                  )}
 
                   {/* Barra de progresso — apenas tratamentos temporários ativos */}
-                  {progress && !isFinished && <TreatmentProgressBar med={m} T={T} scale={scale} />}
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                    <span style={{ fontSize: 12 * scale, fontWeight: 700, padding: '3px 10px', borderRadius: 99, background: m.quantidade <= 5 ? 'rgba(239,68,68,.15)' : m.quantidade <= 10 ? 'rgba(245,158,11,.15)' : 'rgba(34,197,94,.15)', color: m.quantidade <= 5 ? C.red : m.quantidade <= 10 ? C.amber : C.green }}>
-                      📦 {m.quantidade} {m.unidade}s
-                    </span>
-                    {!isFinished && (
-                      <span style={{ color: T.muted, fontSize: 12 * scale }}>Hoje: {todayDone}/{(m.horarios || []).length || 1}</span>
+                  {progress && !isFinished && !isSOS && <TreatmentProgressBar med={m} T={T} scale={scale} />}
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: 8, gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12 * scale, fontWeight: 700, padding: '3px 10px', borderRadius: 99, background: m.quantidade <= 5 ? 'rgba(239,68,68,.15)' : m.quantidade <= 10 ? 'rgba(245,158,11,.15)' : 'rgba(34,197,94,.15)', color: m.quantidade <= 5 ? C.red : m.quantidade <= 10 ? C.amber : C.green }}>
+                        📦 {m.quantidade} {m.unidade}s
+                      </span>
+                      {!isFinished && !isSOS && (
+                        <span style={{ color: T.muted, fontSize: 12 * scale }}>Hoje: {todayDone}/{(m.horarios || []).length || 1}</span>
+                      )}
+                    </div>
+                    {isSOS && (
+                       <button
+                         onClick={(e) => { e.stopPropagation(); setSosTarget(m); }}
+                         style={{ padding: '8px 14px', borderRadius: 10, background: '#3b82f6', color: '#fff', fontWeight: 700, fontSize: 12 * scale, border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}
+                       >
+                         + Tomar SOS
+                       </button>
                     )}
                   </div>
-
+                  
                   {isFinished && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setRepeatTarget(m); }}
@@ -225,7 +274,6 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
           scale={scale}
         />
       )}
-
       {sosTarget && (
         <SOSQuickLogModal
           med={sosTarget}
@@ -235,7 +283,6 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
           scale={scale}
         />
       )}
-
       {repeatTarget && (
         <RepeatTreatmentModal
           med={repeatTarget}

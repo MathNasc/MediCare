@@ -130,7 +130,7 @@ export function StatsScreen({ T, scale }) {
         {[
           { l: 'Hoje: tomadas',   v: confirmed,                    c: C.green },
           { l: 'Hoje: pendentes', v: pending,                      c: C.amber },
-          { l: 'Meds ativos',     v: meds.filter((m) => m.ativo).length, c: C.blue },
+          { l: 'Medicamentos ativos',     v: meds.filter((m) => m.ativo).length, c: C.blue },
           { l: 'Estoque crítico', v: critical,                     c: C.red   },
         ].map((s) => (
           <div key={s.l} style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: '14px 16px' }}>

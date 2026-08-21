@@ -62,7 +62,7 @@ export function HomeScreen({ T, scale, onQuickConfirm, toggle, dark }) {
         {doses.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <p style={{ fontSize: 36, marginBottom: 8 }}>💊</p>
-            <p style={{ color: T.sub, fontSize: 14 * scale }}>Adicione medicamentos na aba Meds</p>
+            <p style={{ color: T.sub, fontSize: 14 * scale }}>Adicione medicamentos na aba Medicamentos</p>
           </div>
         ) : (
           <Timeline doses={doses} onAction={onQuickConfirm} T={T} scale={scale} />

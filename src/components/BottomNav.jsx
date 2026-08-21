@@ -3,7 +3,7 @@ import { C } from '@/lib/theme';
 
 const TABS = [
   { id: 'home',     emoji: '🏠', label: 'Início'    },
-  { id: 'meds',     emoji: '💊', label: 'Meds'      },
+  { id: 'meds',     emoji: '💊', label: 'Medicamentos' },
   { id: 'calendar', emoji: '📅', label: 'Calendário' },
   { id: 'ai',       emoji: '✨', label: 'IA'        },
   { id: 'profile',  emoji: '👤', label: 'Perfil'    },

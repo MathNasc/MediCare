@@ -175,31 +175,7 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
   const [showCaregivers,    setShowCaregivers]    = useState(false);
   const [showCaregiverDash, setShowCaregiverDash] = useState(false);
 
-  const [testPushStatus, setTestPushStatus] = useState('');
   
-  const handleTestPush = async () => {
-    if (!user?.id) return;
-    setTestPushStatus('Iniciando verificação de doses...');
-    
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-medication-reminders`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        }
-      });
-      
-      const data = await res.json();
-      if (res.ok) {
-        setTestPushStatus(`✓ Processado. Enviados: ${data.sent}, Falhas: ${data.failed}, Ignorados (já notificados/tomados): ${data.ignored}`);
-      } else {
-        setTestPushStatus(`❌ Erro: ${data.error || 'Falha no envio'}`);
-      }
-    } catch (err) {
-      setTestPushStatus('❌ Erro na requisição: ' + err.message);
-    }
-  };
 
   const [showStockHistory,  setShowStockHistory]  = useState(false);
 
@@ -271,7 +247,7 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
       {/* Quick stats */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
         {[
-          { e: '💊', n: meds.length, l: 'Meds'        },
+          { e: '💊', n: meds.length, l: 'Medicamentos'        },
           { e: '✓',  n: histConf,    l: 'Confirmadas'  },
           { e: '📦', n: critical,    l: 'Críticos'     },
         ].map(s => (
@@ -434,25 +410,7 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
       </div>
 
       
-      {/* Diagnóstico Push */}
-      <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 14, padding: '15px 16px' }}>
-        <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 * scale, marginBottom: 8 }}>Diagnóstico de Push</p>
-        <p style={{ color: T.muted, fontSize: 12 * scale, marginBottom: 12, lineHeight: 1.4 }}>
-          Teste isolado ponta-a-ponta para validar se o Android acorda o PWA em background.
-        </p>
-        <button
-          onClick={handleTestPush}
-          disabled={!isSubscribed}
-          style={{ width: '100%', padding: '12px', borderRadius: 10, background: isSubscribed ? C.blueBg : T.bg2, color: isSubscribed ? C.blue : T.muted, fontWeight: 700, fontSize: 13 * scale, border: `1px solid ${isSubscribed ? C.blue : T.bdr}`, cursor: isSubscribed ? 'pointer' : 'not-allowed' }}
-        >
-          {isSubscribed ? '📡 Rodar Verificador de Remédios' : 'Ative as notificações primeiro'}
-        </button>
-        {testPushStatus && (
-          <p style={{ marginTop: 10, fontSize: 11 * scale, color: testPushStatus.includes('Erro') ? C.red : C.green, fontWeight: 600 }}>
-            {testPushStatus}
-          </p>
-        )}
-      </div>
+      
 
       {/* Logout */}
       <button
