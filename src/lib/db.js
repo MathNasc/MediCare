@@ -12,6 +12,14 @@ export const AuthDB = {
     if (!isSupabaseEnabled) return { error: 'O banco de dados não está configurado. Tente novamente mais tarde.' };
     const { data, error } = await SupabaseAuth.signUp(email, pass, nome, role);
     if (error) return { error: typeof error === 'string' ? error : error.message };
+    
+    if (!data?.session) {
+      if (data?.user?.identities && data.user.identities.length === 0) {
+        return { error: 'Este e-mail já está cadastrado. Faça login.' };
+      }
+      return { error: 'Conta criada. Verifique seu e-mail para confirmar sua conta.' };
+    }
+    
     return { user: { id: data.user.id, nome, email, role, created_at: data.user.created_at } };
   },
 
@@ -19,6 +27,7 @@ export const AuthDB = {
     if (!isSupabaseEnabled) return { error: 'O banco de dados não está configurado. Tente novamente mais tarde.' };
     const { data, error } = await SupabaseAuth.signIn(email, pass);
     if (error) return { error: typeof error === 'string' ? error : error.message };
+    if (!data?.session) return { error: 'Falha ao autenticar: sessão não estabelecida.' };
     const u = data.user;
     const role = await SupabaseAuth.getProfileRole(u.id);
     return { user: { id: u.id, nome: u.user_metadata?.nome || email, email: u.email, role, created_at: u.created_at } };

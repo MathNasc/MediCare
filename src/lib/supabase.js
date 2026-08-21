@@ -34,7 +34,7 @@ export const SupabaseAuth = {
     const { data, error } = await supabase.auth.signUp({
       email, password, options: { data: { nome } },
     });
-    if (!error && data.user) {
+    if (!error && data.user && data.session) {
       await supabase.from('profiles').upsert({ id: data.user.id, nome, email });
     }
     return { data, error };
@@ -49,6 +49,17 @@ export const SupabaseAuth = {
     return supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || ''}/reset-password`,
     });
+  },
+  async getProfileRole(userId) {
+    if (!supabase) return 'independente';
+    try {
+      const { data, error } = await supabase.from('profiles').select('role').eq('id', userId).single();
+      if (error) {
+        console.error('getProfileRole error:', error);
+        return 'independente';
+      }
+      return data?.role || 'independente';
+    } catch { return 'independente'; }
   },
   async getSession() {
     if (!supabase) return null;

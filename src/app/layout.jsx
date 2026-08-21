@@ -14,7 +14,7 @@ export const metadata = {
   authors: [{ name: 'MediCare' }],
   manifest: '/manifest.json',
   appleWebApp: {
-    capable: true,
+    capable: false,
     statusBarStyle: 'black-translucent',
     title: 'MediCare',
   },
@@ -58,6 +58,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="pt-BR">
       <head>
+        <meta name="mobile-web-app-capable" content="yes" />
         <script dangerouslySetInnerHTML={{ __html: `
           if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
