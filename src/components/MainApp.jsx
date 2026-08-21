@@ -23,6 +23,7 @@ import { ProfileScreen  } from '@/screens/ProfileScreen';
 import { QuickConfirm   } from '@/components/modals/QuickConfirm';
 import { MedModal       } from '@/components/modals/MedModal';
 import { MedDetail      } from '@/components/modals/MedDetail';
+import { ErrorBoundary  } from '@/components/ErrorBoundary';
 
 
 // ─── PWA installer hook ───────────────────────────────────────────────────────
@@ -315,14 +316,16 @@ function InnerApp() {
           minHeight: '100vh',
         }}
       >
-        <Suspense fallback={<ScreenLoader />}>
-          {tab === 'home'     && <HomeScreen     {...screenProps} onQuickConfirm={setQuickDose} toggle={toggle} dark={dark} />}
-          {tab === 'meds'     && <MedsScreen     {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
-          {tab === 'calendar' && <CalendarScreen {...screenProps} />}
-          {tab === 'stats'    && <StatsScreen    {...screenProps} />}
-          {tab === 'ai'       && <AIScreen       {...screenProps} />}
-          {tab === 'profile'  && <ProfileScreen  {...screenProps} dark={dark} toggle={toggle} fsSize={fsSize} setFs={setFs} />}
-        </Suspense>
+        <ErrorBoundary T={T} scale={scale} onReset={() => setTab('home')}>
+          <Suspense fallback={<ScreenLoader />}>
+            {tab === 'home'     && <HomeScreen     {...screenProps} onQuickConfirm={setQuickDose} toggle={toggle} dark={dark} />}
+            {tab === 'meds'     && <MedsScreen     {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
+            {tab === 'calendar' && <CalendarScreen {...screenProps} />}
+            {tab === 'stats'    && <StatsScreen    {...screenProps} />}
+            {tab === 'ai'       && <AIScreen       {...screenProps} />}
+            {tab === 'profile'  && <ProfileScreen  {...screenProps} dark={dark} toggle={toggle} fsSize={fsSize} setFs={setFs} />}
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       <BottomNav tab={tab} setTab={setTab} T={T} pendingCount={pendingCount} criticalCount={criticalCount} />

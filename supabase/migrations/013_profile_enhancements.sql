@@ -77,11 +77,11 @@ CREATE POLICY "emergency_contacts_own" ON public.emergency_contacts FOR ALL USIN
 CREATE POLICY "healthcare_professionals_own" ON public.healthcare_professionals FOR ALL USING (auth.uid() = user_id);
 
 -- Caregiver read access policies
-CREATE POLICY "caregiver_read_allergies" ON public.allergies FOR SELECT USING (public.caregiver_has_permission(auth.uid(), user_id));
-CREATE POLICY "caregiver_read_health_conditions" ON public.health_conditions FOR SELECT USING (public.caregiver_has_permission(auth.uid(), user_id));
-CREATE POLICY "caregiver_read_emergency_contacts" ON public.emergency_contacts FOR SELECT USING (public.caregiver_has_permission(auth.uid(), user_id));
-CREATE POLICY "caregiver_read_healthcare_professionals" ON public.healthcare_professionals FOR SELECT USING (public.caregiver_has_permission(auth.uid(), user_id));
-CREATE POLICY "caregiver_read_profiles" ON public.profiles FOR SELECT USING (public.caregiver_has_permission(auth.uid(), id));
+CREATE POLICY "caregiver_read_allergies" ON public.allergies FOR SELECT USING (public.caregiver_has_permission(user_id, 'viewer'));
+CREATE POLICY "caregiver_read_health_conditions" ON public.health_conditions FOR SELECT USING (public.caregiver_has_permission(user_id, 'viewer'));
+CREATE POLICY "caregiver_read_emergency_contacts" ON public.emergency_contacts FOR SELECT USING (public.caregiver_has_permission(user_id, 'viewer'));
+CREATE POLICY "caregiver_read_healthcare_professionals" ON public.healthcare_professionals FOR SELECT USING (public.caregiver_has_permission(user_id, 'viewer'));
+CREATE POLICY "caregiver_read_profiles" ON public.profiles FOR SELECT USING (public.caregiver_has_permission(id, 'viewer'));
 
 -- 8. Avatars Storage
 INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true) ON CONFLICT (id) DO NOTHING;
