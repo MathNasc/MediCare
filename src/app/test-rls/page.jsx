@@ -8,7 +8,11 @@ export default function TestRLS() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
 
-  return isClient ? <InnerTest /> : null;
+  return isClient ? (
+    <AppProvider>
+      <InnerTest />
+    </AppProvider>
+  ) : null;
 }
 
 function InnerTest() {
