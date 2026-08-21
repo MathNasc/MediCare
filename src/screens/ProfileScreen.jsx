@@ -1,428 +1,265 @@
 'use client';
-import { useState, useEffect } from 'react';
-
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
-import { ROLES, getRoleMeta } from '@/lib/permissions';
+import { getRoleMeta } from '@/lib/permissions';
 import { CaregiversScreen } from '@/screens/CaregiversScreen';
 import { CaregiverDashboard } from '@/screens/CaregiverDashboard';
 import { StockHistoryScreen } from '@/screens/StockHistoryScreen';
-// ─── Overlay de sub-tela ──────────────────────────────────────────────────────
-function SubScreen({ title, onBack, bg, children }) {
+import { ProfileDB } from '@/lib/profileDb';
+import { PersonalData } from '@/screens/profile/PersonalData';
+import { EmergencyCardConfig } from '@/screens/profile/EmergencyCardConfig';
+import { HealthSection } from '@/screens/profile/HealthSection';
+import { EmergencyContacts } from '@/screens/profile/EmergencyContacts';
+import { HealthcareProfessionals } from '@/screens/profile/HealthcareProfessionals';
+import { ImportantMedsConfig } from '@/screens/profile/ImportantMedsConfig';
+import { EmergencyCard } from '@/screens/profile/EmergencyCard';
+
+// ─── Sub-screen wrapper ──────────────────────────────────────────────────────────────
+function FullSubScreen({ children, bg }) {
   return (
     <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: bg, zIndex: 200, overflowY: 'auto' }}>
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '0 16px 96px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
-          <button
-            onClick={onBack}
-            aria-label="Voltar"
-            style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,.08)', border: 'none', color: '#f0f4f8', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
-          >‹</button>
-          <p style={{ color: '#f0f4f8', fontWeight: 800, fontSize: 18 }}>{title}</p>
-        </div>
         {children}
       </div>
     </div>
   );
 }
 
-// ─── Seção: Tipo de Perfil (RBAC) ──────────────────────────────────────────────
-function RoleSection({ user, T, scale, updateRole }) {
-  const [expanded, setExpanded] = useState(false);
-  const [saving, setSaving]     = useState(false);
-  const [toast, setToast]       = useState('');
-  const current = getRoleMeta(user?.role);
-
-  const handleChange = async (code) => {
-    if (code === user?.role) { setExpanded(false); return; }
-    setSaving(true);
-    const ok = await updateRole(code);
-    setSaving(false);
-    setToast(ok ? '✓ Tipo de perfil atualizado!' : 'Erro ao atualizar. Tente novamente.');
-    setTimeout(() => setToast(''), 2500);
-    if (ok) setExpanded(false);
-  };
-
-  return (
-    <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 14 }}>
-      <button
-        onClick={() => setExpanded(e => !e)}
-        style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
-      >
-        <span style={{ fontSize: 22 }}>{current.icon}</span>
-        <div style={{ flex: 1 }}>
-          <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Tipo de Perfil</p>
-          <p style={{ color: current.color, fontSize: 12 * scale, fontWeight: 700, marginTop: 1 }}>{current.label}</p>
-        </div>
-        <span style={{ color: T.muted, fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
-      </button>
-
-      {!expanded && (
-        <p style={{ color: T.muted, fontSize: 11 * scale, padding: '0 16px 14px', lineHeight: 1.5 }}>
-          {current.description}
-        </p>
-      )}
-
-      {expanded && (
-        <div style={{ padding: '0 16px 16px', borderTop: `1px solid ${T.bdr}` }}>
-          <p style={{ color: T.sub, fontSize: 10 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', margin: '14px 0 10px' }}>
-            Escolha como você usa o MediCare
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {Object.values(ROLES).map(r => (
-              <button
-                key={r.code}
-                disabled={saving}
-                onClick={() => handleChange(r.code)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
-                  padding: '12px 14px', borderRadius: 12,
-                  border: `2px solid ${user?.role === r.code ? r.color : T.bdr}`,
-                  background: user?.role === r.code ? `${r.color}12` : T.bg2,
-                  cursor: saving ? 'wait' : 'pointer', opacity: saving ? .7 : 1,
-                }}
-              >
-                <span style={{ fontSize: 20, flexShrink: 0 }}>{r.icon}</span>
-                <div style={{ flex: 1 }}>
-                  <p style={{ color: user?.role === r.code ? r.color : T.txt, fontWeight: 700, fontSize: 13 * scale }}>{r.label}</p>
-                  <p style={{ color: T.muted, fontSize: 10.5 * scale, marginTop: 2, lineHeight: 1.4 }}>{r.description}</p>
-                </div>
-                {user?.role === r.code && <span style={{ color: r.color, fontSize: 16, flexShrink: 0 }}>✓</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {toast && (
-        <div style={{ padding: '0 16px 14px' }}>
-          <p style={{ color: toast.startsWith('✓') ? C.green : C.red, fontSize: 12 * scale, fontWeight: 600 }}>{toast}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-import { subscribeToPush, unsubscribeFromPush } from '@/lib/webPush';
-import { SupaPush } from '@/lib/supabase';
-
-// ─── Hook: permissão de notificação ───────────────────────────────────────────
-function usePushSubscription(userId) {
+import { useNotifications } from '@/hooks/useNotifications';
+export function ProfileScreen() {
+  const { user, T, scale, setFs, fsSize, logout, meds } = useApp();
   const [permission, setPermission] = useState('default');
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const { setup } = useNotifications(meds, user?.id);
+  useEffect(() => { if (typeof window !== 'undefined' && 'Notification' in window) setPermission(Notification.permission); }, []);
+  const setupPush = async () => { if (await setup()) setPermission(Notification.permission); };
+  
+  const [profile, setProfile] = useState(null);
+  const [activeView, setActiveView] = useState('main'); // main, personal, config_card, show_card, health, meds, profs, contacts, caregivers, privacy
+  
+  const [showCaregiverDash, setShowCaregiverDash] = useState(false);
+  const [showStockHistory, setShowStockHistory] = useState(false);
+  const fileInputRef = useRef(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window) || !('serviceWorker' in navigator)) {
-      setPermission('unsupported');
-      setLoading(false);
-      return;
+    if (user?.id) {
+      ProfileDB.getProfile(user.id).then(setProfile);
     }
-    setPermission(Notification.permission);
-    
-    navigator.serviceWorker.ready.then(reg => {
-      return reg.pushManager.getSubscription();
-    }).then(sub => {
-      setIsSubscribed(!!sub);
-      setLoading(false);
-    }).catch(() => {
-      setLoading(false);
-    });
-  }, []);
+  }, [user?.id]);
 
-  const togglePush = async () => {
-    if (!('Notification' in window)) return 'unsupported';
-    if (isSubscribed) {
-      setLoading(true);
-      const endpoint = await unsubscribeFromPush();
-      if (endpoint) await SupaPush.removeSubscription(endpoint);
-      setIsSubscribed(false);
-      setLoading(false);
-      return false;
-    } else {
-      setLoading(true);
-      if (Notification.permission === 'default') {
-         const result = await Notification.requestPermission();
-         setPermission(result);
-         if (result !== 'granted') {
-             setLoading(false);
-             return false;
-         }
-      } else if (Notification.permission === 'denied') {
-          setLoading(false);
-          return false;
-      }
-      
-      const subscription = await subscribeToPush();
-      if (subscription && userId) {
-        await SupaPush.saveSubscription(userId, subscription);
-        setIsSubscribed(true);
-      }
-      setLoading(false);
-      return !!subscription;
+  const calcAge = (dob) => {
+    if (!dob) return '';
+    const diff = Date.now() - new Date(dob).getTime();
+    return `${Math.abs(new Date(diff).getUTCFullYear() - 1970)} anos`;
+  };
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    const url = await ProfileDB.uploadAvatar(user.id, file);
+    if (url) {
+      await ProfileDB.updateProfile(user.id, { foto_url: url });
+      setProfile(p => ({ ...p, foto_url: url }));
     }
+    setUploadingAvatar(false);
   };
 
-  return { permission, isSubscribed, loading, togglePush };
-}
+  const currentRole = getRoleMeta(user?.role);
+  const displayName = profile?.social_name || profile?.nome || user?.nome || 'Usuário';
 
-// ─── ProfileScreen ─────────────────────────────────────────────────────────────
-export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
-  const { user, meds, history, logout, updateRole } = useApp();
-  const { permission, isSubscribed, loading, togglePush } = usePushSubscription(user?.id);
+  const NavItem = ({ icon, title, subtitle, onClick }) => (
+    <button onClick={onClick} style={{ width: '100%', background: 'none', border: 'none', padding: '16px 0', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', textAlign: 'left' }}>
+      <span style={{ fontSize: 24 }}>{icon}</span>
+      <div style={{ flex: 1 }}>
+        <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>{title}</p>
+        <p style={{ color: T.muted, fontSize: 13 * scale }}>{subtitle}</p>
+      </div>
+      <span style={{ color: T.muted, fontSize: 20 }}>›</span>
+    </button>
+  );
 
-  const [showDeniedHelp,    setShowDeniedHelp]    = useState(false);
-  const [showCaregivers,    setShowCaregivers]    = useState(false);
-  const [showCaregiverDash, setShowCaregiverDash] = useState(false);
-
-  
-
-  const [showStockHistory,  setShowStockHistory]  = useState(false);
-
-  const histConf = history.filter(h => h.status === 'confirmed').length;
-  const adhesion = history.length > 0 ? Math.round((histConf / history.length) * 100) : 0;
-  const critical = meds.filter(m => m.quantidade <= 5).length;
-
-  const handleNotificationPress = async () => {
-    if (permission === 'unsupported' || loading) return;
-    if (permission === 'denied') { setShowDeniedHelp(true); return; }
-    await togglePush();
-  };
-
-  const notifStatus = () => {
-    if (permission === 'unsupported') return { label: 'Não suportado', color: T.muted, bg: T.bg3,                    disabled: true  };
-    if (permission === 'denied')      return { label: 'Bloqueado',     color: C.red,   bg: 'rgba(239,68,68,.12)',    disabled: false };
-    if (loading)                      return { label: 'Carregando...', color: T.muted, bg: T.bg2,                    disabled: true  };
-    if (isSubscribed)                 return { label: '✓ Ativo',       color: C.green, bg: 'rgba(34,197,94,.12)',    disabled: false };
-    return                                   { label: 'Ativar',        color: C.blue,  bg: C.blueBg,                 disabled: false };
-  };
-  const ns = notifStatus();
-
-  // ── Sub-telas ────────────────────────────────────────────────────────────────
-  if (showCaregivers) {
-    return (
-      <SubScreen title="Meus cuidadores" onBack={() => setShowCaregivers(false)} bg={T.bg0}>
-        <CaregiversScreen user={user} T={T} scale={scale} />
-      </SubScreen>
-    );
-  }
-
-  if (showCaregiverDash) {
-    return (
-      <SubScreen title="Painel do cuidador" onBack={() => setShowCaregiverDash(false)} bg={T.bg0}>
-        <CaregiverDashboard user={user} T={T} scale={scale} />
-      </SubScreen>
-    );
-  }
-
-  if (showStockHistory) {
-    return (
-      <SubScreen title="Histórico de Estoque" onBack={() => setShowStockHistory(false)} bg={T.bg0}>
-        <StockHistoryScreen T={T} scale={scale} />
-      </SubScreen>
-    );
-  }
-
-  // ── Tela principal ────────────────────────────────────────────────────────────
   return (
-    <div className="anim-fadeUp">
-
-      {/* Hero */}
-      <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 22, padding: 24, textAlign: 'center', marginBottom: 14 }}>
-        <div style={{ width: 80, height: 80, borderRadius: 22, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, margin: '0 auto 12px', fontWeight: 900, color: '#fff', boxShadow: '0 8px 32px rgba(59,130,246,.4)' }}>
-          {user?.nome?.[0]?.toUpperCase() || '👤'}
-        </div>
-        <p style={{ color: T.txt, fontSize: 20 * scale, fontWeight: 800, marginBottom: 2 }}>{user?.nome}</p>
-        <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 10 }}>{user?.email}</p>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13 * scale, fontWeight: 700, padding: '6px 16px', borderRadius: 99, background: adhesion >= 80 ? C.greenBg : C.amberBg, color: adhesion >= 80 ? C.green : C.amber, border: `1px solid ${adhesion >= 80 ? 'rgba(34,197,94,.3)' : 'rgba(245,158,11,.3)'}` }}>
-            {adhesion}% de adesão ao tratamento
-          </span>
-          <span style={{ fontSize: 13 * scale, fontWeight: 700, padding: '6px 16px', borderRadius: 99, background: `${getRoleMeta(user?.role).color}15`, color: getRoleMeta(user?.role).color, border: `1px solid ${getRoleMeta(user?.role).color}30` }}>
-            {getRoleMeta(user?.role).icon} {getRoleMeta(user?.role).label}
-          </span>
-        </div>
-      </div>
-
-      {/* Quick stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
-        {[
-          { e: '💊', n: meds.length, l: 'Medicamentos'        },
-          { e: '✓',  n: histConf,    l: 'Confirmadas'  },
-          { e: '📦', n: critical,    l: 'Críticos'     },
-        ].map(s => (
-          <div key={s.l} style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: '14px 6px', textAlign: 'center' }}>
-            <p style={{ fontSize: 22, marginBottom: 4 }}>{s.e}</p>
-            <p style={{ color: T.txt, fontSize: 19 * scale, fontWeight: 900 }}>{s.n}</p>
-            <p style={{ color: T.muted, fontSize: 11 * scale }}>{s.l}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* ── TIPO DE PERFIL (RBAC) ── */}
-      <RoleSection user={user} T={T} scale={scale} updateRole={updateRole} />
-
-      {/* Settings card */}
-      <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 14 }}>
-
-        {/* Tema */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 16px', borderBottom: `1px solid ${T.bdr}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 22 }}>{dark ? '🌙' : '☀️'}</span>
-            <div>
-              <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Tema</p>
-              <p style={{ color: T.muted, fontSize: 12 * scale }}>{dark ? 'Modo escuro' : 'Modo claro'}</p>
+    <div style={{ paddingBottom: 100 }}>
+      {/* ─── TELA PRINCIPAL DO PERFIL ─── */}
+      {activeView === 'main' && (
+        <div className="anim-fadeUp">
+          <h2 style={{ color: T.txt, fontSize: 28 * scale, fontWeight: 800, marginBottom: 24, paddingTop: 10 }}>Meu Perfil</h2>
+          
+          {/* Cabeçalho */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
+            <div style={{ position: 'relative' }}>
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                style={{ width: 100, height: 100, borderRadius: '50%', background: T.bg2, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', border: `2px solid ${C.blue}` }}
+              >
+                {uploadingAvatar ? <span style={{ fontSize: 14 * scale, color: T.sub }}>...</span> 
+                 : profile?.foto_url ? <img src={profile.foto_url} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> 
+                 : <span style={{ fontSize: 36, color: T.sub }}>{displayName[0]?.toUpperCase()}</span>}
+              </div>
+              <input type="file" accept="image/*" ref={fileInputRef} onChange={handleAvatarUpload} style={{ display: 'none' }} />
+              <div style={{ position: 'absolute', bottom: 0, right: 0, background: C.blue, width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,.2)' }} onClick={() => fileInputRef.current?.click()}>📷</div>
+            </div>
+            
+            <p style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 800, marginTop: 16 }}>{displayName}</p>
+            {profile?.dob && <p style={{ color: T.sub, fontSize: 15 * scale }}>{calcAge(profile.dob)}</p>}
+            <div style={{ background: T.bg2, padding: '4px 12px', borderRadius: 20, marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 14 }}>{currentRole?.icon || '⚙️'}</span>
+              <span style={{ color: T.sub, fontSize: 13 * scale, fontWeight: 600 }}>{currentRole?.label || 'Independente'}</span>
             </div>
           </div>
-          <button
-            onClick={toggle}
-            role="switch" aria-checked={dark} aria-label="Alternar tema"
-            style={{ width: 52, height: 28, borderRadius: 99, background: dark ? '#3b82f6' : T.bg3, border: 'none', position: 'relative', transition: 'background .25s', flexShrink: 0 }}
-          >
-            <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: dark ? 27 : 3, transition: 'left .25s', boxShadow: '0 1px 4px rgba(0,0,0,.4)' }} />
+
+          {/* Cartão de Emergência */}
+          <div style={{ background: '#ef4444', borderRadius: 20, padding: 20, color: '#fff', marginBottom: 24, boxShadow: '0 4px 12px rgba(239,68,68,.25)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <span style={{ fontSize: 24 }}>🚨</span>
+              <p style={{ fontSize: 18 * scale, fontWeight: 800 }}>Cartão de Emergência</p>
+            </div>
+            <p style={{ fontSize: 14 * scale, opacity: 0.9, marginBottom: 16, lineHeight: 1.4 }}>Informações vitais para um momento de necessidade.</p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setActiveView('show_card')} style={{ flex: 1, padding: 12, borderRadius: 12, background: '#fff', color: '#ef4444', fontWeight: 700, fontSize: 15 * scale, border: 'none', cursor: 'pointer' }}>Abrir Cartão</button>
+              <button onClick={() => setActiveView('config_card')} style={{ padding: 12, borderRadius: 12, background: 'rgba(255,255,255,.2)', color: '#fff', fontWeight: 600, fontSize: 15 * scale, border: 'none', cursor: 'pointer' }}>Configurar</button>
+            </div>
+          </div>
+
+          {/* Menu Principal */}
+          <div style={{ background: T.bg1, borderRadius: 24, padding: '0 20px', border: `1px solid ${T.bdr}`, marginBottom: 24 }}>
+            <NavItem icon="👤" title="Dados pessoais" subtitle="Nome, nascimento, peso, altura..." onClick={() => setActiveView('personal')} />
+            <NavItem icon="❤️" title="Saúde" subtitle="Alergias e condições importantes..." onClick={() => setActiveView('health')} />
+            <NavItem icon="💊" title="Tratamento" subtitle="Medicamentos para emergência..." onClick={() => setActiveView('meds')} />
+            <NavItem icon="👨‍⚕️" title="Profissionais" subtitle="Médicos e especialistas..." onClick={() => setActiveView('profs')} />
+            <NavItem icon="👨‍👩‍👧" title="Contatos" subtitle="Emergência e familiares..." onClick={() => setActiveView('contacts')} />
+            <NavItem icon="🤝" title="Cuidadores" subtitle="Quem acompanha seu tratamento..." onClick={() => setActiveView('caregivers')} />
+            <NavItem icon="🔐" title="Privacidade" subtitle="Controle dos seus dados..." onClick={() => setActiveView('privacy')} />
+            <NavItem icon="⚙️" title="Preferências" subtitle="Acessibilidade e notificações..." onClick={() => setActiveView('prefs')} />
+          </div>
+
+          <button onClick={logout} style={{ width: '100%', padding: '16px', borderRadius: 16, background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', color: '#f87171', fontWeight: 700, fontSize: 16 * scale, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, cursor: 'pointer' }}>
+            🚪 Sair da conta
           </button>
         </div>
+      )}
 
-        {/* Tamanho da fonte */}
-        <div style={{ padding: '15px 16px', borderBottom: `1px solid ${T.bdr}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-            <span style={{ fontSize: 22 }}>🔤</span>
-            <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Tamanho da fonte</p>
+      {/* ─── SUB-TELAS ─── */}
+      {activeView === 'personal' && (
+        <FullSubScreen bg={T.bg}><PersonalData user={user} profile={profile} onUpdate={setProfile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+      )}
+      {activeView === 'config_card' && (
+        <FullSubScreen bg={T.bg}><EmergencyCardConfig user={user} profile={profile} onUpdate={setProfile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+      )}
+      {activeView === 'show_card' && (
+        <FullSubScreen bg={T.bg}><EmergencyCard user={user} profile={profile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+      )}
+      {activeView === 'health' && (
+        <FullSubScreen bg={T.bg}><HealthSection user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+      )}
+      {activeView === 'contacts' && (
+        <FullSubScreen bg={T.bg}><EmergencyContacts user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+      )}
+      {activeView === 'profs' && (
+        <FullSubScreen bg={T.bg}><HealthcareProfessionals user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+      )}
+      {activeView === 'meds' && (
+        <FullSubScreen bg={T.bg}><ImportantMedsConfig onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+      )}
+      
+      {activeView === 'caregivers' && (
+        <FullSubScreen bg={T.bg}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
+            <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Cuidadores</p>
           </div>
-          <div style={{ display: 'flex', gap: 7 }}>
-            {[{ id: 'normal', l: 'Normal' }, { id: 'large', l: 'Grande' }, { id: 'xlarge', l: 'Maior' }].map(f => (
-              <button
-                key={f.id}
-                onClick={() => setFs(f.id)}
-                aria-pressed={fsSize === f.id}
-                style={{ flex: 1, padding: '10px 4px', borderRadius: 10, fontSize: 11, fontWeight: 700, border: 'none', transition: 'all .15s', background: fsSize === f.id ? '#3b82f6' : T.bg2, color: fsSize === f.id ? '#fff' : T.sub, boxShadow: fsSize === f.id ? '0 2px 8px rgba(59,130,246,.4)' : 'none' }}
-              >{f.l}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* Acessibilidade */}
-        <div style={{ padding: '15px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 22 }}>♿</span>
-          <div>
-            <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Acessibilidade</p>
-            <p style={{ color: T.muted, fontSize: 12 * scale }}>Botões 44px+ · Alto contraste · Leitor de tela</p>
-          </div>
-        </div>
-
-        {/* ── CUIDADORES (paciente gerencia quem acompanha) ── */}
-        <button
-          onClick={() => setShowCaregivers(true)}
-          aria-label="Gerenciar cuidadores"
-          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
-        >
-          <span style={{ fontSize: 22 }}>🤝</span>
-          <div style={{ flex: 1 }}>
-            <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Cuidadores</p>
-            <p style={{ color: T.muted, fontSize: 12 * scale }}>Compartilhe seu tratamento com familiares</p>
-          </div>
-          <span style={{ color: T.muted, fontSize: 18 }}>›</span>
-        </button>
-
-        {/* ── PAINEL DO CUIDADOR (quando este usuário acompanha alguém) ── */}
-        <button
-          onClick={() => setShowCaregiverDash(true)}
-          aria-label="Ver painel do cuidador"
-          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
-        >
-          <span style={{ fontSize: 22 }}>👁</span>
-          <div style={{ flex: 1 }}>
-            <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Pacientes que acompanho</p>
-            <p style={{ color: T.muted, fontSize: 12 * scale }}>Visualizar tratamento de quem você cuida</p>
-          </div>
-          <span style={{ color: T.muted, fontSize: 18 }}>›</span>
-        </button>
-
-        {/* ── HISTÓRICO DE ESTOQUE ── */}
-        <button
-          onClick={() => setShowStockHistory(true)}
-          aria-label="Ver histórico de estoque"
-          style={{ width: '100%', background: 'none', border: 'none', padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left' }}
-        >
-          <span style={{ fontSize: 22 }}>📦</span>
-          <div style={{ flex: 1 }}>
-            <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Histórico de Estoque</p>
-            <p style={{ color: T.muted, fontSize: 12 * scale }}>Compras, ajustes e previsão de reposição</p>
-          </div>
-          <span style={{ color: T.muted, fontSize: 18 }}>›</span>
-        </button>
-
-      </div>
-
-      {/* Notificações */}
-      <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 14 }}>
-        <div style={{ padding: '15px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: permission === 'denied' ? 12 : 0 }}>
-            <span style={{ fontSize: 22 }}>🔔</span>
-            <div style={{ flex: 1 }}>
-              <p style={{ color: T.txt, fontWeight: 600, fontSize: 14 * scale }}>Notificações</p>
-              <p style={{ color: T.muted, fontSize: 12 * scale }}>
-                {permission === 'granted'     && 'Lembretes ativos — você será avisado no horário'}
-                {permission === 'denied'      && 'Bloqueado — é necessário reativar nas configurações'}
-                {permission === 'default'     && 'Lembretes automáticos de doses'}
-                {permission === 'unsupported' && 'Não suportado neste navegador'}
-              </p>
+          <CaregiversScreen user={user} T={T} scale={scale} />
+          {user?.role !== 'paciente' && (
+            <div style={{ marginTop: 24 }}>
+               <h3 style={{ color: T.txt, fontSize: 16 * scale, fontWeight: 700, marginBottom: 16 }}>Pacientes que acompanho</h3>
+               <button onClick={() => setShowCaregiverDash(true)} style={{ width: '100%', padding: 16, borderRadius: 12, background: C.blue, color: '#fff', fontSize: 15 * scale, fontWeight: 700, border: 'none' }}>Acessar Painel</button>
             </div>
-            {permission !== 'unsupported' && (
-              <button
-                onClick={handleNotificationPress}
-                disabled={ns.disabled}
-                style={{ padding: '8px 14px', borderRadius: 10, background: ns.bg, color: ns.color, fontWeight: 700, fontSize: 12 * scale, border: `1px solid ${ns.color}30`, opacity: ns.disabled ? .8 : 1, cursor: ns.disabled ? 'default' : 'pointer', flexShrink: 0 }}
-              >
-                {ns.label}
-              </button>
-            )}
-          </div>
+          )}
+        </FullSubScreen>
+      )}
 
-          {permission === 'denied' && showDeniedHelp && (
-            <div style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', borderRadius: 12, padding: 14 }}>
-              <p style={{ color: '#f87171', fontWeight: 700, fontSize: 13 * scale, marginBottom: 10 }}>Como reativar as notificações</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {[
-                  'Abra as Configurações do Android',
-                  'Toque em "Apps" ou "Aplicativos"',
-                  'Encontre o navegador (Edge ou Chrome)',
-                  'Toque em "Notificações"',
-                  'Ative as notificações para o MediCare',
-                  'Volte ao app e toque em "Ativar" novamente',
-                ].map((t, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(239,68,68,.2)', color: '#f87171', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900, flexShrink: 0 }}>{i + 1}</div>
-                    <p style={{ color: T.sub, fontSize: 12 * scale }}>{t}</p>
-                  </div>
+      {activeView === 'privacy' && (
+        <FullSubScreen bg={T.bg}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
+            <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Privacidade</p>
+          </div>
+          <div style={{ background: T.bg1, padding: 20, borderRadius: 20, border: `1px solid ${T.bdr}` }}>
+            <p style={{ color: T.txt, fontSize: 16 * scale, fontWeight: 700, marginBottom: 10 }}>Seus dados estão seguros</p>
+            <p style={{ color: T.sub, fontSize: 14 * scale, lineHeight: 1.5, marginBottom: 16 }}>O MediCare utiliza criptografia avançada. Apenas você e as pessoas que você explicitamente autorizar (Cuidadores) possuem acesso aos seus dados de saúde.</p>
+            <p style={{ color: T.txt, fontSize: 15 * scale, fontWeight: 700, marginBottom: 8 }}>Cartão de Emergência</p>
+            <p style={{ color: T.sub, fontSize: 14 * scale, lineHeight: 1.5 }}>As informações selecionadas para o Cartão de Emergência só são exibidas quando o cartão é ativamente aberto no seu aparelho.</p>
+          </div>
+        </FullSubScreen>
+      )}
+
+      {activeView === 'prefs' && (
+        <FullSubScreen bg={T.bg}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
+            <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Preferências</p>
+          </div>
+          <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 20 }}>
+            <div style={{ padding: '16px', borderBottom: `1px solid ${T.bdr}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <span style={{ fontSize: 24 }}>🔤</span>
+                <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>Tamanho da fonte</p>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[{ id: 'normal', l: 'Normal' }, { id: 'large', l: 'Grande' }, { id: 'xlarge', l: 'Maior' }].map(f => (
+                  <button key={f.id} onClick={() => setFs(f.id)} style={{ flex: 1, padding: '12px 4px', borderRadius: 12, fontSize: 13, fontWeight: 700, border: 'none', transition: 'all .15s', background: fsSize === f.id ? C.blue : T.bg2, color: fsSize === f.id ? '#fff' : T.sub }}>{f.l}</button>
                 ))}
               </div>
-              <button onClick={() => setShowDeniedHelp(false)} style={{ marginTop: 10, background: 'none', color: T.muted, border: 'none', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>Fechar</button>
             </div>
-          )}
-
-          {permission === 'granted' && (
-            <div style={{ background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.2)', borderRadius: 10, padding: '10px 12px', marginTop: 8 }}>
-              <p style={{ color: C.green, fontSize: 12 * scale, fontWeight: 600 }}>✓ Você receberá lembretes nos horários dos seus medicamentos</p>
+            <div style={{ padding: '16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 24 }}>♿</span>
+              <div>
+                <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>Acessibilidade</p>
+                <p style={{ color: T.muted, fontSize: 13 * scale }}>Alto contraste, botões 44px+</p>
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+            <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 24 }}>🔔</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>Notificações</p>
+                <p style={{ color: T.muted, fontSize: 13 * scale }}>
+                  {permission === 'granted' ? 'Ativas' : permission === 'denied' ? 'Bloqueadas no aparelho' : 'Desativadas'}
+                </p>
+              </div>
+              {permission !== 'granted' && permission !== 'denied' && (
+                <button onClick={setupPush} style={{ background: C.blue, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>Ativar</button>
+              )}
+            </div>
+          </div>
+          <button onClick={() => setShowStockHistory(true)} style={{ width: '100%', padding: 16, borderRadius: 16, background: T.bg1, border: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+            <span style={{ fontSize: 24 }}>📦</span>
+            <span style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale, flex: 1, textAlign: 'left' }}>Histórico de Estoque</span>
+            <span style={{ color: T.muted, fontSize: 20 }}>›</span>
+          </button>
+        </FullSubScreen>
+      )}
 
-      
-      
+      {showCaregiverDash && (
+        <FullSubScreen bg={T.bg}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
+            <button onClick={() => setShowCaregiverDash(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Painel do Cuidador</p>
+          </div>
+          <CaregiverDashboard user={user} T={T} scale={scale} />
+        </FullSubScreen>
+      )}
 
-      {/* Logout */}
-      <button
-        onClick={logout}
-        style={{ width: '100%', padding: '16px', borderRadius: 14, background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', color: '#f87171', fontWeight: 700, fontSize: 15 * scale, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, cursor: 'pointer' }}
-      >
-        🚪 Sair da conta
-      </button>
-
-      <p style={{ textAlign: 'center', color: T.muted, fontSize: 11 * scale, marginTop: 16 }}>
-        MediCare v2.0 · Seus dados são privados e seguros
-      </p>
+      {showStockHistory && (
+        <FullSubScreen bg={T.bg}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
+            <button onClick={() => setShowStockHistory(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Histórico de Estoque</p>
+          </div>
+          <StockHistoryScreen user={user} T={T} scale={scale} />
+        </FullSubScreen>
+      )}
     </div>
   );
 }
