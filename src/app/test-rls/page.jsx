@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useApp } from '@/context/AppContext';
+import { useApp, AppProvider } from '@/context/AppContext';
 import { AuthScreen } from '@/components/AuthScreen';
 
 export default function TestRLS() {
