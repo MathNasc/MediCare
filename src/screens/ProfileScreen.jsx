@@ -27,8 +27,8 @@ function FullSubScreen({ children, bg }) {
 }
 
 import { useNotifications } from '@/hooks/useNotifications';
-export function ProfileScreen() {
-  const { user, T, scale, setFs, fsSize, logout, meds } = useApp();
+export function ProfileScreen({ T, scale, setFs, fsSize }) {
+  const { user, logout, meds } = useApp();
   const [permission, setPermission] = useState('default');
   const { setup } = useNotifications(meds, user?.id);
   useEffect(() => { if (typeof window !== 'undefined' && 'Notification' in window) setPermission(Notification.permission); }, []);
