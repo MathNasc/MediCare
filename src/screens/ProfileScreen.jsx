@@ -103,33 +103,73 @@ function RoleSection({ user, T, scale, updateRole }) {
   );
 }
 
+import { subscribeToPush, unsubscribeFromPush } from '@/lib/webPush';
+import { SupaPush } from '@/lib/supabase';
+
 // ─── Hook: permissão de notificação ───────────────────────────────────────────
-function useNotificationPermission() {
+function usePushSubscription(userId) {
   const [permission, setPermission] = useState('default');
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
+    if (typeof window === 'undefined' || !('Notification' in window) || !('serviceWorker' in navigator)) {
       setPermission('unsupported');
+      setLoading(false);
       return;
     }
     setPermission(Notification.permission);
+    
+    navigator.serviceWorker.ready.then(reg => {
+      return reg.pushManager.getSubscription();
+    }).then(sub => {
+      setIsSubscribed(!!sub);
+      setLoading(false);
+    }).catch(() => {
+      setLoading(false);
+    });
   }, []);
 
-  const request = async () => {
+  const togglePush = async () => {
     if (!('Notification' in window)) return 'unsupported';
-    if (Notification.permission === 'granted') return 'granted';
-    const result = await Notification.requestPermission();
-    setPermission(result);
-    return result;
+    if (isSubscribed) {
+      setLoading(true);
+      const endpoint = await unsubscribeFromPush();
+      if (endpoint) await SupaPush.removeSubscription(endpoint);
+      setIsSubscribed(false);
+      setLoading(false);
+      return false;
+    } else {
+      setLoading(true);
+      if (Notification.permission === 'default') {
+         const result = await Notification.requestPermission();
+         setPermission(result);
+         if (result !== 'granted') {
+             setLoading(false);
+             return false;
+         }
+      } else if (Notification.permission === 'denied') {
+          setLoading(false);
+          return false;
+      }
+      
+      const subscription = await subscribeToPush();
+      if (subscription && userId) {
+        await SupaPush.saveSubscription(userId, subscription);
+        setIsSubscribed(true);
+      }
+      setLoading(false);
+      return !!subscription;
+    }
   };
 
-  return { permission, request };
+  return { permission, isSubscribed, loading, togglePush };
 }
 
 // ─── ProfileScreen ─────────────────────────────────────────────────────────────
 export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
   const { user, meds, history, logout, updateRole } = useApp();
-  const { permission, request } = useNotificationPermission();
+  const { permission, isSubscribed, loading, togglePush } = usePushSubscription(user?.id);
 
   const [showDeniedHelp,    setShowDeniedHelp]    = useState(false);
   const [showCaregivers,    setShowCaregivers]    = useState(false);
@@ -141,15 +181,16 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
   const critical = meds.filter(m => m.quantidade <= 5).length;
 
   const handleNotificationPress = async () => {
-    if (permission === 'unsupported' || permission === 'granted') return;
+    if (permission === 'unsupported' || loading) return;
     if (permission === 'denied') { setShowDeniedHelp(true); return; }
-    await request();
+    await togglePush();
   };
 
   const notifStatus = () => {
     if (permission === 'unsupported') return { label: 'Não suportado', color: T.muted, bg: T.bg3,                    disabled: true  };
-    if (permission === 'granted')     return { label: '✓ Ativo',       color: C.green, bg: 'rgba(34,197,94,.12)',    disabled: true  };
     if (permission === 'denied')      return { label: 'Bloqueado',     color: C.red,   bg: 'rgba(239,68,68,.12)',    disabled: false };
+    if (loading)                      return { label: 'Carregando...', color: T.muted, bg: T.bg2,                    disabled: true  };
+    if (isSubscribed)                 return { label: '✓ Ativo',       color: C.green, bg: 'rgba(34,197,94,.12)',    disabled: false };
     return                                   { label: 'Ativar',        color: C.blue,  bg: C.blueBg,                 disabled: false };
   };
   const ns = notifStatus();
