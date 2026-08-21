@@ -1,6 +1,6 @@
 // MediCare Service Worker v6 — notificações via Web Push (VAPID)
 
-const CACHE_VERSION = 'medicare-v9'; // Atualizado para v9
+const CACHE_VERSION = 'medicare-v10'; // Atualizado para v9
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 
@@ -35,19 +35,28 @@ self.addEventListener('push', (event) => {
   if (!event.data) return;
   let data = {};
   try { data = event.data.json(); } catch { data = { title: '💊 MediCare', body: event.data.text() }; }
+  
+  const tag = data.tag || `med-${Date.now()}`;
+  const isDose = tag.startsWith('dose-');
+  
+  const options = {
+    body: data.body || 'Notificação do MediCare',
+    icon: '/icon-192.png', badge: '/icon-96.png',
+    vibrate: [200, 100, 200, 100, 200],
+    tag: tag,
+    renotify: true, requireInteraction: true,
+    data: { url: data.url || '/', doseId: data.doseId, medId: data.medId, hora: data.hora, title: data.title, body: data.body, tag: data.tag }
+  };
+  
+  if (isDose) {
+    options.actions = [
+      { action: 'confirm', title: '✓ Tomei agora' },
+      { action: 'snooze',  title: '⏰ 15 minutos' },
+    ];
+  }
+  
   event.waitUntil(
-    self.registration.showNotification(data.title || '💊 MediCare', {
-      body: data.body || 'Hora de tomar seu medicamento',
-      icon: '/icon-192.png', badge: '/icon-96.png',
-      vibrate: [200, 100, 200, 100, 200],
-      tag: data.tag || `med-${Date.now()}`,
-      renotify: true, requireInteraction: true,
-      data: { url: data.url || '/', doseId: data.doseId, medId: data.medId, hora: data.hora, title: data.title, body: data.body, tag: data.tag },
-      actions: [
-        { action: 'confirm', title: '✓ Tomei agora' },
-        { action: 'snooze',  title: '⏰ 15 minutos' },
-      ],
-    })
+    self.registration.showNotification(data.title || '💊 MediCare', options)
   );
 });
 
