@@ -254,11 +254,32 @@ export function AppProvider({ children }) {
       medicationId, movementType, quantityBefore, quantityAfter,
       purchasePrice, purchaseLocation, batch, expirationDate, notes,
     });
+
     if (result?.success && state.user) {
+      const med = state.meds.find(m => m.id === medicationId);
       await loadAll(state.user.id);
+      
+      if (med) {
+        try {
+          const { EventsDB } = await import('@/lib/supabaseCalendar');
+          const isIncrease = quantityAfter > quantityBefore;
+          const toISO = (d) => d.toISOString().slice(0, 10);
+          
+          await EventsDB.add({
+            user_id: state.user.id,
+            type: 'estoque',
+            title: isIncrease ? 'Reposição de estoque' : 'Ajuste de estoque',
+            description: `${med.nome}: ${quantityBefore} ➔ ${quantityAfter} ${med.unidade}s${notes ? ' - ' + notes : ''}`,
+            date: toISO(new Date()),
+            time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+          });
+        } catch (e) {
+          console.error('Falha ao registrar evento de calendário para o estoque:', e);
+        }
+      }
     }
     return result;
-  }, [state.user, loadAll]);
+  }, [state.user, state.meds, loadAll]);
 
   // ── Caregiver alert ─────────────────────────────────────────────────────────
   const alertCaregiver = useCallback(async (dose) => {
