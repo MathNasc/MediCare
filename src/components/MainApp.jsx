@@ -202,6 +202,14 @@ function InnerApp() {
 
   const [tab,       setTab]       = useState('home');
   const [quickDose, setQuickDose] = useState(null);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.style.background = T.bg0;
+      document.body.style.color = T.txt;
+      document.body.style.transition = 'background 0.3s ease, color 0.3s ease';
+    }
+  }, [T.bg0, T.txt]);
   const [showAdd,   setShowAdd]   = useState(false);
   const [editMed,   setEditMed]   = useState(null);
   const [viewMed,   setViewMed]   = useState(null);
@@ -281,6 +289,8 @@ function InnerApp() {
       </>
     );
   }
+
+
 
   const screenProps = { T, scale };
 

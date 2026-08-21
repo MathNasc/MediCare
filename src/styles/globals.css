@@ -19,8 +19,10 @@ html { font-size: 16px; -webkit-text-size-adjust: 100%; }
 
 body {
   font-family: var(--font);
-  background: #0d1117;
-  color: #f0f4f8;
+  /* background handled by MainApp */
+  background: var(--bg0, #0f172a);
+  /* color handled by MainApp */
+  color: var(--txt, #f8fafc);
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
   min-height: 100vh;
@@ -33,7 +35,7 @@ input, select, textarea { outline: none; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 3px; }
-::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
 
 /* Animations */
 @keyframes fadeUp   { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
