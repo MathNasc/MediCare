@@ -179,23 +179,22 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
   
   const handleTestPush = async () => {
     if (!user?.id) return;
-    setTestPushStatus('Iniciando... feche o aplicativo AGORA e bloqueie a tela! (10s)');
+    setTestPushStatus('Iniciando verificação de doses...');
     
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/test-push`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-medication-reminders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({ user_id: user.id })
+        }
       });
       
       const data = await res.json();
       if (res.ok) {
-        setTestPushStatus('✓ Comando enviado ao backend.');
+        setTestPushStatus(`✓ Processado. Enviados: ${data.sent}, Falhas: ${data.failed}, Ignorados (já notificados/tomados): ${data.ignored}`);
       } else {
-        setTestPushStatus(`❌ Erro: ${data.error}`);
+        setTestPushStatus(`❌ Erro: ${data.error || 'Falha no envio'}`);
       }
     } catch (err) {
       setTestPushStatus('❌ Erro na requisição: ' + err.message);
@@ -446,7 +445,7 @@ export function ProfileScreen({ T, scale, dark, toggle, fsSize, setFs }) {
           disabled={!isSubscribed}
           style={{ width: '100%', padding: '12px', borderRadius: 10, background: isSubscribed ? C.blueBg : T.bg2, color: isSubscribed ? C.blue : T.muted, fontWeight: 700, fontSize: 13 * scale, border: `1px solid ${isSubscribed ? C.blue : T.bdr}`, cursor: isSubscribed ? 'pointer' : 'not-allowed' }}
         >
-          {isSubscribed ? '📡 Disparar Teste (Edge Function)' : 'Ative as notificações primeiro'}
+          {isSubscribed ? '📡 Rodar Verificador de Remédios' : 'Ative as notificações primeiro'}
         </button>
         {testPushStatus && (
           <p style={{ marginTop: 10, fontSize: 11 * scale, color: testPushStatus.includes('Erro') ? C.red : C.green, fontWeight: 600 }}>
