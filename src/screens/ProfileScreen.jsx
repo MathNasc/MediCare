@@ -38,7 +38,6 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
   const [activeView, setActiveView] = useState('main'); // main, personal, config_card, show_card, health, meds, profs, contacts, caregivers, privacy
   
   const [showCaregiverDash, setShowCaregiverDash] = useState(false);
-  const [showStockHistory, setShowStockHistory] = useState(false);
   const fileInputRef = useRef(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -131,6 +130,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
             <NavItem icon="👨‍⚕️" title="Profissionais" subtitle="Médicos e especialistas..." onClick={() => setActiveView('profs')} />
             <NavItem icon="👨‍👩‍👧" title="Contatos" subtitle="Emergência e familiares..." onClick={() => setActiveView('contacts')} />
             <NavItem icon="🤝" title="Cuidadores" subtitle="Quem acompanha seu tratamento..." onClick={() => setActiveView('caregivers')} />
+            <NavItem icon="📦" title="Estoque" subtitle="Histórico e previsões..." onClick={() => setActiveView('stock')} />
             <NavItem icon="🔐" title="Privacidade" subtitle="Controle dos seus dados..." onClick={() => setActiveView('privacy')} />
             <NavItem icon="⚙️" title="Preferências" subtitle="Acessibilidade e notificações..." onClick={() => setActiveView('prefs')} />
           </div>
@@ -233,11 +233,6 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
               )}
             </div>
           </div>
-          <button onClick={() => setShowStockHistory(true)} style={{ width: '100%', padding: 16, borderRadius: 16, background: T.bg1, border: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
-            <span style={{ fontSize: 24 }}>📦</span>
-            <span style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale, flex: 1, textAlign: 'left' }}>Histórico de Estoque</span>
-            <span style={{ color: T.muted, fontSize: 20 }}>›</span>
-          </button>
         </FullSubScreen>
       )}
 
@@ -251,11 +246,11 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
         </FullSubScreen>
       )}
 
-      {showStockHistory && (
+      {activeView === 'stock' && (
         <FullSubScreen bg={T.bg}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
-            <button onClick={() => setShowStockHistory(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
-            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Histórico de Estoque</p>
+            <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+            <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Estoque de Medicamentos</p>
           </div>
           <StockHistoryScreen user={user} T={T} scale={scale} />
         </FullSubScreen>
