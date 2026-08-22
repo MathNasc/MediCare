@@ -94,7 +94,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   const [form, setForm] = useState(med || {
     nome: '', dosagem: '', quantidade: 30,
     unidade: 'comprimido', cor: PILL_COLORS[0],
-    observacoes: '', ativo: true,
+    observacoes: '', ativo: true, important_for_emergency: false,
   });
 
   const [horarios, setHorarios] = useState(
@@ -130,7 +130,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
   const handleManual = () => {
     setSelectedCatalog(null);
-    setForm({ nome: '', dosagem: '', quantidade: 30, unidade: 'comprimido', cor: PILL_COLORS[0], observacoes: '', ativo: true });
+    setForm({ nome: '', dosagem: '', quantidade: 30, unidade: 'comprimido', cor: PILL_COLORS[0], observacoes: '', ativo: true, important_for_emergency: false });
     setStep(STEPS.TREATMENT);
   };
 
@@ -143,7 +143,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
     return {
       nome: form.nome, dosagem: form.dosagem, quantidade: form.quantidade,
       unidade: form.unidade, cor: form.cor, observacoes: form.observacoes,
-      ativo: form.ativo !== false,
+      ativo: form.ativo !== false, important_for_emergency: form.important_for_emergency || false,
       horarios: isSOS ? [] : (horarios.length > 0 ? horarios : ['08:00']),
       dias_semana: isSOS ? [] : (dias.length > 0 ? dias : [1,2,3,4,5,6,7]),
       treatment_type: treatmentType,
@@ -382,6 +382,11 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
               <label style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', display: 'block', marginBottom: 6 }}>Observações</label>
               <textarea rows={2} style={{ ...inp, resize: 'none' }} placeholder="Tomar com água, em jejum…" value={form.observacoes} onChange={e => set('observacoes', e.target.value)} />
             </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.important_for_emergency || false} onChange={e => set('important_for_emergency', e.target.checked)} style={{ width: 18, height: 18, accentColor: C.blue }} />
+              <span style={{ color: T.txt, fontSize: 13 * scale, fontWeight: 600 }}>Mostrar no Cartão de Emergência</span>
+            </label>
           </div>
 
           {/* ── Campos condicionais: TEMPORÁRIO ── */}

@@ -4,13 +4,13 @@ import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
 
 export function ImportantMedsConfig({ onBack, T, scale }) {
-  const { meds, loadAll } = useApp();
+  const { meds, loadAll, user } = useApp();
   const [savingId, setSavingId] = useState(null);
 
   const handleToggle = async (med) => {
     setSavingId(med.id);
     await MedDB.update(med.id, { important_for_emergency: !med.important_for_emergency });
-    await loadAll();
+    await loadAll(user.id);
     setSavingId(null);
   };
 
