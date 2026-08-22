@@ -1,218 +1,218 @@
 ---
 name: premortem  
-description: "Ejecuta un premortem sobre cualquier plan, lanzamiento, producto, contratación, estrategia o decisión. Asume que ya falló 6 meses después y trabaja hacia atrás para encontrar todos los motivos. Produce un plan revisado con los puntos ciegos expuestos. DISPARADORES OBLIGATORIOS: 'premortem esto', 'premortem mi', 'ejecuta un premortem', 'qué podría matar esto', 'prueba de estrés este plan', 'qué me estoy perdiendo aquí', 'encuentra los puntos ciegos'. DISPARADORES FUERTES: 'qué podría salir mal', 'me estoy perdiendo algo', 'hazle agujeros a esto', 'dónde va a romperse esto', 'abogado del diablo'. NO disparar en solicitudes simples de retroalimentación, preguntas factuales o solicitudes al Consejo LLM. SÍ disparar cuando alguien tiene un plan o compromiso donde el coste de equivocarse es alto."  
+description: "Executa um premortem sobre qualquer plano, lançamento, produto, contratação, estratégia ou decisão. Assume que já falhou 6 meses depois e trabalha de trás para frente para encontrar todos os motivos. Produz um plano revisado com os pontos cegos expostos. GATILHOS OBRIGATÓRIOS: 'premortem isso', 'meu premortem', 'execute um premortem', 'o que poderia matar isso', 'teste de estresse neste plano', 'o que estou perdendo aqui', 'encontre os pontos cegos'. GATILHOS FORTES: 'o que poderia dar errado', 'estou perdendo algo', 'faça buracos nisso', 'onde isso vai quebrar', 'advogado do diabo'. NÃO disparar em solicitações simples de feedback, perguntas factuais ou solicitações ao Conselho LLM. SIM disparar quando alguém tem um plano ou compromisso onde o custo de errar é alto."  
 ---
 
 # Premortem
 
-Un premortem es lo contrario de un postmortem. En lugar de averiguar qué salió mal después de que algo falla, imaginas que ya falló y averiguas por qué antes de empezar.
+Um premortem é o oposto de um postmortem. Em vez de descobrir o que deu errado depois que algo falha, você imagina que já falhou e descobre o porquê antes de começar.
 
-El método proviene del psicólogo Gary Klein. Lo publicó en Harvard Business Review. Daniel Kahneman (el psicólogo ganador del Premio Nobel detrás de "Pensar rápido, pensar despacio") lo llamó su técnica más valiosa para la toma de decisiones. Google, Goldman Sachs y Procter & Gamble lo usan antes de grandes decisiones.
+O método vem do psicólogo Gary Klein. Ele o publicou na Harvard Business Review. Daniel Kahneman (o psicólogo vencedor do Prêmio Nobel por trás de "Rápido e Devagar") chamou de sua técnica mais valiosa para a tomada de decisões. Google, Goldman Sachs e Procter & Gamble o usam antes de grandes decisões.
 
-La idea clave: cuando preguntas a la gente "¿qué podría salir mal?" dan respuestas cautelosas y ambiguas. Cuando dices "esto ya falló, dime por qué", el cerebro cambia al modo narrativo y genera razones mucho más específicas, creativas y honestas. Investigadores de Wharton y Cornell llamaron a esto "retrospectiva prospectiva" y descubrieron que aumenta significativamente la capacidad de identificar causas de resultados futuros.
+A ideia chave: quando você pergunta às pessoas "o que poderia dar errado?", elas dão respostas cautelosas e ambíguas. Quando você diz "isso já falhou, me diga o porquê", o cérebro muda para o modo narrativo e gera razões muito mais específicas, criativas e honestas. Pesquisadores da Wharton e de Cornell chamaram isso de "retrospectiva prospectiva" e descobriram que aumenta significativamente a capacidade de identificar causas de resultados futuros.
 
-Por qué importa esto para las decisiones asistidas por IA: Claude tiende a respuestas amables y optimistas. Si preguntas "¿es este un buen plan?" encontrará razones para decir que sí. El premortem rompe este patrón al forzar el encuadre en "esto está muerto, explica cómo murió". Claude deja de buscar razones por las que tu plan funcionará y empieza a explicar cómo se desmoronó.
-
----
-
-## cuándo ejecutar un premortem
-
-Buenos objetivos para un premortem:  
-- Un producto o funcionalidad que estás a punto de construir  
-- Un plan de lanzamiento con dinero o reputación en juego  
-- Un cambio de precio o modelo de negocio  
-- Una contratación que estás a punto de hacer  
-- Un pivote de estrategia o posicionamiento  
-- Una alianza o acuerdo que estás evaluando  
-- Cualquier compromiso donde el coste de equivocarse es alto
-
-Malos objetivos para un premortem:  
-- Ideas vagas sin ningún plan concreto todavía (ayúdalos a planificar primero, luego haz el premortem)  
-- Preguntas con una sola respuesta correcta (simplemente respóndelas)  
-- Solicitudes de retroalimentación creativa sobre un borrador (eso es edición, no un premortem)  
-- Decisiones que ya están tomadas e irreversibles (un premortem solo es útil cuando aún puedes cambiar de rumbo)
+Por que isso importa para as decisões assistidas por IA: a IA (como Claude ou Gemini) tende a respostas gentis e otimistas. Se você perguntar "este é um bom plano?", ela encontrará razões para dizer que sim. O premortem quebra esse padrão forçando o enquadramento em "isso está morto, explique como morreu". A IA para de procurar razões pelas quais seu plano funcionará e começa a explicar como ele desmoronou.
 
 ---
 
-## recopilación de contexto (el mínimo necesario)
+## quando executar um premortem
 
-Un premortem es tan bueno como el contexto sobre el que se ejecuta. La información vaga produce escenarios de fallo vagos que no ayudan a nadie. Antes de ejecutar el premortem, necesitas alcanzar un umbral mínimo de contexto.
+Bons alvos para um premortem:  
+- Um produto ou funcionalidade que você está prestes a construir  
+- Um plano de lançamento com dinheiro ou reputação em jogo  
+- Uma mudança de preço ou modelo de negócios  
+- Uma contratação que você está prestes a fazer  
+- Um pivô de estratégia ou posicionamento  
+- Uma parceria ou acordo que você está avaliando  
+- Qualquer compromisso onde o custo de errar é alto
 
-### paso 1: buscar contexto existente
-
-Antes de preguntar nada al usuario, busca contexto que ya esté disponible:
-
-**A. La conversación actual.** El usuario puede haber estado discutiendo un plan, un lanzamiento, un producto o una decisión antes en esta sesión. Lee la conversación y extrae lo que sea relevante.
-
-**B. El espacio de trabajo.** Escanea rápidamente en busca de archivos que puedan contener contexto relevante:  
-- `CLAUDE.md` o `claude.md` (contexto empresarial, preferencias, restricciones)  
-- Cualquier carpeta `memory/` (perfiles de audiencia, detalles del negocio, decisiones pasadas)  
-- Archivos que el usuario referenciara o adjuntara explícitamente  
-- Cualquier archivo de proyecto, briefs o planes relacionados con lo que se está sometiendo al premortem
-
-Usa `Glob` y llamadas rápidas a `Read`. No dediques más de 30 segundos a esto. Buscas los archivos clave que anclarán los escenarios de fallo en la realidad.
-
-### paso 2: evaluar la suficiencia del contexto
-
-Después de escanear, comprueba si tienes suficiente para ejecutar un premortem útil. Necesitas tres cosas:
-
-1. **¿Qué es?** — Una comprensión clara de lo que se está sometiendo al premortem (un producto, un lanzamiento, una contratación, un cambio de precio, una estrategia). Debes ser capaz de describírselo al usuario en una frase.
-
-2. **¿Para quién es / a quién afecta?** — La audiencia, el cliente, el equipo, las partes interesadas. Los escenarios de fallo dependen en gran medida de quién está involucrado.
-
-3. **¿Cómo es el éxito?** — ¿Qué resultado espera el usuario? El fallo se define invirtiendo el éxito. Si no sabes qué significa el éxito, no puedes definir qué significa el fracaso.
-
-### paso 3: completar las lagunas de forma conversacional
-
-Si tienes los tres, procede inmediatamente al premortem. No hagas preguntas innecesarias.
-
-Si te falta uno o más, pregunta primero por la pieza más importante que falta. Una pregunta a la vez. Evalúa después de cada respuesta si ahora tienes suficiente. Sigue preguntando hasta alcanzar el umbral, pero nunca preguntes más de lo necesario.
-
-Ejemplos de preguntas de contexto enfocadas:  
-- "¿Qué es exactamente lo que estás a punto de lanzar/construir/decidir?" (si no sabes qué es)  
-- "¿Para quién es esto?" (si conoces el plan pero no la audiencia)  
-- "¿Cómo sería una victoria para esto?" (si conoces el plan y la audiencia pero no los criterios de éxito)
-
-El objetivo es alcanzar el mínimo lo más rápido posible sin hacer que el usuario sienta que está rellenando un formulario. Conversacional, no interrogativo. Si puedes inferir una respuesta del contexto, hazlo en lugar de preguntar.
+Maus alvos para um premortem:  
+- Ideias vagas sem nenhum plano concreto ainda (ajude-os a planejar primeiro, depois faça o premortem)  
+- Perguntas com apenas uma resposta correta (simplesmente responda-as)  
+- Solicitações de feedback criativo sobre um rascunho (isso é edição, não um premortem)  
+- Decisões que já foram tomadas e são irreversíveis (um premortem só é útil quando você ainda pode mudar de rumo)
 
 ---
 
-## cómo funciona una sesión de premortem
+## coleta de contexto (o mínimo necessário)
 
-### paso 1: establecer el encuadre
+Um premortem é tão bom quanto o contexto sobre o qual é executado. Informações vagas produzem cenários de falha vagos que não ajudam ninguém. Antes de executar o premortem, você precisa atingir um limite mínimo de contexto.
 
-Después de recopilar suficiente contexto, establece el encuadre del premortem explícitamente. Algo como:
+### passo 1: buscar contexto existente
 
-"Bien, tengo suficiente contexto. Vamos a ejecutar el premortem. La premisa es: han pasado 6 meses. [El plan/lanzamiento/decisión] ha fallado. Está hecho. Miramos hacia atrás intentando entender qué salió mal."
+Antes de perguntar qualquer coisa ao usuário, busque o contexto que já está disponível:
 
-Este encuadre importa. Cambia el modo de "evalúa este plan" (que desencadena respuestas complacientes) a "explica por qué murió esto" (que desencadena una identificación honesta y específica de los fallos).
+**A. A conversa atual.** O usuário pode ter estado discutindo um plano, um lançamento, um produto ou uma decisão anteriormente nesta sessão. Leia a conversa e extraia o que for relevante.
 
-### paso 2: generar razones de fallo (premortem en bruto)
+**B. O espaço de trabalho.** Escaneie rapidamente em busca de arquivos que possam conter contexto relevante:  
+- `AGENTS.md` ou `GEMINI.md` (contexto de negócios, preferências, restrições)  
+- Qualquer pasta `memory/` (perfis de público, detalhes do negócio, decisões passadas)  
+- Arquivos que o usuário referenciou ou anexou explicitamente  
+- Qualquer arquivo de projeto, briefs ou planos relacionados ao que está sendo submetido ao premortem
 
-Ejecuta el premortem en bruto como un análisis único y completo. Sin categorías prefijadas, sin lentes, sin restricciones. Solo el método Klein básico:
+Use ferramentas de busca e chamadas rápidas de leitura. Não dedique mais de 30 segundos a isso. Você está procurando os arquivos-chave que ancorarão os cenários de falha na realidade.
 
-"Este plan ha fallado 6 meses después. Genera cada razón genuina por la que podría haber muerto. Sé exhaustivo. Sé específico. Fundamenta cada razón en los detalles reales del plan. No rellenes con razones débiles y no pares antes de tiempo si hay más."
+### passo 2: avaliar a suficiência do contexto
 
-El resultado debe ser una lista completa de razones de fallo, cada una expresada en 1-2 frases. Sé honesto y exhaustivo. Algunos planes pueden tener 4 modos de fallo genuinos. Otros pueden tener 9. El número debe ser el que sea real para este plan específico.
+Depois de escanear, verifique se você tem o suficiente para executar um premortem útil. Você precisa de três coisas:
 
-Cada razón de fallo debe ser:  
-- Específica de este plan (no un consejo genérico que aplique a cualquier cosa)  
-- Fundamentada en detalles reales que el usuario proporcionó  
-- Una amenaza genuina (no un inconveniente menor o un caso extremadamente improbable)
+1. **O que é?** — Uma compreensão clara do que está sendo submetido ao premortem (um produto, um lançamento, uma contratação, uma mudança de preço, uma estratégia). Você deve ser capaz de descrevê-lo ao usuário em uma frase.
 
-### paso 3: agentes de análisis profundo (uno por razón de fallo, todos en paralelo)
+2. **Para quem é / a quem afeta?** — O público, o cliente, a equipe, as partes interessadas. Os cenários de falha dependem muito de quem está envolvido.
 
-Toma cada razón de fallo del paso 2 y lanza un sub-agente por razón, todos en paralelo. Cada agente toma su razón de fallo asignada y la analiza en profundidad de forma independiente.
+3. **Como é o sucesso?** — Que resultado o usuário espera? A falha é definida invertendo o sucesso. Se você não sabe o que o sucesso significa, não pode definir o que o fracasso significa.
 
-**Plantilla de prompt para sub-agente:**
+### passo 3: preencher as lacunas de forma conversacional
+
+Se você tem os três, prossiga imediatamente para o premortem. Não faça perguntas desnecessárias.
+
+Se faltar um ou mais, pergunte primeiro pela peça mais importante que está faltando. Uma pergunta por vez. Avalie após cada resposta se agora você tem o suficiente. Continue perguntando até atingir o limite, mas nunca pergunte mais do que o necessário.
+
+Exemplos de perguntas de contexto focadas:  
+- "O que exatamente você está prestes a lançar/construir/decidir?" (se você não sabe o que é)  
+- "Para quem é isso?" (se você conhece o plano, mas não o público)  
+- "Como seria uma vitória para isso?" (se você conhece o plano e o público, mas não os critérios de sucesso)
+
+O objetivo é atingir o mínimo o mais rápido possível sem fazer o usuário sentir que está preenchendo um formulário. Conversacional, não interrogativo. Se você puder inferir uma resposta do contexto, faça isso em vez de perguntar.
+
+---
+
+## como funciona uma sessão de premortem
+
+### passo 1: estabelecer o enquadramento
+
+Após coletar contexto suficiente, estabeleça o enquadramento do premortem explicitamente. Algo como:
+
+"Certo, tenho contexto suficiente. Vamos executar o premortem. A premissa é: passaram-se 6 meses. [O plano/lançamento/decisão] falhou. Acabou. Olhamos para trás tentando entender o que deu errado."
+
+Esse enquadramento importa. Ele muda o modo de "avalie este plano" (que desencadeia respostas complacentes) para "explique por que isso morreu" (que desencadeia uma identificação honesta e específica de falhas).
+
+### passo 2: gerar razões de falha (premortem bruto)
+
+Execute o premortem bruto como uma análise única e completa. Sem categorias prefixadas, sem lentes, sem restrições. Apenas o método básico de Klein:
+
+"Este plano falhou 6 meses depois. Gere cada razão genuína pela qual ele poderia ter morrido. Seja exaustivo. Seja específico. Fundamente cada razão nos detalhes reais do plano. Não preencha com razões fracas e não pare cedo se houver mais."
+
+O resultado deve ser uma lista completa de razões de falha, cada uma expressa em 1-2 frases. Seja honesto e exaustivo. Alguns planos podem ter 4 modos de falha genuínos. Outros podem ter 9. O número deve ser o que for real para este plano específico.
+
+Cada razão de falha deve ser:  
+- Específica deste plano (não um conselho genérico que se aplique a qualquer coisa)  
+- Fundamentada em detalhes reais que o usuário forneceu  
+- Uma ameaça genuína (não um inconveniente menor ou um caso extremamente improvável)
+
+### passo 3: agentes de análise profunda (um por razão de falha, todos em paralelo)
+
+Pegue cada razão de falha do passo 2 e lance um subagente por razão, todos em paralelo. Cada agente pega sua razão de falha atribuída e a analisa profundamente de forma independente.
+
+**Modelo de prompt para o subagente:**
 
 ```  
-Eres un investigador en un análisis de premortem. Se te ha asignado una razón de fallo específica para analizar en profundidad.
+Você é um pesquisador em uma análise de premortem. Foi atribuída a você uma razão de falha específica para analisar profundamente.
 
-El plan:  
+O plano:  
 ---  
-[contexto completo: qué es, para quién es, cómo es el éxito, más contexto relevante del espacio de trabajo]  
+[contexto completo: o que é, para quem é, como é o sucesso, mais contexto relevante do espaço de trabalho]  
 ---
 
-ENCUADRE DEL PREMORTEM: Han pasado 6 meses. Este plan ha fallado.
+ENQUADRAMENTO DO PREMORTEM: Passaram-se 6 meses. Este plano falhou.
 
-TU RAZÓN DE FALLO ASIGNADA: [la razón de fallo específica del paso 2]
+SUA RAZÃO DE FALHA ATRIBUÍDA: [a razão de falha específica do passo 2]
 
-Tu trabajo es profundizar en este fallo. Escribe la historia de cómo se desarrolló realmente. Sé específico. Usa detalles del plan. Hazlo sentir real, como un estudio de caso de algo que realmente ocurrió.
+Seu trabalho é se aprofundar nessa falha. Escreva a história de como ela realmente se desenrolou. Seja específico. Use detalhes do plano. Faça parecer real, como um estudo de caso de algo que realmente aconteceu.
 
-Tu resultado debe incluir:
+Seu resultado deve incluir:
 
-1. LA HISTORIA DEL FALLO: Una narrativa de 2-3 párrafos de cómo se desarrolló este fallo específico. Usa detalles del plan. Nombra momentos específicos donde las cosas salieron mal y por qué.
+1. A HISTÓRIA DA FALHA: Uma narrativa de 2-3 parágrafos de como essa falha específica se desenrolou. Use detalhes do plano. Nomeie momentos específicos onde as coisas deram errado e por quê.
 
-2. EL SUPUESTO SUBYACENTE: La única cosa que el usuario daba por sentada y que hizo posible este fallo. Exprésalo en una frase.
+2. A PREMISSA SUBJACENTE: A única coisa que o usuário tomou como certa e que tornou essa falha possível. Expresse isso em uma frase.
 
-3. SEÑALES DE ADVERTENCIA TEMPRANAS: 1-2 señales concretas y observables que el usuario podría vigilar y que indicarían que este modo de fallo está empezando a desarrollarse. Deben ser cosas que se puedan ver o medir realmente, no sensaciones vagas.
+3. SINAIS DE ALERTA ANTECIPADOS: 1-2 sinais concretos e observáveis que o usuário poderia monitorar e que indicariam que este modo de falha está começando a se desenrolar. Devem ser coisas que podem ser realmente vistas ou medidas, não sentimentos vagos.
 
-Mantén la respuesta total por debajo de 300 palabras. Sé directo. No lo atenúes. No lo suavices.  
+Mantenha a resposta total abaixo de 300 palavras. Seja direto. Não atenue. Não suavize.  
 ```
 
-### paso 4: síntesis
+### passo 4: síntese
 
-Después de que todos los agentes completen, lee cada análisis profundo y produce la síntesis:
+Depois que todos os agentes terminarem, leia cada análise profunda e produza a síntese:
 
-**INFORME DE PREMORTEM**
+**RELATÓRIO DE PREMORTEM**
 
-1. **El Fallo Más Probable** — ¿Qué escenario de fallo es más probable dado lo que sabes sobre el plan? ¿Por qué? Este es en el que el usuario debe enfocarse primero.
+1. **A Falha Mais Provável** — Qual cenário de falha é mais provável, dado o que você sabe sobre o plano? Por quê? Este é aquele em que o usuário deve focar primeiro.
 
-2. **El Fallo Más Peligroso** — ¿Qué escenario de fallo causaría más daño si ocurriera, aunque sea menos probable? Este es el que vale la pena asegurar.
+2. **A Falha Mais Perigosa** — Qual cenário de falha causaria mais danos se ocorresse, mesmo sendo menos provável? Este é o que vale a pena proteger contra.
 
-3. **El Supuesto Oculto** — De todos los análisis de fallo, ¿cuál es el supuesto más importante que el usuario está haciendo y que probablemente no ha cuestionado? Aquí es donde a menudo vive el valor real del premortem: lo que es tan obvio para el usuario que olvidó que era un supuesto.
+3. **A Premissa Oculta** — De todas as análises de falha, qual é a suposição mais importante que o usuário está fazendo e que provavelmente não questionou? É aqui que muitas vezes reside o verdadeiro valor do premortem: o que é tão óbvio para o usuário que ele esqueceu que era uma suposição.
 
-4. **El Plan Revisado** — Basándose en los escenarios de fallo, ¿qué cambios específicos harían el plan más resiliente? Sé concreto. No digas "considera tu precio". Di "prueba el precio en $X con 20 personas antes de comprometerte públicamente". Cada revisión debe corresponderse directamente con un escenario de fallo específico.
+4. **O Plano Revisado** — Com base nos cenários de falha, quais mudanças específicas tornariam o plano mais resiliente? Seja concreto. Não diga "considere testar seu preço". Diga "execute um piloto de US$ 47 com 20 pessoas antes de se comprometer com o workshop completo de US$ 297". Cada revisão deve corresponder diretamente a um cenário de falha específico.
 
-5. **La Lista de Verificación Pre-Lanzamiento** — 3-5 cosas específicas que el usuario debe verificar, probar o implementar antes de ejecutar. Cada una debe prevenir o detectar uno de los modos de fallo identificados.
+5. **A Lista de Verificação Pré-Lançamento** — 3 a 5 coisas específicas que o usuário deve verificar, testar ou implementar antes de executar. Cada uma deve prevenir ou detectar um dos modos de falha identificados.
 
-### paso 5: generar el informe de premortem
+### passo 5: gerar o relatório de premortem
 
-Genera un informe HTML visual y guárdalo en el espacio de trabajo del usuario.
+Gere um relatório HTML visual e salve-o no espaço de trabalho do usuário.
 
-**Archivo:** `premortem-report-[timestamp].html`
+**Arquivo:** `premortem-report-[timestamp].html`
 
-El informe debe ser un único archivo HTML autocontenido con CSS en línea. Principios de diseño:  
-- Fondo oscuro (#0a0e1a o similar), tipografía limpia, fácil de escanear  
-- La sección de síntesis (fallo más probable, fallo más peligroso, supuesto oculto, plan revisado, lista de verificación) debe mostrarse de forma prominente al principio ya que es lo que la mayoría de las personas leerá primero  
-- Una tarjeta visual por razón de fallo que muestre el análisis profundo. Cada tarjeta debe mostrar la razón de fallo como encabezado, la historia del fallo, el supuesto subyacente y las señales de advertencia tempranas. Usa colores de acento distintos para cada tarjeta para que sean visualmente escaneables.  
-- Un indicador visual claro de gravedad/probabilidad para cada modo de fallo  
-- El visual rotativo: muestra el número de agentes que se ejecutaron y sus hallazgos como una cuadrícula o diseño de tarjetas, para que el usuario pueda ver el alcance completo del premortem de un vistazo  
-- Pie de página con marca de tiempo y qué fue sometido al premortem
+O relatório deve ser um único arquivo HTML autocontido com CSS inline. Princípios de design:  
+- Fundo escuro (#0a0e1a ou similar), tipografia limpa, fácil de escanear  
+- A seção de síntese (falha mais provável, falha mais perigosa, premissa oculta, plano revisado, lista de verificação) deve ser exibida com destaque no início, pois é o que a maioria das pessoas lerá primeiro  
+- Um cartão visual por razão de falha que mostre a análise profunda. Cada cartão deve mostrar a razão da falha como título, a história da falha, a premissa subjacente e os sinais de alerta antecipados. Use cores de destaque diferentes para cada cartão, para que sejam visualmente fáceis de escanear.  
+- Um indicador visual claro de gravidade/probabilidade para cada modo de falha  
+- O visual rotativo: mostre o número de agentes que foram executados e suas descobertas como uma grade ou layout de cartões, para que o usuário possa ver a extensão total do premortem de relance  
+- Rodapé com carimbo de data/hora e o que foi submetido ao premortem
 
-Abre el archivo HTML después de generarlo.
+Abra o arquivo HTML depois de gerá-lo.
 
-### paso 6: guardar la transcripción
+### passo 6: salvar a transcrição
 
-Guarda la transcripción completa del premortem como `premortem-transcript-[timestamp].md` en la misma ubicación. Esto incluye:  
-- El contexto que se recopiló (qué, quién, criterios de éxito)  
-- Las razones de fallo del premortem en bruto  
-- Todos los análisis profundos de los agentes  
-- La síntesis completa
+Salve a transcrição completa do premortem como `premortem-transcript-[timestamp].md` no mesmo local. Isso inclui:  
+- O contexto que foi coletado (o que, quem, critérios de sucesso)  
+- As razões de falha do premortem bruto  
+- Todas as análises profundas dos agentes  
+- A síntese completa
 
 ---
 
-## formato de salida
+## formato de saída
 
-Cada sesión de premortem produce dos archivos:
+Cada sessão de premortem produz dois arquivos:
 
 ```  
-premortem-report-[timestamp].html    # informe visual para escanear  
-premortem-transcript-[timestamp].md  # transcripción completa como referencia  
+premortem-report-[timestamp].html    # relatório visual para escanear  
+premortem-transcript-[timestamp].md  # transcrição completa como referência  
 ```
 
-El usuario ve primero el informe HTML. La transcripción está disponible si quiere profundizar en el razonamiento detrás de cada escenario de fallo.
+O usuário vê primeiro o relatório HTML. A transcrição está disponível caso queira se aprofundar no raciocínio por trás de cada cenário de falha.
 
-También proporciona un resumen conciso en el chat: el fallo más probable, el supuesto oculto y la única revisión más importante del plan. Máximo tres frases. El informe tiene todos los detalles.
+Também forneça um resumo conciso no chat: a falha mais provável, a premissa oculta e a única revisão mais importante do plano. Máximo de três frases. O relatório contém todos os detalhes.
 
 ---
 
-## ejemplo: premortem de un lanzamiento de producto
+## exemplo: premortem de um lançamento de produto
 
-**Usuario:** "premortem esto: estoy a punto de lanzar un taller en vivo de $297 sobre cómo usar Claude Cowork para equipos de marketing. 50 plazas. Dirigido a directores de marketing en empresas con 10-50 empleados."
+**Usuário:** "premortem isso: estou prestes a lançar um workshop ao vivo de US$ 297 sobre como usar Claude/Gemini para equipes de marketing. 50 vagas. Direcionado a diretores de marketing em empresas com 10-50 funcionários."
 
-**El premortem en bruto identifica 6 razones de fallo:**  
-1. Los directores de marketing en empresas de este tamaño necesitan aprobación para gastar $297 en desarrollo profesional, añadiendo fricción que no has tenido en cuenta  
-2. "Claude Cowork para marketing" es un pitch centrado en una herramienta en un mercado donde la mayoría de los directores todavía están decidiendo si la IA es relevante para ellos  
-3. La audiencia que realmente compra podría ser solopreneurs, no directores de equipo, creando un desajuste entre el contenido y los asistentes  
-4. Construir un taller para equipos de marketing requiere entornos de demostración con datos de marketing realistas y configuraciones multiusuario, lo que lleva 5 semanas de preparación, no las 2 que has presupuestado  
-5. Si el 60% de los asistentes son solopreneurs, tus reseñas y casos de estudio no resonarán con la audiencia de directores de marketing que necesitas para cohortes futuras  
-6. A $297 con 50 plazas, el ingreso máximo es $14.850, lo que puede no justificar el tiempo de preparación frente a otras oportunidades de ingresos
+**O premortem bruto identifica 6 razões de falha:**  
+1. Diretores de marketing em empresas desse tamanho precisam de aprovação para gastar US$ 297 em desenvolvimento profissional, adicionando atrito que você não considerou  
+2. "IA para marketing" é um pitch centrado em uma ferramenta em um mercado onde a maioria dos diretores ainda está decidindo se a IA é relevante para eles  
+3. O público que realmente compra pode ser de empreendedores individuais, não diretores de equipe, criando um descompasso entre o conteúdo e os participantes  
+4. Construir um workshop para equipes de marketing exige ambientes de demonstração com dados de marketing realistas e configurações multiusuário, o que leva 5 semanas de preparação, não as 2 que você orçou  
+5. Se 60% dos participantes forem empreendedores individuais, suas avaliações e estudos de caso não ressoarão com o público de diretores de marketing que você precisa para futuras turmas  
+6. A US$ 297 com 50 vagas, a receita máxima é de US$ 14.850, o que pode não justificar o tempo de preparação em comparação com outras oportunidades de receita
 
-**6 agentes profundizan en cada razón de forma independiente, produciendo historias de fallo, supuestos subyacentes y señales de advertencia tempranas.**
+**6 agentes se aprofundam em cada razão de forma independente, produzindo histórias de falhas, premissas subjacentes e sinais de alerta antecipados.**
 
-**Síntesis:** El fallo más probable es el desajuste de audiencia: estás apuntando a personas que necesitan aprobación para gastar $297, lo que añade fricción que no has tenido en cuenta. El fallo más peligroso: atraer solopreneurs en lugar de directores de equipo significa que tus casos de estudio y testimonios no resonarán con el comprador objetivo real para cohortes futuras, agravando el problema con el tiempo. Supuesto oculto: asumes que "directores de marketing en empresas de 10-50 personas" es una audiencia alcanzable, pero estas personas no se identifican de esa manera y no están en los mismos lugares. Plan revisado: ejecuta una sesión piloto de $47 para 20 personas primero. Usa eso para identificar si tus compradores reales son directores de equipo o solopreneurs, y construye el taller completo para quien realmente aparezca.
+**Síntese:** A falha mais provável é o descompasso de público: você está visando pessoas que precisam de aprovação para gastar US$ 297, o que adiciona atrito que você não considerou. A falha mais perigosa: atrair empreendedores individuais em vez de diretores de equipe significa que seus estudos de caso e depoimentos não ressoarão com o comprador-alvo real para futuras turmas, agravando o problema com o tempo. Premissa oculta: você assume que "diretores de marketing em empresas de 10-50 pessoas" é um público alcançável, mas essas pessoas não se identificam dessa forma e não estão nos mesmos lugares. Plano revisado: execute uma sessão piloto de US$ 47 para 20 pessoas primeiro. Use isso para identificar se seus compradores reais são diretores de equipe ou empreendedores individuais, e construa o workshop completo para quem realmente aparecer.
 
 ---
 
 ## notas importantes
 
-- **Siempre lanza todos los agentes de fallo en paralelo.** El lanzamiento secuencial desperdicia tiempo y permite que las respuestas anteriores influyan en las posteriores.  
-- **Siempre establece el encuadre del premortem explícitamente.** "Esto ya ha fallado" es el mecanismo psicológico que hace que esto funcione. Sin él, el análisis vuelve a ser una evaluación de riesgos cortés en lugar de una identificación honesta de fallos.  
-- **Sé exhaustivo pero no rellenes.** Encuentra cada razón de fallo genuina. No pares en 3 si hay 7. Pero no fuerces 7 si solo hay 3. El número debe ser el que sea real para este plan específico.  
-- **La síntesis es el producto.** La mayoría de los usuarios leerán la síntesis y hojearán las tarjetas de fallo individuales. Haz la síntesis específica y accionable.  
-- **No suavices.** El objetivo de un premortem es decirle al usuario cosas que no quiere escuchar antes de que lo haga la realidad. Si un plan tiene problemas serios, dilo directamente.  
-- **El plan revisado debe ser concreto.** No digas "considera probar tu precio". Di "ejecuta un piloto de $47 con 20 personas antes de comprometerte con el taller completo de $297". Cada revisión debe ser algo que el usuario pueda hacer realmente esta semana.  
-- **Respeta el umbral mínimo de contexto.** Ejecutar un premortem con contexto insuficiente produce fallos genéricos que desperdician el tiempo del usuario. Es mejor hacer una pregunta más que producir un mal premortem.  
-- **Esto no es el Consejo LLM.** El consejo da múltiples perspectivas sobre una decisión ahora mismo. El premortem envía a Claude al futuro donde la decisión ya falló y trabaja hacia atrás para explicar por qué. Mecanismo psicológico diferente, resultado diferente. Si el usuario parece querer múltiples perspectivas en lugar de un análisis de fallos, sugiere el consejo en su lugar.
+- **Sempre lance todos os agentes de falha em paralelo.** O lançamento sequencial desperdiça tempo e permite que respostas anteriores influenciem as posteriores.  
+- **Sempre estabeleça o enquadramento do premortem explicitamente.** "Isso já falhou" é o mecanismo psicológico que faz isso funcionar. Sem ele, a análise volta a ser uma avaliação de risco educada em vez de uma identificação honesta de falhas.  
+- **Seja exaustivo, mas não encha linguiça.** Encontre cada razão de falha genuína. Não pare em 3 se houver 7. Mas não force 7 se houver apenas 3. O número deve ser o que for real para este plano específico.  
+- **A síntese é o produto.** A maioria dos usuários lerá a síntese e dará uma olhada nos cartões de falha individuais. Torne a síntese específica e acionável.  
+- **Não suavize.** O objetivo de um premortem é dizer ao usuário coisas que ele não quer ouvir antes que a realidade o faça. Se um plano tiver problemas sérios, diga diretamente.  
+- **O plano revisado deve ser concreto.** Não diga "considere testar seu preço". Diga "execute um piloto de US$ 47 com 20 pessoas antes de se comprometer com o workshop completo de US$ 297". Cada revisão deve ser algo que o usuário possa realmente fazer nesta semana.  
+- **Respeite o limite mínimo de contexto.** Executar um premortem com contexto insuficiente produz falhas genéricas que desperdiçam o tempo do usuário. É melhor fazer uma pergunta a mais do que produzir um premortem ruim.  
+- **Isso não é o Conselho LLM.** O conselho fornece várias perspectivas sobre uma decisão agora mesmo. O premortem envia a IA para o futuro, onde a decisão já falhou, e trabalha de trás para frente para explicar o porquê. Mecanismo psicológico diferente, resultado diferente. Se o usuário parece querer várias perspectivas em vez de uma análise de falhas, sugira o conselho em vez disso.
