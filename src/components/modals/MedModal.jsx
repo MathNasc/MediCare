@@ -78,7 +78,7 @@ function TreatmentTypeSelector({ value, onChange, T, scale }) {
 
 // ─── Componente principal ──────────────────────────────────────────────────────
 export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) {
-  const { recordStockMovement } = useApp();
+  const { recordStockMovement, user } = useApp();
   const isEditing = Boolean(med);
 
   const [step, setStep] = useState(isEditing ? STEPS.FORM : STEPS.SEARCH);
@@ -360,7 +360,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
                 <label style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', display: 'block', marginBottom: 6 }}>
                   Qtd. disponível {isEditing && <span title="Alterar este valor registra automaticamente uma movimentação de estoque" style={{ cursor: 'help' }}>ℹ️</span>}
                 </label>
-                <input type="number" min="0" style={inp} value={form.quantidade} onChange={e => set('quantidade', Math.max(0, +e.target.value))} />
+                <input type="number" min="0" style={{...inp, opacity: user?.role === 'paciente' ? 0.6 : 1}} value={form.quantidade} onChange={e => set('quantidade', Math.max(0, +e.target.value))} disabled={user?.role === 'paciente'} />
               </div>
             </div>
 

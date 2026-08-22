@@ -294,10 +294,12 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
     return false;
   };
 
+  const [confirmRole, setConfirmRole] = useState(null);
+
   const handleUpdate = async (newRole) => {
-    if (newRole === 'paciente' && user.role !== 'paciente') {
-      const ok = window.confirm("Atenção: Você está prestes a se tornar Paciente. Este perfil não pode ser alterado sem a permissão (PIN) de um Cuidador. Tem certeza que deseja continuar?");
-      if (!ok) return;
+    if (newRole === 'paciente' && user.role !== 'paciente' && confirmRole !== 'paciente') {
+      setConfirmRole('paciente');
+      return;
     }
 
     if (user.role === 'paciente') {
@@ -367,6 +369,23 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
           )}
         </div>
       </div>
+
+      {confirmRole && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} onClick={() => setConfirmRole(null)} />
+          <div className="anim-scale" style={{ position: 'relative', width: '100%', maxWidth: 340, background: T.bg1, borderRadius: 24, padding: 24, border: `1px solid ${T.bdr}`, boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#fef08a', color: '#854d0e', fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, fontWeight: 900 }}>!</div>
+            <h3 style={{ color: T.txt, fontSize: 20 * scale, fontWeight: 800, marginBottom: 12 }}>Atenção</h3>
+            <p style={{ color: T.sub, fontSize: 15 * scale, lineHeight: 1.5, marginBottom: 24 }}>
+              Você está prestes a se tornar <strong>Paciente</strong>. Este perfil não pode ser alterado depois sem a permissão (PIN) de um Cuidador. Tem certeza que deseja continuar?
+            </p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => setConfirmRole(null)} style={{ flex: 1, padding: 14, borderRadius: 14, background: T.bg2, color: T.txt, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Cancelar</button>
+              <button onClick={() => handleUpdate(confirmRole)} style={{ flex: 1, padding: 14, borderRadius: 14, background: '#3b82f6', color: '#fff', fontWeight: 700, border: 'none', cursor: 'pointer' }}>Continuar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </FullSubScreen>
   );
 }
