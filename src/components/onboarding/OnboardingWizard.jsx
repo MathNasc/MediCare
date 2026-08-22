@@ -53,6 +53,7 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
       setConfirmRole('paciente');
       return;
     }
+    setConfirmRole(null);
     setLoading(true);
     await updateRole(role);
     setLoading(false);

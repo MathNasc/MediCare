@@ -301,6 +301,7 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
       setConfirmRole('paciente');
       return;
     }
+    setConfirmRole(null);
 
     if (user.role === 'paciente') {
       if (!pin.trim()) return setError('Digite o PIN de liberação.');
