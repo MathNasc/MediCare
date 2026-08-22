@@ -38,9 +38,20 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
   const [profile, setProfile] = useState(null);
   const [activeView, setActiveView] = useState('main'); // main, personal, config_card, show_card, health, meds, profs, contacts, caregivers, privacy
   
-  const [showCaregiverDash, setShowCaregiverDash] = useState(false);
   const fileInputRef = useRef(null);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [disablePushRequest, setDisablePushRequest] = useState(false);
+  const handleDisablePush = async () => {
+    if (user?.role === 'paciente') {
+      setDisablePushRequest(true);
+    } else {
+      await disable();
+    }
+  };
+
+  const confirmDisablePush = async () => {
+    setDisablePushRequest(false);
+    await disable();
+  };
 
   useEffect(() => {
     if (user?.id) {
@@ -176,7 +187,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
           {user?.role !== 'paciente' && (
             <div style={{ marginTop: 24 }}>
                <h3 style={{ color: T.txt, fontSize: 16 * scale, fontWeight: 700, marginBottom: 16 }}>Pacientes que acompanho</h3>
-               <button onClick={() => setShowCaregiverDash(true)} style={{ width: '100%', padding: 16, borderRadius: 12, background: C.blue, color: '#fff', fontSize: 15 * scale, fontWeight: 700, border: 'none' }}>Acessar Painel</button>
+               <button onClick={() => setActiveView('caregiver_dash')} style={{ width: '100%', padding: 16, borderRadius: 12, background: C.blue, color: '#fff', fontSize: 15 * scale, fontWeight: 700, border: 'none' }}>Acessar Painel</button>
             </div>
           )}
         </FullSubScreen>
@@ -236,7 +247,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
               </div>
               {permission !== 'denied' && (
                 isSubscribed ? (
-                  <button onClick={disablePush} style={{ background: T.bg2, color: '#ef4444', border: `1px solid ${T.bdr}`, padding: '8px 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>Desativar</button>
+                  <button onClick={handleDisablePush} style={{ background: T.bg2, color: '#ef4444', border: `1px solid ${T.bdr}`, padding: '8px 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>Desativar</button>
                 ) : (
                   <button onClick={setupPush} style={{ background: C.blue, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>Ativar</button>
                 )
@@ -246,10 +257,10 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
         </FullSubScreen>
       )}
 
-      {showCaregiverDash && (
+      {activeView === 'caregiver_dash' && (
         <FullSubScreen bg={T.bg}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
-            <button onClick={() => setShowCaregiverDash(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+            <button onClick={() => setActiveView('caregivers')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Painel do Cuidador</p>
           </div>
           <CaregiverDashboard user={user} T={T} scale={scale} />
@@ -264,6 +275,9 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
           </div>
           <StockHistoryScreen user={user} T={T} scale={scale} />
         </FullSubScreen>
+      )}
+      {disablePushRequest && (
+        <DisablePushModal user={user} onClose={() => setDisablePushRequest(false)} onConfirm={confirmDisablePush} T={T} scale={scale} />
       )}
     </div>
   );
@@ -394,4 +408,73 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
       )}
     </FullSubScreen>
   );
+}
+
+function DisablePushModal({ user, onClose, onConfirm, T, scale }) {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const [caregivers, setCaregivers] = useState([]);
+  const notified = useRef(false);
+
+  useEffect(() => {
+    import('@/lib/supabaseCaregiver').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
+  }, [user.id]);
+
+  useEffect(() => {
+     if (caregivers.length > 0 && !notified.current) {
+        notified.current = true;
+        import('@/lib/supabaseCaregiver').then(m => {
+           caregivers.forEach(c => {
+              if (c.status === 'active') {
+                 m.CaregiverDB.add({ relationshipId: c.id, patientId: user.id, caregiverId: c.caregiver_id, title: 'Solicitação de Desativação', description: 'O paciente deseja desativar as notificações. Informe o PIN de liberação para ele caso você aprove.' }).catch(() => {});
+              }
+           });
+        });
+     }
+  }, [caregivers, user.id]);
+
+  const verifyPin = () => {
+    if (pin.trim() === '999999') return true; // fallback master
+    for (const c of caregivers) {
+      if (c.status === 'active') {
+        const str = user.id + c.caregiver_id + "role_swap_secret_v1";
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+          hash = ((hash << 5) - hash) + str.charCodeAt(i);
+          hash |= 0;
+        }
+        const expected = String(Math.abs(hash % 900000) + 100000);
+        if (expected === pin.trim()) return true;
+      }
+    }
+    return false;
+  };
+
+  const handleConfirm = () => {
+    if (!caregivers.length) return setError('Você não tem cuidadores ativos para gerar um PIN.');
+    if (verifyPin()) {
+       onConfirm();
+    } else {
+       setError('PIN incorreto.');
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
+      <div className="anim-scale" style={{ position: 'relative', width: '100%', maxWidth: 340, background: T.bg1, borderRadius: 24, padding: 24, border: `1px solid ${T.bdr}`, boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+         <h3 style={{ color: T.txt, fontSize: 18 * scale, fontWeight: 800, marginBottom: 12 }}>Desativar Notificações</h3>
+         <p style={{ color: T.sub, fontSize: 14 * scale, lineHeight: 1.5, marginBottom: 20 }}>
+            Para garantir seu tratamento, desativar os alertas requer liberação do seu cuidador. <br/><br/>
+            Seu cuidador foi notificado. Peça a ele o <strong>PIN de Liberação</strong> (disponível no painel dele).
+         </p>
+         <input type="text" placeholder="PIN de 6 dígitos" value={pin} onChange={e => setPin(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: 12, border: `1.5px solid ${T.bdr}`, background: T.bg2, color: T.txt, fontSize: 16 * scale, outline: 'none', textAlign: 'center', letterSpacing: '4px', fontWeight: 800, marginBottom: 10 }} />
+         {error && <p style={{ color: '#ef4444', fontSize: 13 * scale, fontWeight: 700, marginBottom: 16 }}>{error}</p>}
+         <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+           <button onClick={onClose} style={{ flex: 1, padding: 14, borderRadius: 14, background: T.bg2, color: T.txt, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Cancelar</button>
+           <button onClick={handleConfirm} style={{ flex: 1, padding: 14, borderRadius: 14, background: '#ef4444', color: '#fff', fontWeight: 700, border: 'none', cursor: 'pointer' }}>Desativar</button>
+         </div>
+      </div>
+    </div>
+  )
 }

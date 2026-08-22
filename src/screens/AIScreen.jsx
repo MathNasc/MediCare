@@ -15,29 +15,30 @@ export function AIScreen({ T, scale }) {
     setLoading(true);
     const lateCount = history.filter((h) => h.atraso_minutos > 30).length;
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 700,
-          messages: [{
-            role: 'user',
-            content: `Analise estes dados de adesão a medicamentos e crie 3 insights motivacionais em português brasileiro.
-Medicamentos: ${meds.map((m) => m.nome).join(', ') || 'não informado'}
-Taxa de adesão: ${adhesion}%
-Doses totais: ${history.length}, confirmadas: ${histConf}
+          prompt: `Você é um assistente de saúde inteligente para um paciente. Analise estes dados de adesão a medicamentos e crie 3 insights úteis, práticos e motivacionais em português brasileiro.
+Medicamentos: ${meds.map((m) => m.nome).join(', ') || 'nenhum registrado'}
+Taxa de adesão (doses tomadas / total): ${adhesion}%
+Doses totais registradas: ${history.length}, confirmadas: ${histConf}
 Doses com atraso >30min: ${lateCount}
-Use linguagem acolhedora, simples e encorajadora. Máx 2 frases por insight.
-Responda SOMENTE JSON válido sem markdown:
-{"insights":[{"icone":"emoji","titulo":"titulo curto","texto":"texto motivacional"},{"icone":"emoji","titulo":"titulo curto","texto":"texto motivacional"},{"icone":"emoji","titulo":"titulo curto","texto":"texto motivacional"}]}`,
-          }],
+
+Diretrizes:
+- Use uma linguagem acolhedora, clara e encorajadora.
+- Foque em dicas práticas baseadas nos dados (ex: se há muito atraso, sugira dicas para lembrar; se a adesão é alta, elogie e mostre os benefícios).
+- Crie um título bem chamativo.
+- Responda OBRIGATORIAMENTE em JSON no formato exato:
+{"insights":[{"icone":"<emoji que represente>","titulo":"<titulo curto>","texto":"<texto motivacional/prático>"}]}
+`
         }),
       });
       const data = await res.json();
-      const txt  = (data.content?.[0]?.text || '').trim().replace(/```json|```/g, '');
+      const txt = (data.text || '').trim();
       setInsights(JSON.parse(txt).insights || []);
-    } catch {
+    } catch (e) {
+      console.error(e);
       setInsights([
         { icone: '📊', titulo: 'Sua adesão', texto: `Você mantém ${adhesion}% de adesão ao tratamento. ${adhesion >= 80 ? 'Excelente resultado!' : adhesion >= 60 ? 'Você está progredindo bem!' : 'Cada dose conta, vamos melhorar juntos.'}` },
         { icone: '💊', titulo: 'Medicamentos', texto: `${meds.length} medicamento${meds.length !== 1 ? 's' : ''} no tratamento. ${meds.filter((m) => m.quantidade <= 10).length > 0 ? 'Fique atento ao estoque.' : 'Todos com estoque adequado.'}` },
