@@ -6,8 +6,8 @@ import { useApp } from '@/context/AppContext';
 import { MedModal } from '@/components/modals/MedModal';
 
 export function OnboardingWizard({ profile, onComplete, T, scale }) {
-  const { user, toast, saveMed } = useApp();
-  const [step, setStep] = useState(1);
+  const { user, toast, saveMed, updateRole } = useApp();
+  const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
 
   // Step 1: Personal Data
@@ -33,6 +33,17 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
     await ProfileDB.updateProfile(user.id, { emergency_settings: s });
     setLoading(false);
     onComplete();
+  };
+
+  const handleSaveRole = async (role) => {
+    setLoading(true);
+    await updateRole(role);
+    setLoading(false);
+    if (role === 'cuidador') {
+      handleFinish(); // Cuidadores não precisam preencher dados médicos próprios no onboarding
+    } else {
+      setStep(1);
+    }
   };
 
   const handleSavePersonal = async () => {
@@ -82,6 +93,25 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
     <div style={{ background: T.bg0, minHeight: '100vh', position: 'fixed', inset: 0, zIndex: 300, overflowY: 'auto' }}>
       <div style={{ maxWidth: 480, margin: '0 auto' }}>
         
+        {step === 0 && (
+          <StepWrapper title="Como você vai usar o app?" subtitle="Escolha o seu perfil para personalizarmos a sua experiência.">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 20 }}>
+              <button onClick={() => handleSaveRole('independente')} disabled={loading} style={{ width: '100%', padding: 20, borderRadius: 16, background: T.bg1, border: `1.5px solid ${T.bdr}`, cursor: 'pointer', textAlign: 'left' }}>
+                <p style={{ color: T.txt, fontWeight: 800, fontSize: 16 * scale }}>⚙️ Independente</p>
+                <p style={{ color: T.sub, fontSize: 13 * scale, marginTop: 4 }}>Vou gerenciar meus próprios medicamentos e horários.</p>
+              </button>
+              <button onClick={() => handleSaveRole('paciente')} disabled={loading} style={{ width: '100%', padding: 20, borderRadius: 16, background: T.bg1, border: `1.5px solid ${T.bdr}`, cursor: 'pointer', textAlign: 'left' }}>
+                <p style={{ color: T.txt, fontWeight: 800, fontSize: 16 * scale }}>🧑 Paciente</p>
+                <p style={{ color: T.sub, fontSize: 13 * scale, marginTop: 4 }}>Alguém cuida de mim, mas quero acompanhar no meu celular.</p>
+              </button>
+              <button onClick={() => handleSaveRole('cuidador')} disabled={loading} style={{ width: '100%', padding: 20, borderRadius: 16, background: T.bg1, border: `1.5px solid ${T.bdr}`, cursor: 'pointer', textAlign: 'left' }}>
+                <p style={{ color: T.txt, fontWeight: 800, fontSize: 16 * scale }}>🤝 Cuidador</p>
+                <p style={{ color: T.sub, fontSize: 13 * scale, marginTop: 4 }}>Vou gerenciar a medicação de outra pessoa.</p>
+              </button>
+            </div>
+          </StepWrapper>
+        )}
+
         {step === 1 && (
           <StepWrapper title="Seus Dados Básicos" subtitle="Configure seu perfil para o Cartão de Emergência. Pule o que não quiser preencher agora.">
             <label style={lbl}>Nome Completo</label>

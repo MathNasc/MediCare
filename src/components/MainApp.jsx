@@ -308,7 +308,20 @@ function InnerApp() {
 
 
 
-  const screenProps = { T, scale };
+    const screenProps = { T, scale };
+
+  // Note: user.role === 'caregiver' used to skip onboarding, but now we'll allow it so they can pick their role.
+  // Wait, if they pick caregiver, handleFinish is called, onboarding_completed is true.
+  if (profile && !profile?.emergency_settings?.onboarding_completed) {
+    return (
+      <OnboardingWizard 
+        profile={profile} 
+        onComplete={() => setProfile({...profile, emergency_settings: {...(profile.emergency_settings || {}), onboarding_completed: true}})} 
+        T={T} 
+        scale={scale} 
+      />
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: T.bg0 }}>
