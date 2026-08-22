@@ -5,6 +5,17 @@ import { ProfileDB } from '@/lib/profileDb';
 import { useApp } from '@/context/AppContext';
 import { MedModal } from '@/components/modals/MedModal';
 
+const StepWrapper = ({ title, subtitle, children, step, scale, T, C }) => (
+  <div className="anim-fadeUp" style={{ padding: '40px 20px', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1 }}>
+      <p style={{ color: C.blue, fontWeight: 800, fontSize: 14 * scale, marginBottom: 8 }}>PASSO {step + 1} DE 5</p>
+      <h1 style={{ color: T.txt, fontWeight: 900, fontSize: 26 * scale, marginBottom: 12, lineHeight: 1.2 }}>{title}</h1>
+      <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 30, lineHeight: 1.5 }}>{subtitle}</p>
+      {children}
+    </div>
+  </div>
+);
+
 export function OnboardingWizard({ profile, onComplete, T, scale }) {
   const { user, toast, saveMed, updateRole } = useApp();
   const [step, setStep] = useState(0);
@@ -94,7 +105,7 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
       <div style={{ maxWidth: 480, margin: '0 auto' }}>
         
         {step === 0 && (
-          <StepWrapper title="Como você vai usar o app?" subtitle="Escolha o seu perfil para personalizarmos a sua experiência.">
+          <StepWrapper step={step} scale={scale} T={T} C={C} title="Como você vai usar o app?" subtitle="Escolha o seu perfil para personalizarmos a sua experiência.">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 20 }}>
               <button onClick={() => handleSaveRole('independente')} disabled={loading} style={{ width: '100%', padding: 20, borderRadius: 16, background: T.bg1, border: `1.5px solid ${T.bdr}`, cursor: 'pointer', textAlign: 'left' }}>
                 <p style={{ color: T.txt, fontWeight: 800, fontSize: 16 * scale }}>⚙️ Independente</p>
@@ -113,7 +124,7 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
         )}
 
         {step === 1 && (
-          <StepWrapper title="Seus Dados Básicos" subtitle="Configure seu perfil para o Cartão de Emergência. Pule o que não quiser preencher agora.">
+          <StepWrapper step={step} scale={scale} T={T} C={C} title="Seus Dados Básicos" subtitle="Configure seu perfil para o Cartão de Emergência. Pule o que não quiser preencher agora.">
             <label style={lbl}>Nome Completo</label>
             <input style={inp} value={personal.social_name} onChange={e => setPersonal(p => ({ ...p, social_name: e.target.value }))} placeholder="Como gostaria de ser chamado?" />
             
@@ -134,7 +145,7 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
         )}
 
         {step === 2 && (
-          <StepWrapper title="Contato de Emergência" subtitle="Quem deve ser avisado em caso de emergência?">
+          <StepWrapper step={step} scale={scale} T={T} C={C} title="Contato de Emergência" subtitle="Quem deve ser avisado em caso de emergência?">
             <label style={lbl}>Nome do Contato</label>
             <input style={inp} value={contact.name} onChange={e => setContact(p => ({ ...p, name: e.target.value }))} placeholder="Ex: Maria da Silva" />
             
@@ -152,7 +163,7 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
         )}
 
         {step === 3 && (
-          <StepWrapper title="Profissionais de Saúde" subtitle="Algum médico principal que acompanha você?">
+          <StepWrapper step={step} scale={scale} T={T} C={C} title="Profissionais de Saúde" subtitle="Algum médico principal que acompanha você?">
             <label style={lbl}>Nome do Médico</label>
             <input style={inp} value={pro.name} onChange={e => setPro(p => ({ ...p, name: e.target.value }))} placeholder="Ex: Dr. Carlos" />
             
@@ -170,7 +181,7 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
         )}
 
         {step === 4 && (
-          <StepWrapper title="Seus Medicamentos" subtitle="Para finalizar, você pode adicionar seu primeiro medicamento agora.">
+          <StepWrapper step={step} scale={scale} T={T} C={C} title="Seus Medicamentos" subtitle="Para finalizar, você pode adicionar seu primeiro medicamento agora.">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
               <button onClick={() => setShowMedModal(true)} style={{ width: '100%', padding: 20, borderRadius: 16, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', fontWeight: 800, fontSize: 16 * scale, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, boxShadow: '0 8px 24px rgba(59,130,246,.4)' }}>
                 <span style={{ fontSize: 24 }}>💊</span> Adicionar Medicamento
