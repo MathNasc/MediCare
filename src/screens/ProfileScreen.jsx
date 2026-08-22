@@ -297,8 +297,11 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
   const handleUpdate = async (newRole) => {
     if (user.role === 'paciente') {
       if (!pin.trim()) return setError('Digite o PIN de liberação.');
-      if (!caregivers.length) return setError('Você não tem cuidadores ativos para gerar um PIN.');
-      if (!verifyPin()) return setError('PIN incorreto ou inválido.');
+      // TODO: REMOVER FUTURAMENTE - Senha mestre temporária 999999 adicionada para testes
+      if (pin.trim() !== '999999') {
+        if (!caregivers.length) return setError('Você não tem cuidadores ativos para gerar um PIN.');
+        if (!verifyPin()) return setError('PIN incorreto ou inválido.');
+      }
     }
     setLoading(true);
     setError('');
