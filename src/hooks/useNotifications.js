@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { SupaPush } from '@/lib/supabase';
-import { subscribeToPush } from '@/lib/webPush';
+import { subscribeToPush, unsubscribeFromPush } from '@/lib/webPush';
 
 /**
  * Hook de notificações — versão Web Push (VAPID).
@@ -17,6 +17,7 @@ import { subscribeToPush } from '@/lib/webPush';
  */
 export function useNotifications(_doses, userId) {
   const subscribed = useRef(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
 
   const ensureSubscription = useCallback(async () => {
     if (!userId || subscribed.current) return;
@@ -30,6 +31,9 @@ export function useNotifications(_doses, userId) {
     if (subscription) {
       await SupaPush.saveSubscription(userId, subscription);
       subscribed.current = true;
+      setIsSubscribed(true);
+    } else {
+      setIsSubscribed(false);
     }
   }, [userId]);
 
@@ -48,8 +52,20 @@ export function useNotifications(_doses, userId) {
     
     await SupaPush.saveSubscription(userId, subscription);
     subscribed.current = true;
+    setIsSubscribed(true);
     return true;
   }, [userId]);
 
-  return { setup };
+  /** Remove a inscrição deste aparelho */
+  const disable = useCallback(async () => {
+    const endpoint = await unsubscribeFromPush();
+    if (endpoint) {
+      await SupaPush.removeSubscription(endpoint);
+    }
+    subscribed.current = false;
+    setIsSubscribed(false);
+    return true;
+  }, []);
+
+  return { setup, disable, isSubscribed };
 }

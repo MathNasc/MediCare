@@ -30,9 +30,10 @@ import { useNotifications } from '@/hooks/useNotifications';
 export function ProfileScreen({ T, scale, setFs, fsSize }) {
   const { user, logout, meds } = useApp();
   const [permission, setPermission] = useState('default');
-  const { setup } = useNotifications(meds, user?.id);
+  const { setup, disable, isSubscribed } = useNotifications(meds, user?.id);
   useEffect(() => { if (typeof window !== 'undefined' && 'Notification' in window) setPermission(Notification.permission); }, []);
   const setupPush = async () => { if (await setup()) setPermission(Notification.permission); };
+  const disablePush = async () => { await disable(); };
   
   const [profile, setProfile] = useState(null);
   const [activeView, setActiveView] = useState('main'); // main, personal, config_card, show_card, health, meds, profs, contacts, caregivers, privacy
@@ -230,11 +231,15 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
               <div style={{ flex: 1 }}>
                 <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>Notificações</p>
                 <p style={{ color: T.muted, fontSize: 13 * scale }}>
-                  {permission === 'granted' ? 'Ativas' : permission === 'denied' ? 'Bloqueadas no aparelho' : 'Desativadas'}
+                  {permission === 'denied' ? 'Bloqueadas no aparelho' : (isSubscribed ? 'Ativas' : 'Desativadas')}
                 </p>
               </div>
-              {permission !== 'granted' && permission !== 'denied' && (
-                <button onClick={setupPush} style={{ background: C.blue, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>Ativar</button>
+              {permission !== 'denied' && (
+                isSubscribed ? (
+                  <button onClick={disablePush} style={{ background: T.bg2, color: '#ef4444', border: `1px solid ${T.bdr}`, padding: '8px 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>Desativar</button>
+                ) : (
+                  <button onClick={setupPush} style={{ background: C.blue, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>Ativar</button>
+                )
               )}
             </div>
           </div>

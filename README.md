@@ -1,224 +1,139 @@
-# 💊 MediCare — Controle de Medicamentos
+# 💊 MediCare — Controle Inteligente de Saúde e Medicamentos
 
-Aplicativo mobile-first de gerenciamento de medicamentos com lembretes inteligentes, confirmação de doses, controle de estoque, análise por IA e modo cuidador.
-
-**Stack:** Next.js 14 · React 18 · Supabase · Firebase FCM · PWA · Vercel
+O **MediCare** é um aplicativo mobile-first completo e intuitivo para o gerenciamento de saúde, focado no controle rigoroso da adesão medicamentosa. Projetado como um PWA (Progressive Web App) moderno, ele oferece notificações inteligentes, acompanhamento de estoque, agendas médicas e uma estrutura dupla de perfis para **Pacientes** e **Cuidadores**.
 
 ---
 
-## 🚀 Deploy Rápido
+## ✨ Principais Funcionalidades
+
+- 🧑‍🤝‍🧑 **Perfis de Usuário & Modo Cuidador:**
+  - **Pacientes:** Controle total sobre os próprios medicamentos, eventos e histórico de saúde.
+  - **Cuidadores:** Módulo seguro de delegação. O cuidador (após aceitar um convite) recebe uma visão em tempo real da aderência do paciente, podendo registrar doses retroativamente em nome do paciente caso este se esqueça de usar o aplicativo.
+- 💊 **Gestão de Tratamentos Completa:**
+  - **Uso Contínuo:** Para tratamentos sem data de término.
+  - **Uso Temporário:** Definição de data de início e fim. A prescrição encerra automaticamente e some da agenda ativa, indo para o histórico.
+  - **Sob Demanda (SOS):** Medicamentos para controle de sintomas pontuais, registrados no momento do uso, sem interferir na adesão calculada do paciente.
+- 📅 **Controle de Eventos e Consultas:**
+  - Lembretes agendados para consultas médicas, exames e reabastecimentos de estoque.
+- 🔔 **Notificações Push Confiáveis (Web Push & Supabase Edge Functions):**
+  - Integração robusta via VAPID Push API.
+  - **Background Worker:** Lembretes disparados pontualmente através de rotinas agendadas (pg_cron) executadas diretamente no servidor (Supabase Edge Functions). O alerta chega mesmo com o aplicativo fechado!
+  - Alertas escalonados (Hora da dose, +10min, +20min) e Alerta de Estoque Baixo (quando ≤ 5 unidades).
+- 📊 **Dashboard & Adesão:**
+  - Acompanhamento diário e mensal de aderência ao tratamento, visualização em timeline e registro detalhado de sintomas.
+- 🔐 **Segurança e Privacidade:**
+  - Arquitetura segura via **Row Level Security (RLS)** do Supabase. O banco de dados só retorna os dados que pertencem ao usuário logado ou ao seu cuidador autorizado. Todo o histórico possui rastreabilidade (Audit Logs).
+
+---
+
+## 🛠️ Stack Tecnológica
+
+- **Front-end:** Next.js 14, React 18
+- **Estilização:** Tailwind CSS, PostCSS, Componentes customizados
+- **Backend & Database:** Supabase (PostgreSQL)
+- **Autenticação:** Supabase Auth (Email/Senha)
+- **Notificações:** Web Push API (VAPID), Service Workers (`sw.js`) e Supabase Edge Functions (`Deno`)
+- **Agendamento:** `pg_cron` (PostgreSQL)
+- **Infraestrutura UI:** PWA configurado nativamente (Manifest, Add to Home Screen)
+
+---
+
+## 🚀 Como Executar o Projeto Localmente
+
+### 1. Pré-requisitos
+- [Node.js](https://nodejs.org/en/) (Versão 18+)
+- Conta no [Supabase](https://supabase.com/)
+
+### 2. Instalação
 
 ```bash
-git clone <repo>
+# Clone o repositório
+git clone <url-do-repositorio> medicare
 cd medicare
+
+# Instale as dependências
 npm install
-cp .env.example .env.local   # preencher variáveis
-npm run build
-vercel --prod
 ```
 
----
+### 3. Variáveis de Ambiente
 
-## 📁 Estrutura
+Renomeie ou copie o arquivo de exemplo de variáveis de ambiente:
 
-```
-medicare/
-├── public/
-│   ├── sw.js                  # Service Worker (cache + push)
-│   ├── manifest.json          # PWA manifest
-│   ├── icon-*.png             # Ícones (72→512px)
-│   ├── apple-touch-icon.png
-│   └── favicon.ico
-│
-├── supabase/
-│   └── migrations/
-│       └── 001_initial.sql    # Schema completo + RLS
-│
-├── src/
-│   ├── app/
-│   │   ├── layout.jsx         # Root layout + SEO + PWA metadata
-│   │   └── page.jsx           # Entry point + lazy loading + PWA install
-│   │
-│   ├── components/
-│   │   ├── ui/                # Ring, Pill, Toasts
-│   │   ├── modals/            # QuickConfirm, MedModal, MedDetail
-│   │   ├── AuthScreen.jsx
-│   │   ├── BottomNav.jsx
-│   │   └── Dashboard.jsx      # NextDoseHero, DayProgress, Timeline, StockBar
-│   │
-│   ├── screens/               # HomeScreen, MedsScreen, StatsScreen, AIScreen, ProfileScreen
-│   ├── context/AppContext.jsx # Estado global async (Supabase + localStorage)
-│   ├── hooks/                 # useTheme, useFontScale, useToast, useNotifications
-│   └── lib/
-│       ├── db.js              # Unified DB (Supabase ou localStorage)
-│       ├── supabase.js        # Supabase client + Auth + Meds + History + Caregivers
-│       ├── firebase.js        # Firebase FCM + notificações locais
-│       ├── doseUtils.js       # buildDoses, getDoseStatus, timeLabel
-│       └── theme.js           # Design tokens
-│
-└── src/__tests__/             # Jest + RTL tests
+```bash
+cp .env.example .env.local
 ```
 
----
-
-## ⚙️ Variáveis de Ambiente
+Preencha o arquivo `.env.local` com as chaves do seu projeto Supabase e de Push VAPID:
 
 ```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sua_anon_key
+# Supabase - Configuração Padrão
+NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-anon-key-aqui
 
-# Firebase FCM
-NEXT_PUBLIC_FIREBASE_API_KEY=AIza...
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=projeto.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=projeto-id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=projeto.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
-NEXT_PUBLIC_FIREBASE_APP_ID=1:123:web:abc
-NEXT_PUBLIC_FIREBASE_VAPID_KEY=BK_...
-
-# App
-NEXT_PUBLIC_APP_URL=https://seu-app.vercel.app
+# VAPID Keys - Para notificações Web Push (Crie suas chaves usando o pacote web-push)
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=sua-chave-publica-vapid
 ```
 
-> Sem Supabase/Firebase configurados o app funciona com **localStorage** (modo demo).
-
----
-
-## 🗄️ Supabase — Setup
-
-### 1. Criar projeto em [supabase.com](https://supabase.com)
-
-### 2. Executar migration
+### 4. Executando o App Localmente
 
 ```bash
-# Copiar conteúdo de supabase/migrations/001_initial.sql
-# Colar no SQL Editor do Supabase e executar
+npm run dev
 ```
 
-### 3. Configurar Storage
+Acesse [http://localhost:3000](http://localhost:3000) no seu navegador. 
 
-No painel Supabase → Storage → Criar bucket `documentos` (private).
-
-### 4. Habilitar Auth providers
-
-Authentication → Providers → Email ✓
+*(Recomendamos testar em navegadores que suportam Service Workers e Notificações Push, como Chrome, Edge ou Safari).*
 
 ---
 
-## 🔔 Firebase FCM — Setup
+## 🗄️ Setup do Supabase (Banco de Dados & Backend)
 
-### 1. Criar projeto em [console.firebase.google.com](https://console.firebase.google.com)
+Para o aplicativo funcionar perfeitamente em produção, você precisará configurar as tabelas e rotinas no seu projeto Supabase.
 
-### 2. Registrar Web App e copiar `firebaseConfig`
+### 1. Executar as Migrations
+No painel do seu projeto no Supabase, acesse o **SQL Editor** e execute os arquivos `.sql` presentes na pasta `supabase/migrations/` em ordem, ou cole todo o seu schema caso possua um dump completo unificado.
+Esses arquivos criarão as tabelas de `profiles`, `medicamentos`, `historico_doses`, configuração da extensão `pg_cron`, entre outras tabelas e *Policies (RLS)* vitais para a segurança.
 
-### 3. Gerar VAPID key
+### 2. Deploy da Edge Function (Notificações)
+Para que os lembretes cheguem quando o aplicativo estiver fechado, faça o deploy da função `send-medication-reminders`.
 
-Project Settings → Cloud Messaging → Web Push Certificates → Generate Key Pair
-
-### 4. Fluxo de notificações
-
-```
-Horário programado (buildDoses)
-        ↓
-  sendLocalNotification()    ← via SW (foreground + background)
-        ↓
-  Usuário não responde?
-        ↓
-  +15 min → nova notificação
-        ↓
-  +30 min → nova notificação
-        ↓
-  +60 min → dose marcada como "late"
-        ↓
-  +30 min adicionais → alertCaregiver()
-```
-
----
-
-## 👨‍👩‍👧 Modo Cuidador
-
-O cuidador é convidado pelo paciente (email). Após aceitar:
-- Visualiza medicamentos e histórico (somente leitura)
-- Recebe alertas quando o paciente atrasa > 30 min
-- Dashboard com taxa de adesão e últimas doses
-
----
-
-## 📱 Instalar como PWA (Android)
-
-1. Acesse o app no Chrome
-2. Menu → **"Adicionar à tela inicial"**
-3. O banner de instalação também aparece automaticamente
-
----
-
-## 🧪 Testes
+- Instale o Supabase CLI: `npm install -g supabase`
+- Faça login: `supabase login`
+- Vincule ao seu projeto: `supabase link --project-ref seu-projeto-ref`
+- Implante a função e configure os segredos do servidor:
 
 ```bash
-npm test                  # run all tests
-npm run test:coverage     # com relatório de cobertura
+# Configure as variáveis que a Edge Function precisa para disparar as notificações (Deno Runtime)
+supabase secrets set VAPID_PUBLIC_KEY=sua-chave-publica
+supabase secrets set VAPID_PRIVATE_KEY=sua-chave-privada
+
+# O SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY geralmente são injetados sozinhos ou podem ser definidos manualmente
+supabase secrets set SUPABASE_URL=https://seu-projeto.supabase.co
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key-secreta
+
+# Faça o deploy da função
+supabase functions deploy send-medication-reminders
 ```
 
-Arquivos de teste em `src/__tests__/`:
-- `doseUtils.test.js`     — lógica de doses e status
-- `QuickConfirm.test.jsx` — componente modal de confirmação
-- `AppContext.test.jsx`   — estado global
+### 3. Habilitando a rotina de envio (Cron Job)
+A função do Supabase precisa ser acionada todo minuto para checar pendências. Execute o script contido em `supabase/migrations/003_fcm_cron.sql` (agora adaptado para Web Push) no seu SQL Editor, substituindo a URL do seu projeto. O cron utilizará o `net.http_post` para acionar a função de notificações a cada 60 segundos.
 
 ---
 
-## 🚀 Deploy na Vercel
+## 📱 PWA — Experiência Nativa
 
-### Via CLI
-```bash
-npm i -g vercel
-vercel login
-vercel --prod
-```
-
-### Via GitHub
-1. Push para GitHub
-2. [vercel.com/new](https://vercel.com/new) → importar repo
-3. Adicionar variáveis de ambiente
-4. Deploy automático
-
-### Configurar variáveis na Vercel
-Dashboard → Settings → Environment Variables → colar as do `.env.example`
+O MediCare foi desenhado para ser Instalado:
+1. Acesse o endereço web no seu celular (Android/iOS).
+2. O aplicativo sugerirá **"Adicionar à Tela Inicial"**.
+3. A partir desse momento, ele rodará sem as barras do navegador, abrirá rapidamente utilizando cache local e suportará totalmente as Notificações Push no sistema operacional.
 
 ---
 
-## 🛠️ Scripts
+## 🧪 Testes Unitários
+
+O projeto utiliza o Jest. Para executar a suíte de testes de regras de negócios:
 
 ```bash
-npm run dev      # desenvolvimento (localhost:3000)
-npm run build    # build de produção
-npm run start    # rodar build localmente
-npm run lint     # verificar código
-npm test         # testes
+npm run test
+npm run test:coverage # Gera o relatório de cobertura de testes
 ```
-
----
-
-## ♿ Acessibilidade
-
-- Toque mínimo 44×44px em todos os controles
-- `aria-label` em botões icônicos
-- `role` e `aria-pressed` em toggles
-- `aria-current="page"` na navegação
-- Foco visível com outline azul
-- Navegação por teclado (Tab + Enter + Space)
-- Tamanho de fonte ajustável (Normal / Grande / Maior)
-- Alto contraste (WCAG AA mínimo)
-
----
-
-## 📦 Dependências principais
-
-| Pacote               | Uso                              |
-|----------------------|----------------------------------|
-| next@14              | Framework React SSR/SSG          |
-| react@18             | UI library                       |
-| @supabase/supabase-js| Auth + Database + Storage        |
-| firebase             | Push notifications (FCM)         |
-| date-fns             | Manipulação de datas             |
-
