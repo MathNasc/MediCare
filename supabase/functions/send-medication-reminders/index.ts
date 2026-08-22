@@ -3,32 +3,41 @@ import webpush from 'npm:web-push@3.6.7';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
 const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')!;
 const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!;
 const VAPID_CONTACT_EMAIL = Deno.env.get('VAPID_CONTACT_EMAIL') || 'suporte@medicare-amber-five.vercel.app';
 
-webpush.setVapidDetails(`mailto:${VAPID_CONTACT_EMAIL}`, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+webpush.setVapidDetails(
+  `mailto:${VAPID_CONTACT_EMAIL}`,
+  VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY
+);
 
 Deno.serve(async (_req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE);
   const now = new Date();
 
+  // Busca todos os medicamentos ativos
   const { data: meds } = await supabase
     .from('medicamentos')
     .select('id, nome, dosagem, unidade, quantidade, horarios, dias_semana, treatment_type, start_date, end_date, user_id')
     .eq('ativo', true);
 
+  // Busca todos os eventos pendentes
   const { data: events } = await supabase
     .from('health_events')
     .select('*')
     .eq('completed', false);
 
+  // Busca todas as inscrições de Web Push
   const { data: allSubs } = await supabase.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth, timezone');
 
   if (!allSubs?.length) {
     return new Response(JSON.stringify({ ok: true, sent: 0, reason: 'no_subs' }), { status: 200 });
   }
 
+  // Agrupa as inscrições por user_id
   const subsByUser = new Map<string, any[]>();
   for (const sub of allSubs) {
     const arr = subsByUser.get(sub.user_id) || [];
@@ -40,9 +49,11 @@ Deno.serve(async (_req) => {
   let failed = 0;
   let ignored = 0;
 
+  // 1. Processamento de Medicamentos
   if (meds) {
     for (const med of meds) {
       if (med.treatment_type === 'sos') continue;
+
       const userSubs = subsByUser.get(med.user_id);
       if (!userSubs?.length) continue;
 
@@ -51,19 +62,38 @@ Deno.serve(async (_req) => {
       for (const sub of userSubs) {
         const tz = sub.timezone || 'America/Sao_Paulo';
         let nowLocal;
+        let startOfDayUTC;
+        let endOfDayUTC;
+
         try {
+          // Formata a data atual (now) para o timezone do usuário
           const formatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
           const parts = formatter.formatToParts(now);
           const map: any = {};
           parts.forEach(p => map[p.type] = p.value);
-          nowLocal = new Date(`${map.year}-${map.month}-${map.day}T${map.hour === '24' ? '00' : map.hour}:${map.minute}:${map.second}`);
+          
+          nowLocal = new Date(`${map.year}-${map.month}-${map.day}T${map.hour === '24' ? '00' : map.hour}:${map.minute}:${map.second}Z`);
+          
+          const offsetMs = now.getTime() - nowLocal.getTime();
+          
+          const startOfDayFakeUTC = new Date(nowLocal);
+          startOfDayFakeUTC.setUTCHours(0,0,0,0);
+          startOfDayUTC = new Date(startOfDayFakeUTC.getTime() + offsetMs).toISOString();
+          
+          const endOfDayFakeUTC = new Date(nowLocal);
+          endOfDayFakeUTC.setUTCHours(23,59,59,999);
+          endOfDayUTC = new Date(endOfDayFakeUTC.getTime() + offsetMs).toISOString();
+
         } catch (e) {
           nowLocal = now; 
+          startOfDayUTC = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate(), 0, 0, 0, 0).toISOString();
+          endOfDayUTC = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate(), 23, 59, 59, 999).toISOString();
         }
         
-        const todayISO = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
-        const dayOfWeek = nowLocal.getDay() === 0 ? 7 : nowLocal.getDay(); 
+        const todayISO = `${nowLocal.getUTCFullYear()}-${String(nowLocal.getUTCMonth()+1).padStart(2, '0')}-${String(nowLocal.getUTCDate()).padStart(2, '0')}`;
+        const dayOfWeek = nowLocal.getUTCDay() === 0 ? 7 : nowLocal.getUTCDay();
 
+        // 1.A. Verificação de Estoque Baixo
         if (med.quantidade != null && med.quantidade <= 5) {
           const { data: existingStockNotif } = await supabase
             .from('audit_logs')
@@ -98,16 +128,18 @@ Deno.serve(async (_req) => {
         }
 
         if (horarios.length === 0) continue;
+
         if (med.treatment_type === 'temporary') {
           if (med.start_date && todayISO < med.start_date) continue;
           if (med.end_date && todayISO > med.end_date) continue;
         }
+
         if (med.dias_semana && med.dias_semana.length > 0 && !med.dias_semana.includes(dayOfWeek)) continue;
 
         for (const hora of horarios) {
           const [h, m] = hora.split(':').map(Number);
           const doseTime = new Date(nowLocal);
-          doseTime.setHours(h, m, 0, 0);
+          doseTime.setUTCHours(h, m, 0, 0);
           
           const diffMin = Math.floor((nowLocal.getTime() - doseTime.getTime()) / 60000);
           
@@ -118,13 +150,14 @@ Deno.serve(async (_req) => {
 
           if (!targetType) continue;
           
+          // Verifica se já tomou a dose hoje usando as boundaries corretas para o fuso do usuário
           const { data: hist } = await supabase
             .from('historico_doses')
             .select('id, status')
             .eq('med_id', med.id)
             .eq('hora', hora)
-            .gte('created_at', `${todayISO}T00:00:00Z`)
-            .lte('created_at', `${todayISO}T23:59:59Z`)
+            .gte('created_at', startOfDayUTC)
+            .lte('created_at', endOfDayUTC)
             .limit(1);
 
           if (hist && hist.length > 0 && hist[0].status === 'confirmed') {
@@ -132,6 +165,7 @@ Deno.serve(async (_req) => {
              continue;
           }
 
+          // Verifica se JÁ ENVIOU este alerta hoje
           const { data: existingLog } = await supabase
             .from('notification_logs')
             .select('id')
@@ -148,6 +182,7 @@ Deno.serve(async (_req) => {
 
           let title = `💊 ${med.nome}`;
           let body = `${med.dosagem} · Horário: ${hora}`;
+
           if (targetType === 'REMINDER_1') {
               title = `⚠️ Lembrete de Dose: ${med.nome}`;
               body = `Você esqueceu? Dose agendada para ${hora}.`;
@@ -187,9 +222,11 @@ Deno.serve(async (_req) => {
     }
   }
 
+  // 2. Processamento de Eventos Médicos
   if (events) {
     for (const ev of events) {
       if (!ev.date || !ev.time) continue;
+
       const userSubs = subsByUser.get(ev.user_id);
       if (!userSubs?.length) continue;
 
@@ -201,21 +238,22 @@ Deno.serve(async (_req) => {
           const parts = formatter.formatToParts(now);
           const map: any = {};
           parts.forEach(p => map[p.type] = p.value);
-          nowLocal = new Date(`${map.year}-${map.month}-${map.day}T${map.hour === '24' ? '00' : map.hour}:${map.minute}:${map.second}`);
+          nowLocal = new Date(`${map.year}-${map.month}-${map.day}T${map.hour === '24' ? '00' : map.hour}:${map.minute}:${map.second}Z`);
         } catch (e) {
           nowLocal = now;
         }
 
         const [eh, em] = ev.time.split(':').map(Number);
         const [ey, eM, ed] = ev.date.split('-').map(Number);
-        const eventDateLocal = new Date(ey, eM - 1, ed, eh, em, 0);
-
+        
+        const eventDateLocal = new Date(Date.UTC(ey, eM - 1, ed, eh, em, 0));
+        
         const diffMin = Math.floor((eventDateLocal.getTime() - nowLocal.getTime()) / 60000);
         
         let targetType = null;
-        if (diffMin >= 1438 && diffMin <= 1442) targetType = 'EVENT_1D'; // 24h
-        else if (diffMin >= 298 && diffMin <= 302) targetType = 'EVENT_5H'; // 5h
-        else if (diffMin >= 58 && diffMin <= 62) targetType = 'EVENT_1H'; // 1h
+        if (diffMin >= 1438 && diffMin <= 1442) targetType = 'EVENT_1D'; // ~24h
+        else if (diffMin >= 298 && diffMin <= 302) targetType = 'EVENT_5H'; // ~5h
+        else if (diffMin >= 58 && diffMin <= 62) targetType = 'EVENT_1H'; // ~1h
 
         if (!targetType) continue;
 
