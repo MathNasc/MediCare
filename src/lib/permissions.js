@@ -11,7 +11,7 @@ export const ROLES = {
     label: 'Paciente',
     icon: '🧑',
     color: '#3b82f6',
-    description: 'Registra seus próprios medicamentos e confirma doses. Não pode alterar confirmações após 24h nem editar registros feitos por cuidadores.',
+    description: 'Registra seus próprios medicamentos e confirma doses. Não pode alterar registros retroativamente para garantir a segurança dos dados.',
   },
   cuidador: {
     code: 'cuidador',
@@ -33,7 +33,7 @@ export const ROLES = {
 export const ROLE_PERMISSIONS = {
   paciente: [
     'meds.create', 'meds.edit_own',
-    'dose.confirm', 'dose.edit_own_24h',
+    'dose.confirm',
     'history.view', 'calendar.view', 'stats.view',
     'caregiver.share', 'notes.add_own',
   ],
@@ -67,8 +67,7 @@ export function canEditDoseAsSelf(role, doseDateTime, performedBy, userId) {
   if (performedBy && performedBy !== userId) return false; // feito por cuidador
   if (role === 'independente') return true;
   if (role === 'paciente') {
-    const hoursElapsed = (Date.now() - new Date(doseDateTime).getTime()) / 36e5;
-    return hoursElapsed <= 24;
+    return false; // Paciente não pode fazer marcações retroativas
   }
   return false;
 }

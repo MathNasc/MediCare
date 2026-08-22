@@ -156,9 +156,7 @@ function DayPanel({
     if (hist?.performed_by && hist.performed_by !== user.id) return false;
     if (role === 'independente') return true;
     if (role === 'paciente') {
-      const doseDateTime = new Date(`${dateStr}T${hora}:00`);
-      const hoursElapsed = (Date.now() - doseDateTime.getTime()) / 36e5;
-      return hoursElapsed <= 24;
+      return false;
     }
     return false;
   };

@@ -47,6 +47,10 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
   };
 
   const handleSaveRole = async (role) => {
+    if (role === 'paciente') {
+      const ok = window.confirm("Atenção: Você está prestes a se tornar Paciente. Este perfil não pode ser alterado sem a permissão (PIN) de um Cuidador. Tem certeza que deseja continuar?");
+      if (!ok) return;
+    }
     setLoading(true);
     await updateRole(role);
     setLoading(false);

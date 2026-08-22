@@ -295,6 +295,11 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
   };
 
   const handleUpdate = async (newRole) => {
+    if (newRole === 'paciente' && user.role !== 'paciente') {
+      const ok = window.confirm("Atenção: Você está prestes a se tornar Paciente. Este perfil não pode ser alterado sem a permissão (PIN) de um Cuidador. Tem certeza que deseja continuar?");
+      if (!ok) return;
+    }
+
     if (user.role === 'paciente') {
       if (!pin.trim()) return setError('Digite o PIN de liberação.');
       // TODO: REMOVER FUTURAMENTE - Senha mestre temporária 999999 adicionada para testes
