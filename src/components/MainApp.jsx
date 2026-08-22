@@ -24,6 +24,7 @@ import { QuickConfirm   } from '@/components/modals/QuickConfirm';
 import { MedModal       } from '@/components/modals/MedModal';
 import { MedDetail      } from '@/components/modals/MedDetail';
 import { ErrorBoundary  } from '@/components/ErrorBoundary';
+import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard';
 
 
 // ─── PWA installer hook ───────────────────────────────────────────────────────
@@ -195,6 +196,20 @@ function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
 // ─── Inner app ────────────────────────────────────────────────────────────────
 function InnerApp() {
   const { user, loading, login, doses, meds, history, confirmDose, saveMed } = useApp();
+  
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  useEffect(() => {
+    if (user?.id && user.role !== 'caregiver') {
+      import('@/lib/profileDb').then(m => m.ProfileDB.getProfile(user.id)).then(p => {
+        setProfile(p);
+        setProfileLoading(false);
+      });
+    } else {
+      setProfileLoading(false);
+    }
+  }, [user]);
   const { dark, toggle, T } = useTheme();
   const { size: fsSize, set: setFs, scale } = useFontScale();
   const { list: toasts, show: toast } = useToast();
@@ -262,7 +277,7 @@ function InnerApp() {
 
   const bannerHeight = !isStandalone ? 56 : 0;
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <div style={{ minHeight: '100vh', background: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
