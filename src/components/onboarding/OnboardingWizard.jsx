@@ -89,16 +89,6 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
   const inp = { width: '100%', padding: '14px', borderRadius: 12, border: `1.5px solid ${T.bdr}`, background: T.bg1, color: T.txt, fontSize: 15 * scale, outline: 'none' };
   const lbl = { display: 'block', color: T.sub, fontSize: 12 * scale, fontWeight: 700, textTransform: 'uppercase', marginBottom: 6, marginTop: 16 };
 
-  const StepWrapper = ({ title, subtitle, children }) => (
-    <div className="anim-fadeUp" style={{ padding: '40px 20px', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1 }}>
-        <p style={{ color: C.blue, fontWeight: 800, fontSize: 14 * scale, marginBottom: 8 }}>PASSO {step} DE 4</p>
-        <h1 style={{ color: T.txt, fontWeight: 900, fontSize: 26 * scale, marginBottom: 12, lineHeight: 1.2 }}>{title}</h1>
-        <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 30, lineHeight: 1.5 }}>{subtitle}</p>
-        {children}
-      </div>
-    </div>
-  );
 
   return (
     <div style={{ background: T.bg0, minHeight: '100vh', position: 'fixed', inset: 0, zIndex: 300, overflowY: 'auto' }}>

@@ -334,6 +334,8 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
     { id: 'notes',    label: 'Notas',     icon: '📝' },
   ];
 
+
+
   return (
     <div className="anim-fadeUp">
       <div style={{ marginBottom: 16 }}>
@@ -355,6 +357,18 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
               {p.patient?.nome || 'Paciente'}
             </button>
           ))}
+        </div>
+      )}
+
+      {swapPin && (
+        <div style={{ background: T.bg2, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <p style={{ color: T.txt, fontSize: 13 * scale, fontWeight: 700 }}>PIN de Liberação</p>
+            <p style={{ color: T.sub, fontSize: 11 * scale }}>Para o paciente alterar o próprio perfil</p>
+          </div>
+          <div style={{ background: '#3b82f6', color: '#fff', padding: '6px 12px', borderRadius: 8, fontSize: 16 * scale, fontWeight: 900, letterSpacing: '2px' }}>
+            {swapPin}
+          </div>
         </div>
       )}
 

@@ -131,6 +131,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
             <NavItem icon="👨‍👩‍👧" title="Contatos" subtitle="Emergência e familiares..." onClick={() => setActiveView('contacts')} />
             <NavItem icon="🤝" title="Cuidadores" subtitle="Quem acompanha seu tratamento..." onClick={() => setActiveView('caregivers')} />
             <NavItem icon="📦" title="Estoque" subtitle="Histórico e previsões..." onClick={() => setActiveView('stock')} />
+            <NavItem icon="🔄" title="Mudar Perfil" subtitle="Alterar tipo de conta..." onClick={() => setActiveView('role_swap')} />
             <NavItem icon="🔐" title="Privacidade" subtitle="Controle dos seus dados..." onClick={() => setActiveView('privacy')} />
             <NavItem icon="⚙️" title="Preferências" subtitle="Acessibilidade e notificações..." onClick={() => setActiveView('prefs')} />
           </div>
@@ -178,6 +179,10 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
             </div>
           )}
         </FullSubScreen>
+      )}
+
+      {activeView === 'role_swap' && (
+        <RoleSwapView user={user} T={T} scale={scale} setActiveView={setActiveView} logout={logout} />
       )}
 
       {activeView === 'privacy' && (
@@ -256,5 +261,104 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
         </FullSubScreen>
       )}
     </div>
+  );
+}
+
+
+function RoleSwapView({ user, T, scale, setActiveView, logout }) {
+  const { updateRole } = useApp();
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [caregivers, setCaregivers] = useState([]);
+
+  useEffect(() => {
+    if (user?.role === 'paciente') {
+      import('@/lib/supabaseCaregiver').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
+    }
+  }, [user]);
+
+  const verifyPin = () => {
+    for (const c of caregivers) {
+      if (c.status === 'active') {
+        const str = user.id + c.caregiver_id + "role_swap_secret_v1";
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+          hash = ((hash << 5) - hash) + str.charCodeAt(i);
+          hash |= 0;
+        }
+        const expected = String(Math.abs(hash % 900000) + 100000);
+        if (expected === pin.trim()) return true;
+      }
+    }
+    return false;
+  };
+
+  const handleUpdate = async (newRole) => {
+    if (user.role === 'paciente') {
+      if (!pin.trim()) return setError('Digite o PIN de liberação.');
+      if (!caregivers.length) return setError('Você não tem cuidadores ativos para gerar um PIN.');
+      if (!verifyPin()) return setError('PIN incorreto ou inválido.');
+    }
+    setLoading(true);
+    setError('');
+    const ok = await updateRole(newRole);
+    if (!ok) setError('Erro ao atualizar perfil.');
+    setLoading(false);
+    if (ok) {
+      setActiveView('main');
+    }
+  };
+
+  return (
+    <FullSubScreen bg={T.bg}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
+        <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
+        <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Mudar Perfil</p>
+      </div>
+
+      <div style={{ background: T.bg1, padding: 20, borderRadius: 20, border: `1px solid ${T.bdr}` }}>
+        <p style={{ color: T.txt, fontSize: 16 * scale, fontWeight: 700, marginBottom: 10 }}>Seu perfil atual: <span style={{ color: '#3b82f6' }}>{user?.role.toUpperCase()}</span></p>
+        
+        {user?.role === 'paciente' ? (
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ color: T.sub, fontSize: 14 * scale, lineHeight: 1.5, marginBottom: 16 }}>
+              Como paciente, você precisa de um <strong>PIN de liberação</strong> gerado pelo seu cuidador no painel dele para alterar o seu perfil.
+            </p>
+            <input 
+              type="text" 
+              placeholder="Digite o PIN de 6 dígitos" 
+              value={pin}
+              onChange={e => setPin(e.target.value)}
+              style={{ width: '100%', padding: '14px', borderRadius: 12, border: `1.5px solid ${T.bdr}`, background: T.bg2, color: T.txt, fontSize: 16 * scale, outline: 'none', textAlign: 'center', letterSpacing: '4px', fontWeight: 800, marginBottom: 10 }}
+            />
+          </div>
+        ) : (
+          <p style={{ color: T.sub, fontSize: 14 * scale, lineHeight: 1.5, marginBottom: 20 }}>
+            Você pode alterar o seu tipo de conta livremente.
+          </p>
+        )}
+
+        {error && <p style={{ color: '#ef4444', fontSize: 13 * scale, fontWeight: 700, marginBottom: 16 }}>{error}</p>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {user?.role !== 'independente' && (
+            <button onClick={() => handleUpdate('independente')} disabled={loading} style={{ width: '100%', padding: 16, borderRadius: 12, background: T.bg2, border: `1px solid ${T.bdr}`, color: T.txt, fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>
+              ⚙️ Tornar-se <strong>Independente</strong>
+            </button>
+          )}
+          {user?.role !== 'cuidador' && (
+            <button onClick={() => handleUpdate('cuidador')} disabled={loading} style={{ width: '100%', padding: 16, borderRadius: 12, background: T.bg2, border: `1px solid ${T.bdr}`, color: T.txt, fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>
+              🤝 Tornar-se <strong>Cuidador</strong>
+            </button>
+          )}
+          {user?.role !== 'paciente' && (
+            <button onClick={() => handleUpdate('paciente')} disabled={loading} style={{ width: '100%', padding: 16, borderRadius: 12, background: T.bg2, border: `1px solid ${T.bdr}`, color: T.txt, fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}>
+              🧑 Tornar-se <strong>Paciente</strong>
+            </button>
+          )}
+        </div>
+      </div>
+    </FullSubScreen>
   );
 }
