@@ -387,7 +387,7 @@ function InnerApp() {
         role="main"
         style={{
           maxWidth: 480, margin: '0 auto',
-          padding: `${22 + bannerHeight}px 16px 96px`,
+          padding: `calc(${22 + bannerHeight}px + env(safe-area-inset-top, 0px)) 16px 96px`,
           minHeight: '100vh',
         }}
       >

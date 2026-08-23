@@ -1,6 +1,9 @@
 'use client';
+import { useNotifications } from '@/hooks/useNotifications';
+
 import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
 import { getRoleMeta } from '@/lib/permissions';
@@ -19,16 +22,20 @@ import { EmergencyCard } from '@/screens/profile/EmergencyCard';
 
 // ─── Sub-screen wrapper ──────────────────────────────────────────────────────────────
 function FullSubScreen({ children, bg }) {
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  
+  return createPortal(
     <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: bg, zIndex: 200, overflowY: 'auto' }}>
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '0 16px 96px' }}>
+      <div style={{ maxWidth: 480, margin: '0 auto', padding: 'calc(env(safe-area-inset-top, 0px) + 22px) 16px 96px' }}>
         {children}
       </div>
-    </div>
+    </div>,
+    document.getElementById('root') || document.body
   );
 }
 
-import { useNotifications } from '@/hooks/useNotifications';
 export function ProfileScreen({ T, scale, setFs, fsSize }) {
   const { user, logout, meds } = useApp();
   const [permission, setPermission] = useState('default');
@@ -162,29 +169,29 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
 
       {/* ─── SUB-TELAS ─── */}
       {activeView === 'personal' && (
-        <FullSubScreen bg={T.bg}><PersonalData user={user} profile={profile} onUpdate={setProfile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+        <FullSubScreen bg={T.bg0}><PersonalData user={user} profile={profile} onUpdate={setProfile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
       )}
       {activeView === 'config_card' && (
-        <FullSubScreen bg={T.bg}><EmergencyCardConfig user={user} profile={profile} onUpdate={setProfile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+        <FullSubScreen bg={T.bg0}><EmergencyCardConfig user={user} profile={profile} onUpdate={setProfile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
       )}
       {activeView === 'show_card' && (
-        <FullSubScreen bg={T.bg}><EmergencyCard user={user} profile={profile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+        <FullSubScreen bg={T.bg0}><EmergencyCard user={user} profile={profile} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
       )}
       {activeView === 'health' && (
-        <FullSubScreen bg={T.bg}><HealthSection user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+        <FullSubScreen bg={T.bg0}><HealthSection user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
       )}
       {activeView === 'contacts' && (
-        <FullSubScreen bg={T.bg}><EmergencyContacts user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+        <FullSubScreen bg={T.bg0}><EmergencyContacts user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
       )}
       {activeView === 'profs' && (
-        <FullSubScreen bg={T.bg}><HealthcareProfessionals user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+        <FullSubScreen bg={T.bg0}><HealthcareProfessionals user={user} onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
       )}
       {activeView === 'meds' && (
-        <FullSubScreen bg={T.bg}><ImportantMedsConfig onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
+        <FullSubScreen bg={T.bg0}><ImportantMedsConfig onBack={() => setActiveView('main')} T={T} scale={scale} /></FullSubScreen>
       )}
       
       {activeView === 'caregivers' && (
-        <FullSubScreen bg={T.bg}>
+        <FullSubScreen bg={T.bg0}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
             <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Cuidadores</p>
@@ -204,7 +211,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
       )}
 
       {activeView === 'privacy' && (
-        <FullSubScreen bg={T.bg}>
+        <FullSubScreen bg={T.bg0}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
             <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Privacidade</p>
@@ -219,7 +226,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
       )}
 
       {activeView === 'prefs' && (
-        <FullSubScreen bg={T.bg}>
+        <FullSubScreen bg={T.bg0}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
             <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Preferências</p>
@@ -264,7 +271,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
       )}
 
       {activeView === 'caregiver_dash' && (
-        <FullSubScreen bg={T.bg}>
+        <FullSubScreen bg={T.bg0}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
             <button onClick={() => setActiveView('caregivers')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Painel do Cuidador</p>
@@ -274,7 +281,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
       )}
 
       {activeView === 'stock' && (
-        <FullSubScreen bg={T.bg}>
+        <FullSubScreen bg={T.bg0}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
             <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Estoque de Medicamentos</p>
@@ -349,7 +356,7 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
   };
 
   return (
-    <FullSubScreen bg={T.bg}>
+    <FullSubScreen bg={T.bg0}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 56, paddingBottom: 20 }}>
         <button onClick={() => setActiveView('main')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
         <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Mudar Perfil</p>
