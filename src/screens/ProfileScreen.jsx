@@ -39,6 +39,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
   const [activeView, setActiveView] = useState('main'); // main, personal, config_card, show_card, health, meds, profs, contacts, caregivers, privacy
   
   const fileInputRef = useRef(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [disablePushRequest, setDisablePushRequest] = useState(false);
   const handleDisablePush = async () => {
     if (user?.role === 'paciente') {
@@ -417,11 +418,13 @@ function DisablePushModal({ user, onClose, onConfirm, T, scale }) {
   const notified = useRef(false);
 
   useEffect(() => {
-    import('@/lib/supabaseCaregiver').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
-  }, [user.id]);
+    if (user?.id) {
+      import('@/lib/supabaseCaregiver').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
-     if (caregivers.length > 0 && !notified.current) {
+     if (caregivers.length > 0 && !notified.current && user?.id) {
         notified.current = true;
         import('@/lib/supabaseCaregiver').then(m => {
            caregivers.forEach(c => {
@@ -431,7 +434,7 @@ function DisablePushModal({ user, onClose, onConfirm, T, scale }) {
            });
         });
      }
-  }, [caregivers, user.id]);
+  }, [caregivers, user?.id]);
 
   const verifyPin = () => {
     if (pin.trim() === '999999') return true; // fallback master
