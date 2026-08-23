@@ -308,7 +308,7 @@ function InnerApp() {
 
   const handleUndoDoseAction = useCallback((dose) => {
     undoDose(dose, toast);
-    setUndoWarning(null);
+    window.history.back();
   }, [undoDose, toast]);
 
   const handleSnooze = useCallback((dose) => {

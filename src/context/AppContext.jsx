@@ -182,7 +182,8 @@ export function AppProvider({ children }) {
   }, [state.user, state.meds, loadAll]);
 
   const undoDose = useCallback(async (dose, toastFn) => {
-    if (!dose.hist_id) return { success: false, error: 'Histórico não encontrado' };
+    const idsToDelete = dose.hist_ids && dose.hist_ids.length > 0 ? dose.hist_ids : (dose.hist_id ? [dose.hist_id] : []);
+    if (idsToDelete.length === 0) return { success: false, error: 'Histórico não encontrado' };
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       if (toastFn) toastFn('Sem conexão. Ação cancelada.', 'error');
       else alert('Sem conexão. Ação cancelada.');
@@ -190,7 +191,9 @@ export function AppProvider({ children }) {
     }
 
     try {
-      await HistDB.delete(dose.hist_id);
+      for (const id of idsToDelete) {
+        await HistDB.delete(id);
+      }
 
       const med = state.meds.find((m) => m.id === dose.med_id);
       if (med) {

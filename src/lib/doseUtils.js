@@ -58,13 +58,14 @@ export function buildDoses(medList, history) {
         : ['08:00'];
 
       horarios.forEach((hora) => {
-        const done = history.find(
+        const dones = history.filter(
           (h) =>
             h.med_id === m.id &&
             h.hora === hora &&
             new Date(h.created_at).toDateString() === today &&
             h.status === 'confirmed'
         );
+        const done = dones.length > 0 ? dones[0] : null;
         result.push({
           id:              `${m.id}-${hora.replace(':', '')}`,
           med_id:          m.id,
@@ -76,7 +77,8 @@ export function buildDoses(medList, history) {
           hora,
           status:  getDoseStatus(hora, !!done),
           hist_id: done ? done.id : null,
-          quantidade_usada: done ? (done.quantidade_usada || 1) : null
+          hist_ids: dones.map(d => d.id),
+          quantidade_usada: dones.reduce((sum, d) => sum + (d.quantidade_usada || 1), 0)
         });
       });
     });
