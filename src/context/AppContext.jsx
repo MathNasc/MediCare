@@ -112,8 +112,9 @@ export function AppProvider({ children }) {
   // evento de calendário — apenas reduz a quantidade normalmente.
   const confirmDose = useCallback(async (dose, toastFn) => {
     const flightKey = `${dose.med_id}-${dose.hora}`;
-    if (inFlightDoses.has(flightKey)) return { success: false, error: 'Em andamento' };
-    if (dose.status === 'confirmed') return { success: false, error: 'Dose já confirmada' };
+    console.log('confirmDose starts', dose, flightKey);
+    if (inFlightDoses.has(flightKey)) { console.warn('In flight'); return { success: false, error: 'Em andamento' }; }
+    if (dose.status === 'confirmed') { console.warn('Already confirmed'); return { success: false, error: 'Dose já confirmada' }; }
     inFlightDoses.add(flightKey);
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -173,6 +174,7 @@ export function AppProvider({ children }) {
       if (toastFn) toastFn(`✓ ${dose.nome} confirmada!`, 'ok');
       await loadAll(state.user.id);
     } catch (err) {
+      console.error('confirmDose error', err);
       if (toastFn) toastFn(err.message || 'Erro ao confirmar dose', 'err');
     } finally {
       inFlightDoses.delete(flightKey);

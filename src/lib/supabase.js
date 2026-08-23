@@ -115,8 +115,8 @@ export const SupaHist = {
     // IDEMPOTENCY GUARD
     if (row.hora && row.med_id && row.created_at) {
        const d = new Date(row.created_at);
-       const start = new Date(d); start.setUTCHours(0,0,0,0);
-       const end = new Date(d); end.setUTCHours(23,59,59,999);
+       const start = new Date(d); start.setHours(0,0,0,0);
+       const end = new Date(d); end.setHours(23,59,59,999);
        const { data: existing } = await supabase.from('historico_doses')
          .select('*')
          .eq('user_id', row.user_id)

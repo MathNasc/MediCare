@@ -428,10 +428,18 @@ function InnerApp() {
           dose={timeWarning.dose}
           type={timeWarning.type}
           diffMin={timeWarning.diffMin}
-          onConfirm={() => {
-            if (timeWarning.type === 'confirm') handleConfirmDose(timeWarning.dose);
-            if (timeWarning.type === 'snooze') handleSnooze(timeWarning.dose);
-            setTimeWarning(null);
+          onConfirm={async () => {
+            try {
+              if (timeWarning.type === 'confirm') {
+                 handleConfirmDose(timeWarning.dose);
+              }
+              if (timeWarning.type === 'snooze') {
+                 handleSnooze(timeWarning.dose);
+              }
+              setTimeWarning(null);
+            } catch(e) {
+              toast("Erro interno modal: " + e.message, 'err');
+            }
           }}
           onClose={() => setTimeWarning(null)}
           T={T}
