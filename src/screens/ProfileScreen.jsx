@@ -36,7 +36,7 @@ function FullSubScreen({ children, bg }) {
   );
 }
 
-export function ProfileScreen({ T, scale, setFs, fsSize }) {
+export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle }) {
   const { user, logout, meds } = useApp();
   const [permission, setPermission] = useState('default');
   const { setup, disable, isSubscribed } = useNotifications(meds, user?.id);
@@ -232,6 +232,18 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Preferências</p>
           </div>
           <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, overflow: 'hidden', marginBottom: 20 }}>
+            <div style={{ padding: '16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 24 }}>{dark ? '🌙' : '☀️'}</span>
+                <div>
+                  <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>Tema {dark ? 'Escuro' : 'Claro'}</p>
+                  <p style={{ color: T.muted, fontSize: 13 * scale }}>Toque para alternar o modo visual</p>
+                </div>
+              </div>
+              <button onClick={toggle} style={{ background: T.bg2, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: '10px 14px', color: T.txt, fontWeight: 700, fontSize: 13 * scale }}>
+                Alternar
+              </button>
+            </div>
             <div style={{ padding: '16px', borderBottom: `1px solid ${T.bdr}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                 <span style={{ fontSize: 24 }}>🔤</span>

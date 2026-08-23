@@ -5,7 +5,7 @@ import { NextDoseHero, DayProgress, Timeline } from '@/components/Dashboard';
 import { C } from '@/lib/theme';
 import { greet } from '@/lib/doseUtils';
 
-export function HomeScreen({ T, scale, onQuickConfirm, toggle, dark }) {
+export function HomeScreen({ T, scale, onQuickConfirm, onSnooze }) {
   const { user, doses, meds } = useApp();
 
   const nextDose = useMemo(() => {
@@ -28,13 +28,7 @@ export function HomeScreen({ T, scale, onQuickConfirm, toggle, dark }) {
             {greet(user?.nome)} 👋
           </h1>
         </div>
-        <button
-          onClick={toggle}
-          aria-label={dark ? 'Ativar modo claro' : 'Ativar modo escuro'}
-          style={{ width: 44, height: 44, borderRadius: 13, background: T.bg1, border: `1px solid ${T.bdr}`, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          {dark ? '☀️' : '🌙'}
-        </button>
+        
       </div>
 
       {/* Critical stock alert */}
@@ -51,7 +45,7 @@ export function HomeScreen({ T, scale, onQuickConfirm, toggle, dark }) {
       )}
 
       {/* Next dose hero */}
-      {nextDose && <NextDoseHero dose={nextDose} onConfirm={onQuickConfirm} T={T} scale={scale} />}
+      {nextDose && <NextDoseHero dose={nextDose} onConfirm={onQuickConfirm} onSnooze={onSnooze} T={T} scale={scale} />}
 
       {/* Progress */}
       <DayProgress doses={doses} T={T} scale={scale} />

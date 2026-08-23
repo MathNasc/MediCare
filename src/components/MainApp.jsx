@@ -22,7 +22,7 @@ import { StatsScreen    } from '@/screens/StatsScreen';
 import { AIScreen       } from '@/screens/AIScreen';
 import { ProfileScreen  } from '@/screens/ProfileScreen';
 
-import { QuickConfirm   } from '@/components/modals/QuickConfirm';
+import { TimeWarningModal } from '@/components/modals/TimeWarningModal';
 import { MedModal       } from '@/components/modals/MedModal';
 import { MedDetail      } from '@/components/modals/MedDetail';
 import { ErrorBoundary  } from '@/components/ErrorBoundary';
@@ -245,7 +245,7 @@ function InnerApp() {
 
 
   const [tab,       setTab]       = useState('home');
-  const [quickDose, setQuickDose] = useState(null);
+  const [timeWarning, setTimeWarning] = useState(null);
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -273,7 +273,7 @@ function InnerApp() {
       const hora   = params.get('hora');
       const doseId = params.get('doseId');
       const dose   = doses.find((d) => d.hora === hora || d.id === doseId);
-      if (dose && dose.status !== 'confirmed') setQuickDose(dose);
+      if (dose && dose.status !== 'confirmed') handleDoseAction(dose, action === 'snooze' ? 'snooze' : 'confirm');
     }
     if (action || tabParam) window.history.replaceState({}, '', '/');
   }, [doses, loading, syncing]);
@@ -290,7 +290,7 @@ function InnerApp() {
       window.history.pushState({}, '', '/');
     }
   });
-  useBackButton(quickDose !== null, () => setQuickDose(null));
+  useBackButton(timeWarning !== null, () => setTimeWarning(null));
 
   useNotifications(doses, user?.id);
 
@@ -393,7 +393,7 @@ function InnerApp() {
       >
         <ErrorBoundary T={T} scale={scale} onReset={() => setTab('home')}>
           <Suspense fallback={<ScreenLoader />}>
-            {tab === 'home'     && <HomeScreen     {...screenProps} onQuickConfirm={setQuickDose} toggle={toggle} dark={dark} />}
+            {tab === 'home'     && <HomeScreen     {...screenProps} onQuickConfirm={(dose) => handleDoseAction(dose, 'confirm')} onSnooze={(dose) => handleDoseAction(dose, 'snooze')} toggle={toggle} dark={dark} />}
             {tab === 'meds'     && <MedsScreen     {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
             {tab === 'calendar' && <CalendarScreen {...screenProps} />}
             {tab === 'stats'    && <StatsScreen    {...screenProps} />}
@@ -405,7 +405,21 @@ function InnerApp() {
 
       <BottomNav tab={tab} setTab={setTab} T={T} pendingCount={pendingCount} criticalCount={criticalCount} />
 
-      {quickDose && <QuickConfirm dose={quickDose} onConfirm={handleConfirmDose} onSnooze={handleSnooze} onClose={() => setQuickDose(null)} T={T} />}
+      {timeWarning && (
+        <TimeWarningModal
+          dose={timeWarning.dose}
+          type={timeWarning.type}
+          diffMin={timeWarning.diffMin}
+          onConfirm={() => {
+            if (timeWarning.type === 'confirm') handleConfirmDose(timeWarning.dose);
+            if (timeWarning.type === 'snooze') handleSnooze(timeWarning.dose);
+            setTimeWarning(null);
+          }}
+          onClose={() => setTimeWarning(null)}
+          T={T}
+          scale={scale}
+        />
+      )}
       {/* NOVO: prop `toast` adicionada — permite ao MedModal avisar o usuário
           caso a movimentação de estoque falhe ao salvar (ver correção de bug). */}
       {showAdd   && <MedModal med={editMed} onSave={handleSaveMed} onClose={() => { setShowAdd(false); setEditMed(null); }} T={T} scale={scale} userId={user?.id} toast={toast} />}
