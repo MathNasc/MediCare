@@ -1,4 +1,3 @@
-import { createPortal } from 'react-dom';
 import { C } from '@/lib/theme';
 
 export function TimeWarningModal({ dose, type, diffMin, onConfirm, onClose, T, scale = 1 }) {
@@ -18,7 +17,7 @@ export function TimeWarningModal({ dose, type, diffMin, onConfirm, onClose, T, s
 
   const confirmText = type === 'confirm' ? '✓ Sim, já tomei' : '⏰ Sim, adiar';
 
-  return createPortal(
+  return (
     <div
       onClick={onClose}
       role="dialog" aria-modal="true"
@@ -80,7 +79,6 @@ export function TimeWarningModal({ dose, type, diffMin, onConfirm, onClose, T, s
           Cancelar
         </button>
       </div>
-    </div>,
-    document.getElementById('root') || document.body
+    </div>
   );
 }

@@ -34,7 +34,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   let data = {};
-  try { data = event.data.json(); } catch { data = { title: '💊 MediCare', body: event.data.text() }; }
+  try { data = event.data.json(); } catch { data = { title: 'MediCare', body: event.data.text() }; }
   
   const tag = data.tag || `med-${Date.now()}`;
   const isDose = tag.startsWith('dose-');
@@ -56,7 +56,7 @@ self.addEventListener('push', (event) => {
   }
   
   event.waitUntil(
-    self.registration.showNotification(data.title || '💊 MediCare', options)
+    self.registration.showNotification(data.title || 'MediCare', options)
   );
 });
 

@@ -302,6 +302,24 @@ function InnerApp() {
     toast(`⏰ Lembrete de ${dose.nome} em 15 minutos`, 'info');
   }, [toast]);
 
+  const handleDoseAction = useCallback((dose, type) => {
+    try {
+      const [h, m] = dose.hora.split(':').map(Number);
+      const scheduledTime = new Date();
+      scheduledTime.setHours(h, m, 0, 0);
+      const diffMin = Math.round((scheduledTime - new Date()) / 60000);
+      
+      if (Math.abs(diffMin) > 60) {
+        setTimeWarning({ dose, type, diffMin });
+      } else {
+        if (type === 'confirm') handleConfirmDose(dose);
+        if (type === 'snooze') handleSnooze(dose);
+      }
+    } catch(e) {
+      toast('Erro: ' + e.message, 'err');
+    }
+  }, [handleConfirmDose, handleSnooze, toast]);
+
   const handleSaveMed = useCallback(async (form, horarios, dias) => {
     if (!form.nome.trim()) { toast('Informe o nome do medicamento', 'err'); return; }
     try {
