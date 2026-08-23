@@ -121,4 +121,9 @@ export const HistDB = {
     if (!isSupabaseEnabled) throw new Error('Seus dados não foram salvos na nuvem. Verifique sua conexão e tente novamente.');
     return SupaHist.add(row);
   },
+
+  async delete(id) {
+    if (!isSupabaseEnabled) throw new Error('Seus dados não foram salvos na nuvem. Verifique sua conexão e tente novamente.');
+    return SupaHist.delete(id);
+  }
 };

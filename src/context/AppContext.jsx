@@ -181,6 +181,33 @@ export function AppProvider({ children }) {
     }
   }, [state.user, state.meds, loadAll]);
 
+  const undoDose = useCallback(async (dose, toastFn) => {
+    if (!dose.hist_id) return { success: false, error: 'Histórico não encontrado' };
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (toastFn) toastFn('Sem conexão. Ação cancelada.', 'error');
+      else alert('Sem conexão. Ação cancelada.');
+      return { success: false, error: 'Offline' };
+    }
+
+    try {
+      await HistDB.delete(dose.hist_id);
+
+      const med = state.meds.find((m) => m.id === dose.med_id);
+      if (med) {
+         const qtyRestored = dose.quantidade_usada || 1;
+         await MedDB.update(med.id, { quantidade: med.quantidade + qtyRestored });
+      }
+
+      if (toastFn) toastFn(`Dose de ${dose.nome} desfeita!`, 'ok');
+      await loadAll(state.user.id);
+      return { success: true };
+    } catch (err) {
+      console.error('undoDose error', err);
+      if (toastFn) toastFn(err.message || 'Erro ao desfazer dose', 'err');
+      return { success: false, error: err.message };
+    }
+  }, [state.user, state.meds, loadAll]);
+
   // ── Dose actions (correção retroativa — RBAC + auditoria) ──────────────────
   const confirmDoseRetroactive = useCallback(async ({ medId, hora, doseDate, newStatus = 'confirmed', reason = null, patientId }) => {
     if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return { success: false, error: 'Offline' }; }
@@ -378,13 +405,13 @@ export function AppProvider({ children }) {
   const value = useMemo(() => ({
     ...state,
     login, logout, refresh, updateRole,
-    confirmDose, confirmDoseRetroactive,
+    confirmDose, undoDose, confirmDoseRetroactive,
     registerSOSUse, repeatTreatment, setTreatmentStatus, getTreatmentDashboard,
     recordStockMovement,
     saveMed, deleteMed, alertCaregiver,
   }), [
     state, login, logout, refresh, updateRole,
-    confirmDose, confirmDoseRetroactive,
+    confirmDose, undoDose, confirmDoseRetroactive,
     registerSOSUse, repeatTreatment, setTreatmentStatus, getTreatmentDashboard,
     recordStockMovement,
     saveMed, deleteMed, alertCaregiver,

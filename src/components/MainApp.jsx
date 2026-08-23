@@ -23,6 +23,7 @@ import { AIScreen       } from '@/screens/AIScreen';
 import { ProfileScreen  } from '@/screens/ProfileScreen';
 
 import { TimeWarningModal } from '@/components/modals/TimeWarningModal';
+import { UndoConfirmModal } from '@/components/modals/UndoConfirmModal';
 import { MedModal       } from '@/components/modals/MedModal';
 import { MedDetail      } from '@/components/modals/MedDetail';
 import { ErrorBoundary  } from '@/components/ErrorBoundary';
@@ -208,7 +209,7 @@ function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
 
 // ─── Inner app ────────────────────────────────────────────────────────────────
 function InnerApp() {
-  const { user, loading, syncing, login, doses, meds, history, confirmDose, saveMed, refresh } = useApp();
+  const { user, loading, syncing, login, doses, meds, history, confirmDose, undoDose, saveMed, refresh } = useApp();
   const isOnline = useNetwork();
   
   const [profile, setProfile] = useState(null);
@@ -246,6 +247,7 @@ function InnerApp() {
 
   const [tab,       setTab]       = useState('home');
   const [timeWarning, setTimeWarning] = useState(null);
+  const [undoWarning, setUndoWarning] = useState(null);
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -291,12 +293,23 @@ function InnerApp() {
     }
   });
   useBackButton(timeWarning !== null, () => setTimeWarning(null));
+  useBackButton(undoWarning !== null, () => setUndoWarning(null));
 
   useNotifications(doses, user?.id);
 
   const handleConfirmDose = useCallback((dose) => {
     confirmDose(dose, toast);
   }, [confirmDose, toast]);
+
+  const handleUndoDose = useCallback((dose) => {
+    setUndoWarning(dose);
+    window.history.pushState({}, '', '/');
+  }, []);
+
+  const handleUndoDoseAction = useCallback((dose) => {
+    undoDose(dose, toast);
+    setUndoWarning(null);
+  }, [undoDose, toast]);
 
   const handleSnooze = useCallback((dose) => {
     toast(`⏰ Lembrete de ${dose.nome} em 15 minutos`, 'info');
@@ -411,7 +424,7 @@ function InnerApp() {
       >
         <ErrorBoundary T={T} scale={scale} onReset={() => setTab('home')}>
           <Suspense fallback={<ScreenLoader />}>
-            {tab === 'home'     && <HomeScreen     {...screenProps} onQuickConfirm={(dose) => handleDoseAction(dose, 'confirm')} onSnooze={(dose) => handleDoseAction(dose, 'snooze')} toggle={toggle} dark={dark} />}
+            {tab === 'home'     && <HomeScreen     {...screenProps} onQuickConfirm={(dose) => handleDoseAction(dose, 'confirm')} onUndoDose={handleUndoDose} onSnooze={(dose) => handleDoseAction(dose, 'snooze')} toggle={toggle} dark={dark} />}
             {tab === 'meds'     && <MedsScreen     {...screenProps} toast={toast} onAdd={() => { setEditMed(null); setShowAdd(true); }} onEdit={(m) => { setEditMed(m); setShowAdd(true); }} onView={setViewMed} />}
             {tab === 'calendar' && <CalendarScreen {...screenProps} />}
             {tab === 'stats'    && <StatsScreen    {...screenProps} />}
@@ -422,6 +435,15 @@ function InnerApp() {
       </main>
 
       <BottomNav tab={tab} setTab={setTab} T={T} pendingCount={pendingCount} criticalCount={criticalCount} />
+
+      {undoWarning && (
+        <UndoConfirmModal
+          dose={undoWarning}
+          onConfirm={() => handleUndoDoseAction(undoWarning)}
+          onCancel={() => { window.history.back(); }}
+          T={T}
+        />
+      )}
 
       {timeWarning && (
         <TimeWarningModal

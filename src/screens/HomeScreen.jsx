@@ -5,7 +5,7 @@ import { NextDoseHero, DayProgress, Timeline } from '@/components/Dashboard';
 import { C } from '@/lib/theme';
 import { greet } from '@/lib/doseUtils';
 
-export function HomeScreen({ T, scale, onQuickConfirm, onSnooze }) {
+export function HomeScreen({ T, scale, onQuickConfirm, onUndoDose, onSnooze }) {
   const { user, doses, meds } = useApp();
 
   const nextDose = useMemo(() => {
@@ -59,7 +59,7 @@ export function HomeScreen({ T, scale, onQuickConfirm, onSnooze }) {
             <p style={{ color: T.sub, fontSize: 14 * scale }}>Adicione medicamentos na aba Medicamentos</p>
           </div>
         ) : (
-          <Timeline doses={doses} onAction={onQuickConfirm} T={T} scale={scale} />
+          <Timeline doses={doses} onAction={onQuickConfirm} onUndo={onUndoDose} T={T} scale={scale} />
         )}
       </div>
     </div>

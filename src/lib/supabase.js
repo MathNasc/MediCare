@@ -131,6 +131,12 @@ export const SupaHist = {
     if (error) throw error;
     return data;
   },
+  async delete(id) {
+    if (!supabase) return false;
+    const { error } = await supabase.from('historico_doses').delete().eq('id', id);
+    if (error) throw error;
+    return true;
+  }
 };
 
 // ─── Caregivers ───────────────────────────────────────────────────────────────

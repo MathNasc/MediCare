@@ -93,13 +93,14 @@ export function DayProgress({ doses, T, scale = 1 }) {
 }
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
-export function Timeline({ doses, onAction, T, scale = 1 }) {
+export function Timeline({ doses, onAction, onUndo, T, scale = 1 }) {
   return (
     <div style={{ position: 'relative' }}>
       <div style={{ position: 'absolute', left: 19, top: 20, bottom: 20, width: 2, background: `linear-gradient(to bottom,${T.bdr},transparent)`, borderRadius: 2, pointerEvents: 'none' }} />
       {doses.map((dose, i) => {
         const st     = STATUS[dose.status] || STATUS.scheduled;
         const active = ['upcoming', 'pending', 'late'].includes(dose.status);
+        const isConfirmed = dose.status === 'confirmed';
         return (
           <div
             key={dose.id}
@@ -130,6 +131,14 @@ export function Timeline({ doses, onAction, T, scale = 1 }) {
                 <span style={{ fontSize: 11 * scale, fontWeight: 700, padding: '2px 9px', borderRadius: 99, background: st.bg, color: st.color }}>{st.label}</span>
                 <span style={{ color: T.muted, fontSize: 12 * scale }}>{dose.dosagem}</span>
                 {active && <span style={{ color: T.sub, fontSize: 11 * scale, marginLeft: 'auto' }}>Toque →</span>}
+                {isConfirmed && onUndo && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onUndo(dose); }}
+                    style={{ background: 'transparent', border: 'none', color: T.sub, fontSize: 11 * scale, marginLeft: 'auto', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+                  >
+                    Desfazer
+                  </button>
+                )}
               </div>
             </div>
           </div>

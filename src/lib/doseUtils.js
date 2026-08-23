@@ -75,6 +75,8 @@ export function buildDoses(medList, history) {
           treatment_type:  m.treatment_type || 'continuous',
           hora,
           status:  getDoseStatus(hora, !!done),
+          hist_id: done ? done.id : null,
+          quantidade_usada: done ? (done.quantidade_usada || 1) : null
         });
       });
     });
