@@ -5,6 +5,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useFontScale } from '@/hooks/useFontScale';
 import { useToast } from '@/hooks/useToast';
 import { useNotifications } from '@/hooks/useNotifications';
+import { useBackButton } from '@/hooks/useBackButton';
 import { AuthScreen }       from '@/components/AuthScreen';
 import { BottomNav }        from '@/components/BottomNav';
 import { Toasts }           from '@/components/ui/Toasts';
@@ -249,6 +250,13 @@ function InnerApp() {
     }
     if (action || tabParam) window.history.replaceState({}, '', '/');
   }, [doses]);
+
+  // ── Hardware Back Button Interceptors ───────────────────────────────────────
+  // Evaluated in order of precedence (bottom-most has highest precedence for intercepting).
+  useBackButton(tab !== 'home', () => setTab('home'));
+  useBackButton(viewMed !== null, () => setViewMed(null));
+  useBackButton(showAdd, () => { setShowAdd(false); setEditMed(null); });
+  useBackButton(quickDose !== null, () => setQuickDose(null));
 
   useNotifications(doses, user?.id);
 

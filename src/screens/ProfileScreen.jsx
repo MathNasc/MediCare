@@ -7,6 +7,7 @@ import { CaregiversScreen } from '@/screens/CaregiversScreen';
 import { CaregiverDashboard } from '@/screens/CaregiverDashboard';
 import { StockHistoryScreen } from '@/screens/StockHistoryScreen';
 import { ProfileDB } from '@/lib/profileDb';
+import { useBackButton } from '@/hooks/useBackButton';
 import { PersonalData } from '@/screens/profile/PersonalData';
 import { EmergencyCardConfig } from '@/screens/profile/EmergencyCardConfig';
 import { HealthSection } from '@/screens/profile/HealthSection';
@@ -53,6 +54,9 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
     setDisablePushRequest(false);
     await disable();
   };
+
+  useBackButton(activeView !== 'main', () => setActiveView('main'));
+  useBackButton(disablePushRequest, () => setDisablePushRequest(false));
 
   useEffect(() => {
     if (user?.id) {
@@ -315,6 +319,8 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
   };
 
   const [confirmRole, setConfirmRole] = useState(null);
+
+  useBackButton(confirmRole !== null, () => setConfirmRole(null));
 
   const handleUpdate = async (newRole) => {
     if (newRole === 'paciente' && user.role !== 'paciente' && confirmRole !== 'paciente') {

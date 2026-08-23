@@ -9,6 +9,7 @@ import { useApp } from '@/context/AppContext';
 import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
 import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
 import { C } from '@/lib/theme';
+import { useBackButton } from '@/hooks/useBackButton';
 
 // ─── Cards de métricas ─────────────────────────────────────────────────────────
 function MetricCard({ icon, label, value, sub, color = '#3b82f6', T, scale }) {
@@ -129,6 +130,8 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
   const [modalDose, setModalDose]       = useState(null);
   const [toast, setToast]               = useState('');
 
+  useBackButton(modalDose !== null, () => setModalDose(null));
+
   const isPast = (dateStr) => new Date(dateStr) < new Date(new Date().toDateString());
 
   // Monta a lista de doses esperadas para a data selecionada, cruzando com o histórico
@@ -243,6 +246,8 @@ function NotesSection({ notes, onAdd, onDelete, caregiverId, relationshipId, T, 
   const [title, setTitle]             = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving]           = useState(false);
+
+  useBackButton(showForm, () => setShowForm(false));
 
   const handleAdd = async () => {
     if (!title.trim()) return;

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useMyCaregivers, PERMISSION_LEVELS } from '@/hooks/useCaregiver';
 import { InviteModal } from '@/components/modals/InviteModal';
 import { C } from '@/lib/theme';
+import { useBackButton } from '@/hooks/useBackButton';
 
 // ─── Badge de status ───────────────────────────────────────────────────────────
 function StatusBadge({ status, scale = 1 }) {
@@ -192,6 +193,8 @@ export function CaregiversScreen({ user, T, scale = 1 }) {
   const [showInvite, setShowInvite]       = useState(false);
   const [shareTarget, setShareTarget]     = useState(null);
   const [toast, setToast]                 = useState(null);
+  useBackButton(showInvite, () => setShowInvite(false));
+  useBackButton(shareTarget !== null, () => setShareTarget(null));
 
   const showToast = (msg, type = 'ok') => {
     setToast({ msg, type });
