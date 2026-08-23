@@ -39,10 +39,30 @@ export async function subscribeToPush() {
     await navigator.serviceWorker.ready;
 
     let sub = await reg.pushManager.getSubscription();
+    const currentVapidArray = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+
+    if (sub && sub.options && sub.options.applicationServerKey) {
+      const existingKey = new Uint8Array(sub.options.applicationServerKey);
+      let keysMatch = existingKey.length === currentVapidArray.length;
+      if (keysMatch) {
+        for (let i = 0; i < existingKey.length; i++) {
+          if (existingKey[i] !== currentVapidArray[i]) {
+            keysMatch = false;
+            break;
+          }
+        }
+      }
+      if (!keysMatch) {
+        console.warn('[MediCare] VAPID key mismatch detected. Renewing subscription...');
+        await sub.unsubscribe();
+        sub = null;
+      }
+    }
+
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        applicationServerKey: currentVapidArray,
       });
     }
     return sub.toJSON();

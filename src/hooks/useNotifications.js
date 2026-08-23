@@ -27,11 +27,24 @@ export function useNotifications(_doses, userId) {
     // pedir permissão "do nada" sem gesto do usuário é ignorado pelo navegador.
     if (Notification.permission !== 'granted') return;
     
-    const subscription = await subscribeToPush();
+    let subscription = await subscribeToPush();
     if (subscription) {
-      await SupaPush.saveSubscription(userId, subscription);
-      subscribed.current = true;
-      setIsSubscribed(true);
+      try {
+        await SupaPush.saveSubscription(userId, subscription);
+        subscribed.current = true;
+        setIsSubscribed(true);
+      } catch (err) {
+        console.warn('[MediCare] Falha ao salvar subscription (possível conflito de RLS/usuário antigo). Renovando...', err);
+        await unsubscribeFromPush();
+        subscription = await subscribeToPush();
+        if (subscription) {
+          await SupaPush.saveSubscription(userId, subscription);
+          subscribed.current = true;
+          setIsSubscribed(true);
+        } else {
+          setIsSubscribed(false);
+        }
+      }
     } else {
       setIsSubscribed(false);
     }
@@ -47,10 +60,19 @@ export function useNotifications(_doses, userId) {
     
     if (Notification.permission === 'denied') return false;
     
-    const subscription = await subscribeToPush();
+    let subscription = await subscribeToPush();
     if (!subscription) return false;
     
-    await SupaPush.saveSubscription(userId, subscription);
+    try {
+      await SupaPush.saveSubscription(userId, subscription);
+    } catch (err) {
+      console.warn('[MediCare] setup: Falha ao salvar subscription. Renovando...', err);
+      await unsubscribeFromPush();
+      subscription = await subscribeToPush();
+      if (!subscription) return false;
+      await SupaPush.saveSubscription(userId, subscription);
+    }
+
     subscribed.current = true;
     setIsSubscribed(true);
     return true;

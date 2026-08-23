@@ -17,7 +17,7 @@ select cron.schedule(
     url     := 'https://seu-projeto-ref.supabase.co/functions/v1/send-medication-reminders',
     headers := jsonb_build_object(
       'Content-Type',  'application/json',
-      'Authorization', 'Bearer ' || current_setting('app.service_role_key', true)
+      'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key', true)
     ),
     body := '{}'::jsonb
   )

@@ -164,7 +164,7 @@ export const SupaPush = {
   async saveSubscription(userId, subscription) {
     if (!supabase || !subscription?.endpoint) return;
     const { endpoint, keys } = subscription;
-    await supabase.from('push_subscriptions').upsert(
+    const { error } = await supabase.from('push_subscriptions').upsert(
       {
         user_id:    userId,
         endpoint,
@@ -176,6 +176,7 @@ export const SupaPush = {
       },
       { onConflict: 'endpoint' }
     );
+    if (error) throw error;
   },
   async removeSubscription(endpoint) {
     if (!supabase || !endpoint) return;
