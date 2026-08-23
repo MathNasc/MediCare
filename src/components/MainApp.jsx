@@ -6,6 +6,7 @@ import { useFontScale } from '@/hooks/useFontScale';
 import { useToast } from '@/hooks/useToast';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useBackButton } from '@/hooks/useBackButton';
+import { useNetwork } from '@/hooks/useNetwork';
 import { AuthScreen }       from '@/components/AuthScreen';
 import { BottomNav }        from '@/components/BottomNav';
 import { Toasts }           from '@/components/ui/Toasts';
@@ -49,8 +50,19 @@ function usePWAInstall() {
   // (o usuário reabre o app), e a cada 5 minutos enquanto o app está aberto.
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      for (let reg of registrations) reg.unregister();
+    navigator.serviceWorker.ready.then((registration) => {
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        if (newWorker) {
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+               if (window.confirm('Nova versão do MediCare disponível! Atualizar agora?')) {
+                 window.location.reload();
+               }
+            }
+          });
+        }
+      });
     });
   }, []);
 
@@ -196,7 +208,8 @@ function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
 
 // ─── Inner app ────────────────────────────────────────────────────────────────
 function InnerApp() {
-  const { user, loading, login, doses, meds, history, confirmDose, saveMed } = useApp();
+  const { user, loading, syncing, login, doses, meds, history, confirmDose, saveMed, refresh } = useApp();
+  const isOnline = useNetwork();
   
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -216,6 +229,20 @@ function InnerApp() {
   const { list: toasts, show: toast } = useToast();
   const { canInstall, install } = usePWAInstall();
   const invite = useCaregiverInvite();
+  // Sync when returning to tab
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+         // App was reopened or tab was focused
+         refresh();
+         // Check for SW updates
+         if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(reg => reg.update());
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [refresh]);
+
 
   const [tab,       setTab]       = useState('home');
   const [quickDose, setQuickDose] = useState(null);
@@ -237,7 +264,7 @@ function InnerApp() {
       window.navigator.standalone === true);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || loading || syncing) return;
     const params = new URLSearchParams(window.location.search);
     const action   = params.get('action');
     const tabParam = params.get('tab');
@@ -249,13 +276,20 @@ function InnerApp() {
       if (dose && dose.status !== 'confirmed') setQuickDose(dose);
     }
     if (action || tabParam) window.history.replaceState({}, '', '/');
-  }, [doses]);
+  }, [doses, loading, syncing]);
 
   // ── Hardware Back Button Interceptors ───────────────────────────────────────
   // Evaluated in order of precedence (bottom-most has highest precedence for intercepting).
   useBackButton(tab !== 'home', () => setTab('home'));
   useBackButton(viewMed !== null, () => setViewMed(null));
-  useBackButton(showAdd, () => { setShowAdd(false); setEditMed(null); });
+  useBackButton(showAdd, () => {
+    if (window.confirm('Fechar sem salvar?')) {
+      setShowAdd(false);
+      setEditMed(null);
+    } else {
+      window.history.pushState({}, '', '/');
+    }
+  });
   useBackButton(quickDose !== null, () => setQuickDose(null));
 
   useNotifications(doses, user?.id);
@@ -332,7 +366,12 @@ function InnerApp() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: T.bg0 }}>
+    <div className="safe-top" style={{ minHeight: '100vh', background: T.bg0 }}>
+      {!isOnline && (
+        <div style={{ background: '#dc2626', color: '#fff', textAlign: 'center', padding: '6px', fontSize: 13, fontWeight: 'bold', zIndex: 9999 }}>
+          Modo Offline - Ações restritas
+        </div>
+      )}
       <Toasts list={toasts} />
 
       {!isStandalone && (

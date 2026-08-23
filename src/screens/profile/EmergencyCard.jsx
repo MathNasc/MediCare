@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { ProfileDB } from '@/lib/profileDb';
 import { useApp } from '@/context/AppContext';
@@ -36,7 +37,7 @@ export function EmergencyCard({ user, profile, onBack, T, scale }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
           {s.show_photo && (
             <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              {profile?.foto_url ? <img src={profile.foto_url} alt="Foto" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 30 }}>{profile?.nome?.[0]?.toUpperCase()}</span>}
+              {profile?.foto_url ? <Image src={profile.foto_url} alt="Foto" fill style={{ objectFit: 'cover' }} sizes="64px" /> : <span style={{ fontSize: 30 }}>{profile?.nome?.[0]?.toUpperCase()}</span>}
             </div>
           )}
           <div>

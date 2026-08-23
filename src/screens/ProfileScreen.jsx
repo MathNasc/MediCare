@@ -1,4 +1,5 @@
 'use client';
+import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
@@ -111,7 +112,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize }) {
                 style={{ width: 100, height: 100, borderRadius: '50%', background: T.bg2, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', border: `2px solid ${C.blue}` }}
               >
                 {uploadingAvatar ? <span style={{ fontSize: 14 * scale, color: T.sub }}>...</span> 
-                 : profile?.foto_url ? <img src={profile.foto_url} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> 
+                 : profile?.foto_url ? <Image src={profile.foto_url} alt="Avatar" fill style={{ objectFit: 'cover' }} sizes="80px" /> 
                  : <span style={{ fontSize: 36, color: T.sub }}>{displayName[0]?.toUpperCase()}</span>}
               </div>
               <input type="file" accept="image/*" ref={fileInputRef} onChange={handleAvatarUpload} style={{ display: 'none' }} />

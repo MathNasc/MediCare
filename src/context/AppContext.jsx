@@ -8,6 +8,8 @@ import { computeEndDate, isTemporaryExpired } from '@/lib/treatmentTypes';
 import { supabase } from '@/lib/supabase';
 
 // ─── State ────────────────────────────────────────────────────────────────────
+const inFlightDoses = new Set();
+
 const initialState = {
   user:        null, // inclui { id, nome, email, role, created_at }
   meds:        [],
@@ -109,13 +111,45 @@ export function AppProvider({ children }) {
   // Consumo por confirmação de dose NÃO gera movimentação de estoque nem
   // evento de calendário — apenas reduz a quantidade normalmente.
   const confirmDose = useCallback(async (dose, toastFn) => {
+    const flightKey = `${dose.med_id}-${dose.hora}`;
+    if (inFlightDoses.has(flightKey)) return { success: false, error: 'Em andamento' };
+    if (dose.status === 'confirmed') return { success: false, error: 'Dose já confirmada' };
+    inFlightDoses.add(flightKey);
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (toastFn) toastFn('Sem conexão. Ação cancelada.', 'error');
+      else alert('Sem conexão. Ação cancelada.');
+      return { success: false, error: 'Offline' };
+    }
+
     const now = new Date();
     const [h, m] = dose.hora.split(':').map(Number);
-    const planned = new Date(); planned.setHours(h, m, 0, 0);
+    let planned = new Date(); planned.setHours(h, m, 0, 0);
+    
+    // Se planned está mais de 12h no futuro (ex: agora é 00:01, planned é 23:59 de hoje),
+    // significa que a dose real a ser confirmada é a de ontem (23:59 de ontem).
+    if (planned.getTime() - now.getTime() > 12 * 60 * 60 * 1000) {
+      planned.setDate(planned.getDate() - 1);
+    }
+    // Se planned está mais de 12h no passado (ex: agora é 23:59, planned é 00:01 de ontem),
+    // significa que a dose era de hoje, mas wait, planned já seria hoje, então now - planned = 23h, o que está certo (23h de atraso).
+    
     const delay = Math.max(0, Math.round((now - planned) / 60000));
+    
+    // Para garantir que a dose seja vinculada ao dia correto (evitar erro de timezone na virada),
+    // injetamos a data local no created_at (se o banco permitir) ou usamos o retroactive se fosse o caso.
+    // Mas HistDB.add apenas insere. Vamos forçar o created_at a ter a data pretendida + hora atual.
+    let targetCreatedAt = new Date(now);
+    // Se a dose pertence ao dia anterior, limitamos o timestamp para 23:59:59 do dia da dose
+    // para garantir que o parse local em doseUtils.js o agrupe no dia correto.
+    if (targetCreatedAt.getDate() !== planned.getDate()) {
+      targetCreatedAt = new Date(planned);
+      targetCreatedAt.setHours(23, 59, 59, 999);
+    }
 
     try {
       await HistDB.add({
+        created_at:     targetCreatedAt.toISOString(),
         med_id:         dose.med_id,
         user_id:        state.user.id,
         hora:           dose.hora,
@@ -140,11 +174,14 @@ export function AppProvider({ children }) {
       await loadAll(state.user.id);
     } catch (err) {
       if (toastFn) toastFn(err.message || 'Erro ao confirmar dose', 'err');
+    } finally {
+      inFlightDoses.delete(flightKey);
     }
   }, [state.user, state.meds, loadAll]);
 
   // ── Dose actions (correção retroativa — RBAC + auditoria) ──────────────────
   const confirmDoseRetroactive = useCallback(async ({ medId, hora, doseDate, newStatus = 'confirmed', reason = null, patientId }) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return { success: false, error: 'Offline' }; }
     const targetPatientId = patientId || state.user?.id;
     const result = await AuditDB.confirmRetroactive({
       patientId: targetPatientId,
@@ -160,6 +197,13 @@ export function AppProvider({ children }) {
   // Assim como confirmDose, é consumo — não gera movimentação de estoque
   // nem evento de calendário, apenas reduz a quantidade e registra o histórico.
   const registerSOSUse = useCallback(async (med, { hora, motivo, quantidade = 1, toastFn } = {}) => {
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (toastFn) toastFn('Sem conexão. Ação cancelada.', 'error');
+      else alert('Sem conexão. Ação cancelada.');
+      return { success: false, error: 'Offline' };
+    }
+
     const usedAt = hora || new Date().toTimeString().slice(0, 5);
     try {
       await HistDB.add({
@@ -188,6 +232,7 @@ export function AppProvider({ children }) {
 
   // ── Tratamentos temporários: repetir após conclusão ─────────────────────────
   const repeatTreatment = useCallback(async (med, newStartDate) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return { success: false, error: 'Offline' }; }
     if (!state.user) return { success: false, error: 'Sem sessão ativa' };
     try {
       if (supabase) {
@@ -218,6 +263,7 @@ export function AppProvider({ children }) {
 
   // ── Tratamentos: pausar / retomar / cancelar ────────────────────────────────
   const setTreatmentStatus = useCallback(async (medId, status) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return { success: false, error: 'Offline' }; }
     const patch = { status, ativo: status === 'ativo' };
     if (status === 'concluido' || status === 'cancelado') patch.finished_at = new Date().toISOString();
     await MedDB.update(medId, patch);
@@ -226,6 +272,7 @@ export function AppProvider({ children }) {
 
   // ── Med actions ─────────────────────────────────────────────────────────────
   const saveMed = useCallback(async (form, horarios, dias, editingId) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return { success: false, error: "Offline" }; }
     const payload = {
       ...form,
       horarios:    Array.isArray(horarios) && horarios.length > 0 ? horarios : ['08:00'],
@@ -237,6 +284,7 @@ export function AppProvider({ children }) {
   }, [state.user, loadAll]);
 
   const deleteMed = useCallback(async (id) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return false; }
     await MedDB.delete(id);
     await loadAll(state.user.id);
   }, [state.user, loadAll]);
@@ -250,6 +298,7 @@ export function AppProvider({ children }) {
     medicationId, movementType, quantityBefore, quantityAfter,
     purchasePrice, purchaseLocation, batch, expirationDate, notes,
   }) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return { success: false, error: 'Offline' }; }
     const result = await StockDB.recordMovement({
       medicationId, movementType, quantityBefore, quantityAfter,
       purchasePrice, purchaseLocation, batch, expirationDate, notes,

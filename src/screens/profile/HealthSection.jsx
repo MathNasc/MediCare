@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+
 import { ProfileDB } from '@/lib/profileDb';
 import { C } from '@/lib/theme';
 
@@ -9,11 +10,19 @@ export function HealthSection({ user, onBack, T, scale }) {
   const [newCondition, setNewCondition] = useState({ name: '', notes: '' });
   const [loading, setLoading] = useState(true);
 
+  const loadData = React.useCallback(async () => {
+    const a = await ProfileDB.listAllergies(user.id);
+    const c = await ProfileDB.listConditions(user.id);
+    setAllergies(a);
+    setConditions(c);
+    setLoading(false);
+  }, [user.id]);
+
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
-  const loadData = async () => {
+  const _old = async () => {
     const a = await ProfileDB.listAllergies(user.id);
     const c = await ProfileDB.listConditions(user.id);
     setAllergies(a);

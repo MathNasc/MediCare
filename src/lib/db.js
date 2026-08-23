@@ -1,3 +1,16 @@
+function translateAuthError(err) {
+  if (!err) return "Erro desconhecido.";
+  const msg = typeof err === "string" ? err : err.message;
+  if (!msg) return "Erro de autenticação.";
+  if (msg.includes("Invalid login credentials")) return "E-mail ou senha incorretos.";
+  if (msg.includes("already registered")) return "Este e-mail já está cadastrado.";
+  if (msg.includes("at least 6 characters")) return "A senha deve ter pelo menos 6 caracteres.";
+  if (msg.includes("Email not confirmed")) return "Por favor, confirme seu e-mail antes de entrar.";
+  if (msg.includes("Failed to fetch")) return "Verifique sua conexão com a internet e tente novamente.";
+  if (msg.includes("rate limit")) return "Muitas tentativas. Tente novamente mais tarde.";
+  return "Erro ao autenticar. Verifique seus dados e tente novamente.";
+}
+
 // ─── Unified DB Layer ─────────────────────────────────────────────────────────
 import { isSupabaseEnabled, SupabaseAuth, SupaMeds, SupaHist } from './supabase';
 
@@ -11,7 +24,7 @@ export const AuthDB = {
   async register(nome, email, pass, role = 'independente') {
     if (!isSupabaseEnabled) return { error: 'O banco de dados não está configurado. Tente novamente mais tarde.' };
     const { data, error } = await SupabaseAuth.signUp(email, pass, nome, role);
-    if (error) return { error: typeof error === 'string' ? error : error.message };
+    if (error) return { error: translateAuthError(error) };
     
     if (!data?.session) {
       if (data?.user?.identities && data.user.identities.length === 0) {
@@ -26,7 +39,7 @@ export const AuthDB = {
   async login(email, pass) {
     if (!isSupabaseEnabled) return { error: 'O banco de dados não está configurado. Tente novamente mais tarde.' };
     const { data, error } = await SupabaseAuth.signIn(email, pass);
-    if (error) return { error: typeof error === 'string' ? error : error.message };
+    if (error) return { error: translateAuthError(error) };
     if (!data?.session) return { error: 'Falha ao autenticar: sessão não estabelecida.' };
     const u = data.user;
     const role = await SupabaseAuth.getProfileRole(u.id);
@@ -35,6 +48,16 @@ export const AuthDB = {
 
   async logout() {
     if (isSupabaseEnabled) await SupabaseAuth.signOut();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('mc_fs');
+        localStorage.removeItem('mc_theme');
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+      } catch (e) {}
+    }
   },
 
   async current() {

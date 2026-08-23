@@ -7,7 +7,8 @@ export function HealthcareProfessionals({ user, onBack, T, scale }) {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', specialty: '', phone: '', email: '', clinic: '', notes: '' });
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadData = async () => {
     setProfs(await ProfileDB.listProfessionals(user.id));

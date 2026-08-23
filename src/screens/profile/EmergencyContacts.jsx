@@ -7,7 +7,8 @@ export function EmergencyContacts({ user, onBack, T, scale }) {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', relationship: '', phone: '' });
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadData = async () => {
     setContacts(await ProfileDB.listEmergencyContacts(user.id));

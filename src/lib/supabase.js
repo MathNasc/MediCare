@@ -112,6 +112,21 @@ export const SupaHist = {
   },
   async add(row) {
     if (!supabase) return null;
+    // IDEMPOTENCY GUARD
+    if (row.hora && row.med_id && row.created_at) {
+       const d = new Date(row.created_at);
+       const start = new Date(d); start.setUTCHours(0,0,0,0);
+       const end = new Date(d); end.setUTCHours(23,59,59,999);
+       const { data: existing } = await supabase.from('historico_doses')
+         .select('*')
+         .eq('user_id', row.user_id)
+         .eq('med_id', row.med_id)
+         .eq('hora', row.hora)
+         .gte('created_at', start.toISOString())
+         .lte('created_at', end.toISOString())
+         .limit(1);
+       if (existing && existing.length > 0) return existing[0];
+    }
     const { data, error } = await supabase.from('historico_doses').insert(row).select().single();
     if (error) throw error;
     return data;
