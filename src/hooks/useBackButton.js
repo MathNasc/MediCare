@@ -61,16 +61,23 @@ function getBackHandler() {
  */
 export function useBackButton(isActive, onClose) {
   const idRef = useRef(Math.random().toString(36).substring(2, 9));
+  const callbackRef = useRef(onClose);
+
+  useEffect(() => {
+    callbackRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isActive) return;
     
     const handler = getBackHandler();
     const id = idRef.current;
-    handler.push(id, onClose);
+    handler.push(id, () => {
+      if (callbackRef.current) callbackRef.current();
+    });
     
     return () => {
       handler.remove(id);
     };
-  }, [isActive, onClose]);
+  }, [isActive]);
 }

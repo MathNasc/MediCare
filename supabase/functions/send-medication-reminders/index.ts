@@ -91,7 +91,9 @@ Deno.serve(async (_req) => {
         }
         
         const todayISO = `${nowLocal.getUTCFullYear()}-${String(nowLocal.getUTCMonth()+1).padStart(2, '0')}-${String(nowLocal.getUTCDate()).padStart(2, '0')}`;
-        const dayOfWeek = nowLocal.getUTCDay() === 0 ? 7 : nowLocal.getUTCDay();
+        // Frontend usa: 1=Domingo, 2=Segunda, ..., 7=Sábado. 
+        // getUTCDay() retorna: 0=Domingo, 1=Segunda, ..., 6=Sábado.
+        const dayOfWeek = nowLocal.getUTCDay() + 1;
 
         // 1.A. Verificação de Estoque Baixo
         if (med.quantidade != null && med.quantidade <= 5) {
