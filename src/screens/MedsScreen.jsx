@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useBackButton } from '@/hooks/useBackButton';
 import { useApp } from '@/context/AppContext';
 import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal';
 import { SOSQuickLogModal } from '@/components/modals/SOSQuickLogModal';
@@ -49,6 +50,9 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
   const [sosTarget, setSosTarget]       = useState(null);
   const [repeatTarget, setRepeatTarget] = useState(null);
   const [activeTab, setActiveTab] = useState("continuous");
+  useBackButton(deleteTarget !== null, () => setDeleteTarget(null));
+  useBackButton(sosTarget !== null, () => setSosTarget(null));
+  useBackButton(repeatTarget !== null, () => setRepeatTarget(null));
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;

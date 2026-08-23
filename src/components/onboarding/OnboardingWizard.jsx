@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useBackButton } from '@/hooks/useBackButton';
 import { C } from '@/lib/theme';
 import { ProfileDB } from '@/lib/profileDb';
 import { useApp } from '@/context/AppContext';
@@ -47,6 +48,10 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
   };
 
   const [confirmRole, setConfirmRole] = useState(null);
+
+  useBackButton(showMedModal, () => setShowMedModal(false));
+  useBackButton(confirmRole !== null, () => setConfirmRole(null));
+  useBackButton(step > 0, () => setStep(s => s - 1));
 
   const handleSaveRole = async (role) => {
     if (role === 'paciente' && confirmRole !== 'paciente') {

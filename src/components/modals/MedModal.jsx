@@ -18,6 +18,7 @@
 // confirmar que tudo está funcionando.
 
 import { useState } from 'react';
+import { useBackButton } from '@/hooks/useBackButton';
 import { PILL_COLORS, UNITS, WEEK_S, C } from '@/lib/theme';
 import { MEDICINE_TYPES } from '@/data/medicationCatalog';
 import { MedicationSearchInput } from '@/components/medications/MedicationSearchInput';
@@ -107,6 +108,8 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   // Movimentação de estoque pendente — exibida antes de confirmar o salvamento
   // quando a quantidade de um medicamento já existente é alterada.
   const [pendingPayload, setPendingPayload] = useState(null);
+  useBackButton(step === STEPS.FORM && !isEditing, () => setStep(STEPS.SEARCH));
+  useBackButton(pendingPayload !== null, () => setPendingPayload(null));
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const toggleDia = (d) => setDias(ds => ds.includes(d) ? ds.filter(x => x !== d) : [...ds, d]);

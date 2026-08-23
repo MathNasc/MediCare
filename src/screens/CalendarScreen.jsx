@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { useBackButton } from '@/hooks/useBackButton';
 import { useApp } from '@/context/AppContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { C } from '@/lib/theme';
@@ -114,6 +115,8 @@ function DayPanel({
   const [obsText, setObsText] = useState('');
   const [obsTarget, setObsTarget] = useState(null);
   const [retroTarget, setRetroTarget] = useState(null);
+  useBackButton(obsTarget !== null, () => setObsTarget(null));
+  useBackButton(retroTarget !== null, () => setRetroTarget(null));
 
   const date = new Date(dateStr + 'T12:00:00');
   const label = date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -436,6 +439,11 @@ export function CalendarScreen({ T, scale }) {
 
   const [noteModal,  setNoteModal]  = useState(null);
   const [eventModal, setEventModal] = useState(null);
+
+  useBackButton(noteModal !== null, () => setNoteModal(null));
+  useBackButton(eventModal !== null, () => setEventModal(null));
+  useBackButton(showSearch, () => setShowSearch(false));
+  useBackButton(selected !== null, () => setSelected(null));
 
   const loadMonth = useCallback(async (year, month) => {
     if (!user) return;

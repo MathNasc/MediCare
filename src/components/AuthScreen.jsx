@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useBackButton } from '@/hooks/useBackButton';
 import { AuthDB } from '@/lib/db';
 import { isSupabaseEnabled } from '@/lib/supabase';
 
@@ -10,6 +11,7 @@ export function AuthScreen({ onLogin, T }) {
   const [pass, setPass]   = useState('');
   const [err, setErr]     = useState('');
   const [load, setLoad]   = useState(false);
+  useBackButton(mode === 'register', () => setMode('login'));
 
   // Corrigido: AuthDB.login/register são funções async e retornam uma
   // Promise. O código anterior chamava AuthDB.login(...) sem "await"

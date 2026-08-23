@@ -6,6 +6,7 @@
 // Mantém estilo inline do projeto existente.
 
 import { useState, useEffect } from 'react';
+import { useBackButton } from '@/hooks/useBackButton';
 import { PERMISSION_LEVELS } from '@/hooks/useCaregiver';
 import { C } from '@/lib/theme';
 
@@ -283,6 +284,7 @@ export function InviteModal({ onGenerate, onClose, T, scale = 1 }) {
   const [step, setStep]         = useState('config'); // 'config' | 'share'
   const [inviteUrl, setInviteUrl] = useState('');
   const [generating, setGenerating] = useState(false);
+  useBackButton(step === 'share', () => setStep('config'));
 
   const handleGenerate = async (permission, label) => {
     setGenerating(true);
