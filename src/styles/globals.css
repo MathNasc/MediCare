@@ -201,22 +201,25 @@ button, .btn {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  padding-top: env(safe-area-inset-top, 24px);
 }
 .bottom-sheet-content {
   border-radius: 28px 28px 0 0;
   width: 100%;
   max-width: 480px;
-  max-height: 92vh;
+  max-height: calc(100dvh - 24px);
   transition: all 0.3s ease;
+  box-sizing: border-box;
 }
-
 @media (min-width: 768px) {
   .bottom-sheet-overlay {
     align-items: center;
+    padding: 40px 24px;
+    box-sizing: border-box;
   }
   .bottom-sheet-content {
     border-radius: 28px;
     max-width: 540px;
-    max-height: 85vh;
+    max-height: 100%;
   }
 }

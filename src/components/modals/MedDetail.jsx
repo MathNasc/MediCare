@@ -33,7 +33,7 @@ export function MedDetail({ med, history, onClose, T, scale = 1 }) {
         style={{
           background: T.bg1, borderRadius: '28px 28px 0 0',
           width: '100%', maxWidth: 480,
-          maxHeight: '88vh', overflowY: 'auto', paddingBottom: 32,
+           overflowY: 'auto', paddingBottom: 32,
         }}
       >
         {/* Header */}

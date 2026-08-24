@@ -61,7 +61,7 @@ export function StockMovementModal({ med, quantityBefore, quantityAfter, onConfi
       <div
         className="anim-fadeUp"
         onClick={e => e.stopPropagation()}
-        style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', paddingBottom: 32 }}
+        style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480,  overflowY: 'auto', paddingBottom: 32 }}
       >
         {/* Header */}
         <div style={{ padding: '22px 20px 16px', textAlign: 'center' }}>

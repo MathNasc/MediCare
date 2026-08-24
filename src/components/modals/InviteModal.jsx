@@ -317,7 +317,7 @@ export function InviteModal({ onGenerate, onClose, T, scale = 1 }) {
           background: T.bg1,
           borderRadius: '28px 28px 0 0',
           width: '100%', maxWidth: 480,
-          maxHeight: '92vh', overflowY: 'auto',
+           overflowY: 'auto',
           paddingBottom: 32,
         }}
       >
