@@ -54,7 +54,7 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
           </div>
         </div>
         <button
-          onClick={() => { if (title.trim() && currentDate) onSave({ title, description, time, date: currentDate }); }}
+          onClick={() => { if (title.trim() && currentDate) onSave({ title, description, time: time || null, date: currentDate }); }}
           style={{ marginTop: 16, width: '100%', padding: 16, borderRadius: 13, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', fontWeight: 800, fontSize: 15 * scale, border: 'none' }}
         >
           {note ? 'Salvar alterações' : 'Adicionar anotação'}
@@ -105,7 +105,7 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
           <textarea rows={3} style={{ ...inp, resize: 'none' }} placeholder="Observações opcionais…" value={description} onChange={e => setDesc(e.target.value)} />
         </div>
         <button
-          onClick={() => { if (title.trim() && currentDate) onSave({ type, title, description, time, doctor, location, date: currentDate }); }}
+          onClick={() => { if (title.trim() && currentDate) onSave({ type, title, description, time: time || null, doctor, location, date: currentDate }); }}
           style={{ marginTop: 16, width: '100%', padding: 16, borderRadius: 13, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', fontWeight: 800, fontSize: 15 * scale, border: 'none' }}
         >
           {event ? 'Salvar alterações' : 'Adicionar evento'}
@@ -522,18 +522,42 @@ export function CalendarScreen({ T, scale }) {
 
   const monthPrefix = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
   const monthHist   = history.filter(h => new Date(h.created_at).toISOString().startsWith(monthPrefix));
-  const monthConf   = monthHist.filter(h => h.status === 'confirmed').length;
-  const monthLate   = monthHist.filter(h => h.atraso_minutos > 0).length;
-  const monthMissed = monthHist.filter(h => h.status === 'missed').length;
-  const monthTotal  = monthConf + monthMissed;
+
+  const monthSOS    = monthHist.filter(h => meds.find(m => m.id === h.med_id)?.treatment_type === 'sos').length;
+  const monthConf   = monthHist.filter(h => h.status === 'confirmed' && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
+  const monthLate   = monthHist.filter(h => h.atraso_minutos > 0 && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
+
+  let monthMissed = 0;
+  let monthTotal = 0;
+
+  const activeContinuousMeds = meds.filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos');
+  const expectedPerDay = activeContinuousMeds.reduce((acc, m) => acc + (m.horarios?.length || 1), 0);
+  const lastDayOfMonth = getDaysInMonth(viewYear, viewMonth);
+
+  for (let d = 1; d <= lastDayOfMonth; d++) {
+    const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (dateStr >= today()) {
+      if (dateStr === today()) {
+        const todayHist = monthHist.filter(h => getLocalDateISO(new Date(h.created_at)) === today());
+        const todayConf = todayHist.filter(h => h.status === 'confirmed' && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
+        monthTotal += todayConf;
+      }
+      break; 
+    }
+
+    const dayHist = monthHist.filter(h => getLocalDateISO(new Date(h.created_at)) === dateStr);
+    const confirmedNonSOS = dayHist.filter(h => h.status === 'confirmed' && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
+    
+    monthTotal += expectedPerDay;
+    if (confirmedNonSOS < expectedPerDay) {
+      monthMissed += (expectedPerDay - confirmedNonSOS);
+    }
+  }
+
   const monthAdh    = monthTotal > 0 ? Math.round((monthConf / monthTotal) * 100) : 0;
   const monthNotes  = notes.length;
   const monthEvents = events.filter(e => e.type === 'consulta').length;
   const monthStock  = events.filter(e => e.type === 'estoque').length;
-  const monthSOS    = monthHist.filter(h => {
-    const med = meds.find(m => m.id === h.med_id);
-    return med?.treatment_type === 'sos';
-  }).length;
 
   const upcomingEvents = events.filter(e => e.date >= today() && e.type !== 'estoque').slice(0, 3);
 
