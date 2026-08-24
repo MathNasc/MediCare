@@ -125,7 +125,12 @@ export const SupaHist = {
          .gte('created_at', start.toISOString())
          .lte('created_at', end.toISOString())
          .limit(1);
-       if (existing && existing.length > 0) return existing[0];
+       if (existing && existing.length > 0) {
+         if (existing[0].status === 'confirmed') return existing[0];
+         const { data, error } = await supabase.from('historico_doses').update(row).eq('id', existing[0].id).select().single();
+         if (error) throw error;
+         return data;
+       }
     }
     const { data, error } = await supabase.from('historico_doses').insert(row).select().single();
     if (error) throw error;
@@ -133,7 +138,8 @@ export const SupaHist = {
   },
   async delete(id) {
     if (!supabase) return false;
-    const { error } = await supabase.from('historico_doses').delete().eq('id', id);
+    // Delete is blocked by RLS in this system (audit trail), so we update status to pending
+    const { error } = await supabase.from('historico_doses').update({ status: 'pending' }).eq('id', id);
     if (error) throw error;
     return true;
   }
