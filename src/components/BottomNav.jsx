@@ -5,7 +5,7 @@ const TABS = [
   { id: 'home',     emoji: '🏠', label: 'Início'    },
   { id: 'meds',     emoji: '💊', label: 'Medicamentos' },
   { id: 'calendar', emoji: '📅', label: 'Calendário' },
-  { id: 'ai',       emoji: '✨', label: 'IA'        },
+  { id: 'ai',       emoji: '🩺', label: 'Assistente' },
   { id: 'profile',  emoji: '👤', label: 'Perfil'    },
 ];
 
