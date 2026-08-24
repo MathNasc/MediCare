@@ -104,7 +104,7 @@ export const SupaMeds = {
 
 // ─── History ──────────────────────────────────────────────────────────────────
 export const SupaHist = {
-  async list(userId, limit = 50) {
+  async list(userId, limit = 500) {
     if (!supabase) return [];
     const { data } = await supabase.from('historico_doses').select('*')
       .eq('user_id', userId).order('created_at', { ascending: false }).limit(limit);

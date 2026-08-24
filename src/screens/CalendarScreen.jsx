@@ -108,7 +108,7 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
 // ─── Painel de detalhes do dia ────────────────────────────────────────────────
 function DayPanel({
   dateStr, history, meds, notes, events, obs, user, role,
-  onAddNote, onEditNote, onDeleteNote, onAddEvent, onDeleteEvent,
+  onAddNote, onEditNote, onDeleteNote, onAddEvent, onEditEvent, onDeleteEvent,
   onConfirmRetroactive, onClose, T, scale,
 }) {
   const [filter, setFilter] = useState('todos');
@@ -377,7 +377,10 @@ function DayPanel({
                       {ev.location && <p style={{ color: T.sub,  fontSize: 12 * scale }}>📍 {ev.location}</p>}
                       {ev.description && <p style={{ color: T.muted, fontSize: 12 * scale, marginTop: 4 }}>{ev.description}</p>}
                     </div>
-                    <button onClick={() => onDeleteEvent(ev.id)} style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(239,68,68,.1)', color: C.red, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: 8 }}>🗑</button>
+                    <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+                      <button onClick={() => onEditEvent(ev)} style={{ width: 28, height: 28, borderRadius: 8, background: T.bg3, color: T.sub, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✏️</button>
+                      <button onClick={() => onDeleteEvent(ev.id)} style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(239,68,68,.1)', color: C.red, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🗑</button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -716,6 +719,7 @@ export function CalendarScreen({ T, scale }) {
           onEditNote={(note) => setNoteModal({ date: note.date, note })}
           onDeleteNote={handleDeleteNote}
           onAddEvent={(date) => setEventModal({ date })}
+          onEditEvent={(event) => setEventModal({ date: event.date, event })}
           onDeleteEvent={handleDeleteEvent}
           onConfirmRetroactive={confirmDoseRetroactive}
           onClose={() => setSelected(null)}
