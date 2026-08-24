@@ -16,7 +16,23 @@ export const WEEK_S = ['D','S','T','Q','Q','S','S'];
 export const WEEK   = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 export const DEF_HOURS = ['08:00','14:00','20:00'];
 
-export function TK(dark) {
+export function TK(dark, hc) {
+  if (hc) {
+    return {
+      bg0:   dark ? '#000000' : '#ffffff',
+      bg1:   dark ? '#111111' : '#f9f9f9',
+      bg2:   dark ? '#222222' : '#eeeeee',
+      bg3:   dark ? '#444444' : '#dddddd',
+      txt:   dark ? '#ffffff' : '#000000',
+      sub:   dark ? '#dddddd' : '#222222',
+      muted: dark ? '#aaaaaa' : '#555555',
+      bdr:   dark ? '#444444' : '#cccccc',
+      nav:   dark ? '#000000' : '#ffffff',
+      inp:   dark ? '#111111' : '#ffffff',
+      inpB:  dark ? '#666666' : '#999999',
+      shadow:dark ? '0 8px 32px rgba(0,0,0,.8)' : '0 8px 32px rgba(0,0,0,.15)',
+    };
+  }
   return {
     bg0:   dark ? '#0f172a' : '#f8fafc',
     bg1:   dark ? '#1e293b' : '#ffffff',

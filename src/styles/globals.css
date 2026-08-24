@@ -96,3 +96,102 @@ button, .btn {
   color: inherit !important;
   filter: invert(0.8); /* Optional: ensures it's visible on dark backgrounds if it relies on text color */
 }
+
+/* Responsive Containers */
+.main-container {
+  max-width: 480px;
+  margin: 0 auto;
+  transition: max-width 0.3s ease;
+}
+@media (min-width: 768px) {
+  .main-container {
+    max-width: 720px;
+  }
+}
+@media (min-width: 1024px) {
+  .main-container {
+    max-width: 960px;
+  }
+}
+
+.bottom-nav-container {
+  max-width: 480px;
+  margin: 0 auto;
+  transition: max-width 0.3s ease;
+}
+@media (min-width: 768px) {
+  .bottom-nav-container {
+    max-width: 720px;
+  }
+}
+@media (min-width: 1024px) {
+  .bottom-nav-container {
+    max-width: 960px;
+  }
+}
+
+/* Modal Responsiveness */
+.modal-container {
+  width: 100%;
+  max-width: 480px;
+  transition: max-width 0.3s ease;
+}
+@media (min-width: 768px) {
+  .modal-container {
+    max-width: 540px;
+  }
+}
+
+/* Two-column grids for tablet/desktop */
+.grid-responsive {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 768px) {
+  .grid-responsive {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Calendar desktop layout */
+.calendar-responsive {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (min-width: 1024px) {
+  .calendar-responsive {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .calendar-responsive > div:first-child {
+    flex: 1.5;
+  }
+  .calendar-responsive > div:last-child {
+    flex: 1;
+  }
+}
+
+/* Reset margin-bottom inside grid-responsive for direct children */
+.grid-responsive > div {
+  margin-bottom: 0 !important;
+}
+
+/* High Contrast Accessibility Mode */
+.high-contrast button,
+.high-contrast input,
+.high-contrast select,
+.high-contrast .btn,
+.high-contrast [role="button"] {
+  min-height: 44px !important;
+  min-width: 44px !important;
+}
+
+.high-contrast p,
+.high-contrast h1,
+.high-contrast h2,
+.high-contrast h3,
+.high-contrast span {
+  text-shadow: 0 1px 1px rgba(0,0,0,0.1); /* slight definition */
+}

@@ -182,7 +182,7 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
           </button>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="grid-responsive">
           {activeList.map((m) => {
             const isSOS = m.treatment_type === 'sos';
             const todayDone = history.filter(

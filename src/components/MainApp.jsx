@@ -225,7 +225,7 @@ function InnerApp() {
       setProfileLoading(false);
     }
   }, [user]);
-  const { dark, toggle, T } = useTheme();
+  const { dark, toggle, hc, toggleHc, T } = useTheme();
   const { size: fsSize, set: setFs, scale } = useFontScale();
   const { list: toasts, show: toast } = useToast();
   const { canInstall, install } = usePWAInstall();
@@ -416,8 +416,8 @@ function InnerApp() {
 
       <main
         role="main"
+        className="main-container"
         style={{
-          maxWidth: 480, margin: '0 auto',
           padding: `calc(${22 + bannerHeight}px + env(safe-area-inset-top, 0px)) 16px 96px`,
           minHeight: '100vh',
         }}
@@ -429,7 +429,7 @@ function InnerApp() {
             {tab === 'calendar' && <CalendarScreen {...screenProps} />}
             {tab === 'stats'    && <StatsScreen    {...screenProps} />}
             {tab === 'ai'       && <AIScreen       {...screenProps} />}
-            {tab === 'profile'  && <ProfileScreen  {...screenProps} dark={dark} toggle={toggle} fsSize={fsSize} setFs={setFs} />}
+            {tab === 'profile'  && <ProfileScreen  {...screenProps} dark={dark} toggle={toggle} hc={hc} toggleHc={toggleHc} fsSize={fsSize} setFs={setFs} />}
           </Suspense>
         </ErrorBoundary>
       </main>

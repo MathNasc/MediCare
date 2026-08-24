@@ -45,10 +45,10 @@ export function HomeScreen({ T, scale, onQuickConfirm, onUndoDose, onSnooze }) {
       )}
 
       {/* Next dose hero */}
-      {nextDose && <NextDoseHero dose={nextDose} onConfirm={onQuickConfirm} onSnooze={onSnooze} T={T} scale={scale} />}
-
-      {/* Progress */}
-      <DayProgress doses={doses} T={T} scale={scale} />
+      <div className="grid-responsive" style={{ marginBottom: 14 }}>
+        {nextDose && <NextDoseHero dose={nextDose} onConfirm={onQuickConfirm} onSnooze={onSnooze} T={T} scale={scale} />}
+        <DayProgress doses={doses} T={T} scale={scale} />
+      </div>
 
       {/* Timeline */}
       <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 16 }}>

@@ -28,7 +28,7 @@ function FullSubScreen({ children, bg }) {
   
   return createPortal(
     <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: bg, zIndex: 200, overflowY: 'auto' }}>
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: 'calc(env(safe-area-inset-top, 0px) + 22px) 16px 96px' }}>
+      <div className="main-container" style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 22px) 16px 96px' }}>
         {children}
       </div>
     </div>,
@@ -36,7 +36,7 @@ function FullSubScreen({ children, bg }) {
   );
 }
 
-export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle }) {
+export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggleHc }) {
   const { user, logout, meds } = useApp();
   const [permission, setPermission] = useState('default');
   const { setup, disable, isSubscribed } = useNotifications(meds, user?.id);
@@ -111,7 +111,9 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle }) {
         <div className="anim-fadeUp">
           <h2 style={{ color: T.txt, fontSize: 28 * scale, fontWeight: 800, marginBottom: 24, paddingTop: 10 }}>Meu Perfil</h2>
           
-          {/* Cabeçalho */}
+          <div className="grid-responsive">
+            <div>
+            {/* Cabeçalho */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
             <div style={{ position: 'relative' }}>
               <div 
@@ -147,7 +149,9 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle }) {
             </div>
           </div>
 
-          {/* Menu Principal */}
+          </div>
+            <div>
+            {/* Menu Principal */}
           <div style={{ background: T.bg1, borderRadius: 24, padding: '0 20px', border: `1px solid ${T.bdr}`, marginBottom: 24 }}>
             <NavItem icon="👤" title="Dados pessoais" subtitle="Nome, nascimento, peso, altura..." onClick={() => setActiveView('personal')} />
             <NavItem icon="❤️" title="Saúde" subtitle="Alergias e condições importantes..." onClick={() => setActiveView('health')} />
@@ -164,6 +168,8 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle }) {
           <button onClick={logout} style={{ width: '100%', padding: '16px', borderRadius: 16, background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', color: '#f87171', fontWeight: 700, fontSize: 16 * scale, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, cursor: 'pointer' }}>
             🚪 Sair da conta
           </button>
+          </div>
+          </div>
         </div>
       )}
 
@@ -255,12 +261,17 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle }) {
                 ))}
               </div>
             </div>
-            <div style={{ padding: '16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 24 }}>♿</span>
-              <div>
-                <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>Acessibilidade</p>
-                <p style={{ color: T.muted, fontSize: 13 * scale }}>Alto contraste, botões 44px+</p>
+            <div style={{ padding: '16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 24 }}>♿</span>
+                <div>
+                  <p style={{ color: T.txt, fontWeight: 700, fontSize: 16 * scale }}>Acessibilidade</p>
+                  <p style={{ color: T.muted, fontSize: 13 * scale }}>Alto contraste, botões 44px+</p>
+                </div>
               </div>
+              <button onClick={toggleHc} style={{ padding: '8px 16px', borderRadius: 12, background: hc ? C.blue : T.bg2, color: hc ? '#fff' : T.txt, fontWeight: 700, fontSize: 13 * scale, border: 'none' }}>
+                Alternar
+              </button>
             </div>
             <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{ fontSize: 24 }}>🔔</span>

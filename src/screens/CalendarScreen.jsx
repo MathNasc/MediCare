@@ -632,6 +632,8 @@ export function CalendarScreen({ T, scale }) {
         <button onClick={() => setShowSearch(s => !s)} style={{ width: 40, height: 40, borderRadius: 12, background: T.bg1, border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔍</button>
       </div>
 
+      <div className="calendar-responsive">
+        <div>
       {showSearch && (
         <div style={{ marginBottom: 14 }}>
           <input
@@ -748,6 +750,8 @@ export function CalendarScreen({ T, scale }) {
         </button>
       </div>
 
+      </div>
+        <div>
       {/* Resumo mensal */}
       <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 16, marginBottom: 14 }}>
         <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 700, marginBottom: 14 }}>📊 Resumo — {MONTHS[viewMonth]} {viewYear}</p>
@@ -771,6 +775,8 @@ export function CalendarScreen({ T, scale }) {
       </div>
 
       {/* Painel do dia selecionado */}
+      </div>
+      </div>
       {selected && (
         <DayPanel
           dateStr={selected}

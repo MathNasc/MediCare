@@ -17,8 +17,8 @@ export function BottomNav({ tab, setTab, T, pendingCount, criticalCount }) {
       zIndex: 50, backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
     }}>
-      <div style={{
-        maxWidth: 480, margin: '0 auto',
+      <div className="bottom-nav-container" style={{
+        /* maxWidth replaced */
         display: 'flex', padding: '0 2px',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}>
@@ -42,7 +42,7 @@ export function BottomNav({ tab, setTab, T, pendingCount, criticalCount }) {
               }}
             >
               {badge > 0 && (
-                <div style={{
+                <div className="bottom-nav-container" style={{
                   position: 'absolute', top: 5, right: '10%',
                   width: 16, height: 16, borderRadius: '50%',
                   background: C.red, display: 'flex',
@@ -52,7 +52,7 @@ export function BottomNav({ tab, setTab, T, pendingCount, criticalCount }) {
                   {badge}
                 </div>
               )}
-              <div style={{
+              <div className="bottom-nav-container" style={{
                 width: 34, height: 24, borderRadius: 8,
                 background: active ? 'rgba(59,130,246,.15)' : 'transparent',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -70,7 +70,7 @@ export function BottomNav({ tab, setTab, T, pendingCount, criticalCount }) {
                 {t.label}
               </span>
               {active && (
-                <div style={{
+                <div className="bottom-nav-container" style={{
                   position: 'absolute', bottom: 0,
                   left: '25%', right: '25%', height: 2,
                   borderRadius: 99, background: C.blue,
