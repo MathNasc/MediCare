@@ -119,7 +119,7 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
 function DayPanel({
   dateStr, history, meds, notes, events, obs, user, role,
   onAddNote, onEditNote, onDeleteNote, onAddEvent, onEditEvent, onDeleteEvent,
-  onConfirmRetroactive, onClose, T, scale,
+  onConfirmRetroactive, onAddObs, onClose, T, scale,
 }) {
   const [filter, setFilter] = useState('todos');
   const [obsText, setObsText] = useState('');
@@ -140,7 +140,7 @@ function DayPanel({
     .flatMap(m =>
       (m.horarios || ['08:00']).map(hora => {
         const hist = dayHistory.find(h => h.med_id === m.id && h.hora === hora);
-        const obsEntry = obs.find(o => o.med_id === m.id && o.hora === hora);
+        const obsEntry = obs.find(o => o.med_id === m.id && o.hora === hora && o.date === dateStr);
         return { med: m, hora, hist, obs: obsEntry };
       })
     ).sort((a, b) => a.hora.localeCompare(b.hora));
@@ -304,9 +304,13 @@ function DayPanel({
                           <button
                             onClick={async () => {
                               if (!obsText.trim()) return;
-                              await ObsDB.add({ user_id: user.id, med_id: med.id, hora, date: dateStr, hist_id: hist?.id, observation: obsText });
-                              setObsText(''); setObsTarget(null);
-                              window.location.reload();
+                              try {
+                                const newObs = await ObsDB.add({ user_id: user.id, med_id: med.id, hora, date: dateStr, hist_id: hist?.id || null, observation: obsText });
+                                if (onAddObs) onAddObs(newObs);
+                                setObsText(''); setObsTarget(null);
+                              } catch (err) {
+                                alert(err.message || 'Erro ao salvar observação');
+                              }
                             }}
                             style={{ flex: 1, padding: '8px', borderRadius: 8, background: '#3b82f6', color: '#fff', fontWeight: 700, fontSize: 12 * scale, border: 'none' }}
                           >Salvar</button>
@@ -727,6 +731,7 @@ export function CalendarScreen({ T, scale }) {
           notes={notes}
           events={events}
           obs={obs}
+          onAddObs={(newObs) => setObs(prev => [...prev, newObs])}
           user={user}
           role={role}
           onAddNote={(date) => setNoteModal({ date })}

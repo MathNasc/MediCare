@@ -36,7 +36,7 @@ export function EmergencyCard({ user, profile, onBack, T, scale }) {
       <div style={{ background: '#ef4444', color: '#fff', padding: 24, borderRadius: 24, marginBottom: 40, boxShadow: '0 10px 25px rgba(239,68,68,.3)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
           {s.show_photo && (
-            <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <div style={{ position: 'relative', width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
               {profile?.foto_url ? <Image src={profile.foto_url} alt="Foto" fill style={{ objectFit: 'cover' }} sizes="64px" /> : <span style={{ fontSize: 30 }}>{profile?.nome?.[0]?.toUpperCase()}</span>}
             </div>
           )}

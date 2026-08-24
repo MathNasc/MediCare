@@ -116,7 +116,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle }) {
             <div style={{ position: 'relative' }}>
               <div 
                 onClick={() => fileInputRef.current?.click()}
-                style={{ width: 100, height: 100, borderRadius: '50%', background: T.bg2, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', border: `2px solid ${C.blue}` }}
+                style={{ position: 'relative', width: 100, height: 100, borderRadius: '50%', background: T.bg2, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', border: `2px solid ${C.blue}` }}
               >
                 {uploadingAvatar ? <span style={{ fontSize: 14 * scale, color: T.sub }}>...</span> 
                  : profile?.foto_url ? <Image src={profile.foto_url} alt="Avatar" fill style={{ objectFit: 'cover' }} sizes="80px" /> 
