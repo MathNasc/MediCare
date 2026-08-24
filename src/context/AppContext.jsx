@@ -6,6 +6,7 @@ import { AuditDB } from '@/lib/supabaseAudit';
 import { StockDB } from '@/lib/supabaseStock';
 import { computeEndDate, isTemporaryExpired } from '@/lib/treatmentTypes';
 import { supabase } from '@/lib/supabase';
+import { getLocalDateISO, getLocalTime } from '@/lib/dateUtils';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 const inFlightDoses = new Set();
@@ -78,7 +79,7 @@ export function AppProvider({ children }) {
         if (h.is_retroactive) {
           const log = auditLogs.find(a => 
              (a.action === 'dose_status_updated' && a.old_value?.id === h.id) ||
-             (a.action === 'dose_confirmed_retroactively' && a.new_value?.hora === h.hora && a.new_value?.date === new Date(h.created_at).toISOString().slice(0, 10))
+             (a.action === 'dose_confirmed_retroactively' && a.new_value?.hora === h.hora && a.new_value?.date === getLocalDateISO(new Date(h.created_at)))
           );
           if (log && log.reason) h.motivo_correcao = log.reason;
         }
@@ -359,7 +360,7 @@ export function AppProvider({ children }) {
         try {
           const { EventsDB } = await import('@/lib/supabaseCalendar');
           const isIncrease = quantityAfter > quantityBefore;
-          const toISO = (d) => d.toISOString().slice(0, 10);
+          const toISO = (d) => getLocalDateISO(d);
           
           await EventsDB.add({
             user_id: state.user.id,
@@ -408,7 +409,7 @@ export function AppProvider({ children }) {
         return data;
       } catch { /* fallback abaixo */ }
     }
-    const monthPrefix = new Date().toISOString().slice(0, 7);
+    const monthPrefix = getLocalDateISO().slice(0, 7);
     return {
       continuous_count:    state.meds.filter(m => (m.treatment_type || 'continuous') === 'continuous' && m.ativo).length,
       active_treatments:   state.meds.filter(m => m.treatment_type === 'temporary' && m.status === 'ativo').length,

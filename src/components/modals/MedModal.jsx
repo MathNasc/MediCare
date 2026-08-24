@@ -19,6 +19,7 @@ import { BrDateInput } from "@/components/ui/BrDateInput";
 // confirmar que tudo está funcionando.
 
 import { useState } from 'react';
+import { getLocalDateISO } from '@/lib/dateUtils';
 import { useBackButton } from '@/hooks/useBackButton';
 import { PILL_COLORS, UNITS, WEEK_S, C } from '@/lib/theme';
 import { MEDICINE_TYPES } from '@/data/medicationCatalog';
@@ -88,7 +89,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   const [saving, setSaving] = useState(false);
 
   const [treatmentType, setTreatmentType] = useState(med?.treatment_type || 'continuous');
-  const [startDate, setStartDate] = useState(med?.start_date || new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(med?.start_date || getLocalDateISO());
   const [durationDays, setDurationDays] = useState(
     med?.treatment_days || (med?.start_date && med?.end_date ? calcTreatmentDays(med.start_date, med.end_date) : 7)
   );

@@ -6,6 +6,7 @@ import { BrDateInput } from "@/components/ui/BrDateInput";
 
 import { useState } from 'react';
 import { usePatientDashboard, useMyPatients, PERMISSION_LEVELS } from '@/hooks/useCaregiver';
+import { getLocalDateISO, getLocalTime } from '@/lib/dateUtils';
 import { useApp } from '@/context/AppContext';
 import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
 import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
@@ -127,19 +128,19 @@ function HistoryList({ history, T, scale }) {
 // ─── Aba Calendário: correção retroativa (justificativa obrigatória) ──────────
 function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
   const { confirmDoseRetroactive } = useApp();
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => getLocalDateISO());
   const [modalDose, setModalDose]       = useState(null);
   const [toast, setToast]               = useState('');
 
   useBackButton(modalDose !== null, () => setModalDose(null));
 
-  const isPast = (dateStr) => new Date(dateStr) < new Date(new Date().toDateString());
+  const isPast = (dateStr) => dateStr < getLocalDateISO();
 
   // Monta a lista de doses esperadas para a data selecionada, cruzando com o histórico
   const dosesForDate = meds.flatMap(med =>
     (med.horarios || []).map(hora => {
       const record = history.find(h =>
-        h.med_id === med.id && h.hora === hora && new Date(h.created_at).toISOString().slice(0, 10) === selectedDate
+        h.med_id === med.id && h.hora === hora && getLocalDateISO(new Date(h.created_at)) === selectedDate
       );
       return {
         medId: med.id,
@@ -181,7 +182,7 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
       <input
         type="date"
         value={selectedDate}
-        max={new Date().toISOString().slice(0, 10)}
+        max={getLocalDateISO()}
         onChange={e => setSelectedDate(e.target.value)}
         style={{
           width: '100%', background: T.inp, border: `1.5px solid ${T.inpB}`,

@@ -36,6 +36,7 @@
 // Isso já é o formato retornado por HistDB.list / SupaHist.list.
 
 import { useState } from 'react';
+import { getLocalDateISO } from '@/lib/dateUtils';
 import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
 import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
 import { canEditDoseAsSelf } from '@/lib/permissions';
@@ -46,7 +47,7 @@ export function RetroactiveDoseRow({ dose, selectedDate, role, userId, onConfirm
   const [toast, setToast]         = useState('');
 
   const isPastDay = new Date(selectedDate) < new Date(new Date().toDateString());
-  const isToday   = selectedDate === new Date().toISOString().slice(0, 10);
+  const isToday   = selectedDate === getLocalDateISO();
   const isEditable = isPastDay
     ? canEditDoseAsSelf(role, `${selectedDate}T${dose.hora}:00`, dose.record?.performed_by, userId)
     : false; // hoje usa o fluxo normal de confirmação (QuickConfirm), não o retroativo

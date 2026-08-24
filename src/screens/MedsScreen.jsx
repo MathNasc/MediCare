@@ -1,6 +1,7 @@
 'use client';
 import { BrDateInput } from "@/components/ui/BrDateInput";
 import { useState } from 'react';
+import { getLocalDateISO } from '@/lib/dateUtils';
 import { useBackButton } from '@/hooks/useBackButton';
 import { useApp } from '@/context/AppContext';
 import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal';
@@ -11,7 +12,7 @@ import { C } from '@/lib/theme';
 
 // ─── Modal: repetir tratamento (nova data de início) ──────────────────────────
 function RepeatTreatmentModal({ med, onConfirm, onClose, T, scale }) {
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(getLocalDateISO());
   const [saving, setSaving] = useState(false);
 
   const handleConfirm = async () => {

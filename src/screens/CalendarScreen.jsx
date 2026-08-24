@@ -13,7 +13,8 @@ import { TreatmentBadge } from '@/components/ui/TreatmentBadge';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const WEEK_LABELS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
-const toISO = (d) => d.toISOString().slice(0, 10);
+import { getLocalDateISO, getLocalTime } from "@/lib/dateUtils";
+const toISO = (d) => getLocalDateISO(d);
 const today = () => toISO(new Date());
 
 function getDaysInMonth(year, month) {
@@ -130,8 +131,9 @@ function DayPanel({
   const date = new Date(dateStr + 'T12:00:00');
   const label = date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const isFuture = dateStr > today();
+  const nowTime = getLocalTime();
 
-  const dayHistory = history.filter(h => new Date(h.created_at).toISOString().slice(0, 10) === dateStr);
+  const dayHistory = history.filter(h => getLocalDateISO(new Date(h.created_at)) === dateStr);
 
   const scheduledDoses = meds
     .filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos')
@@ -218,12 +220,14 @@ function DayPanel({
               )}
               {scheduledDoses.map(({ med, hora, hist, obs: obsEntry }) => {
                 const confirmed = hist?.status === 'confirmed';
-                const missed    = !hist && !isFuture;
+                const isDoseFuture = isFuture || (dateStr === today() && hora > nowTime);
+                const isPendingOrNone = !hist || hist.status === 'pending';
+                const missed    = isPendingOrNone && !isDoseFuture;
                 const color     = confirmed ? C.green : missed ? C.red : T.muted;
                 const icon      = confirmed ? '✓' : missed ? '✕' : '○';
                 const bgColor   = confirmed ? 'rgba(34,197,94,.08)' : missed ? 'rgba(239,68,68,.08)' : T.bg2;
 
-                const canOfferRetro = !isFuture && !confirmed;
+                const canOfferRetro = !isDoseFuture && !confirmed;
                 const editableNow   = canOfferRetro && isEditableBySelf(hora, hist);
                 const correctedByOther = Boolean(hist?.performed_by && hist.performed_by !== user.id);
 
@@ -485,7 +489,7 @@ export function CalendarScreen({ T, scale }) {
   };
 
   const getDayIndicator = (dateStr) => {
-    const dayHist   = history.filter(h => new Date(h.created_at).toISOString().slice(0, 10) === dateStr);
+    const dayHist   = history.filter(h => getLocalDateISO(new Date(h.created_at)) === dateStr);
     const dayNotes  = notes.filter(n => n.date === dateStr);
     const dayAllEvents = events.filter(e => e.date === dateStr);
     const dayStock  = dayAllEvents.filter(e => e.type === 'estoque');

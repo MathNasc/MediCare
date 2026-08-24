@@ -1,3 +1,4 @@
+import { getLocalDateISO } from "@/lib/dateUtils";
 import { STATUS } from './theme';
 
 export function minutesTill(hora) {
@@ -36,7 +37,7 @@ export function getDoseStatus(hora, confirmed) {
 //                 manualmente (ver AppContext.registerSOSUse).
 export function buildDoses(medList, history) {
   const today = new Date().toDateString();
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayISO = getLocalDateISO();
   const result = [];
 
   medList

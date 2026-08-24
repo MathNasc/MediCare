@@ -1,3 +1,4 @@
+import { getLocalDateISO } from "@/lib/dateUtils";
 // src/lib/treatmentTypes.js
 // ─── Tipos de tratamento ───────────────────────────────────────────────────────
 // Espelho client-side dos tipos definidos no banco (medicamentos.treatment_type).
@@ -94,6 +95,6 @@ export function getTreatmentProgress(med) {
  */
 export function isTemporaryExpired(med) {
   if (med?.treatment_type !== 'temporary' || !med.end_date) return false;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateISO();
   return med.end_date < today;
 }
