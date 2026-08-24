@@ -216,3 +216,12 @@ Também forneça um resumo conciso no chat: a falha mais provável, a premissa o
 - **O plano revisado deve ser concreto.** Não diga "considere testar seu preço". Diga "execute um piloto de US$ 47 com 20 pessoas antes de se comprometer com o workshop completo de US$ 297". Cada revisão deve ser algo que o usuário possa realmente fazer nesta semana.  
 - **Respeite o limite mínimo de contexto.** Executar um premortem com contexto insuficiente produz falhas genéricas que desperdiçam o tempo do usuário. É melhor fazer uma pergunta a mais do que produzir um premortem ruim.  
 - **Isso não é o Conselho LLM.** O conselho fornece várias perspectivas sobre uma decisão agora mesmo. O premortem envia a IA para o futuro, onde a decisão já falhou, e trabalha de trás para frente para explicar o porquê. Mecanismo psicológico diferente, resultado diferente. Se o usuário parece querer várias perspectivas em vez de uma análise de falhas, sugira o conselho em vez disso.
+
+---
+name: cleanup-test-files
+description: "Sempre que terminar testes ou investigações, limpe e delete arquivos temporários que foram gerados."
+---
+
+# Limpeza de Arquivos Temporários
+Sempre que gerar arquivos temporários para testes (como scripts `test.js`, rotas de API de diagnóstico isoladas, arquivos `output.json`, patches experimentais, etc) e a investigação ou teste for concluída com sucesso, você **DEVE** deletar esses arquivos. Mantenha o repositório limpo, focado apenas no código final do produto.
+

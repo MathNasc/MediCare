@@ -136,7 +136,7 @@ Deno.serve(async (_req) => {
           if (med.end_date && todayISO > med.end_date) continue;
         }
 
-        if (med.dias_semana && med.dias_semana.length > 0 && !med.dias_semana.includes(dayOfWeek)) continue;
+        if (med.dias_semana && med.dias_semana.length > 0 && !med.dias_semana.map(String).includes(String(dayOfWeek))) continue;
 
         for (const hora of horarios) {
           const [h, m] = hora.split(':').map(Number);
@@ -146,9 +146,9 @@ Deno.serve(async (_req) => {
           const diffMin = Math.floor((nowLocal.getTime() - doseTime.getTime()) / 60000);
           
           let targetType = null;
-          if (diffMin >= 0 && diffMin <= 2) targetType = 'DOSE';
-          else if (diffMin >= 10 && diffMin <= 12) targetType = 'REMINDER_1';
-          else if (diffMin >= 20 && diffMin <= 22) targetType = 'REMINDER_2';
+          if (diffMin >= 0 && diffMin <= 4) targetType = 'DOSE';
+          else if (diffMin >= 10 && diffMin <= 14) targetType = 'REMINDER_1';
+          else if (diffMin >= 20 && diffMin <= 24) targetType = 'REMINDER_2';
 
           if (!targetType) continue;
           
@@ -253,9 +253,9 @@ Deno.serve(async (_req) => {
         const diffMin = Math.floor((eventDateLocal.getTime() - nowLocal.getTime()) / 60000);
         
         let targetType = null;
-        if (diffMin >= 1438 && diffMin <= 1442) targetType = 'EVENT_1D'; // ~24h
-        else if (diffMin >= 298 && diffMin <= 302) targetType = 'EVENT_5H'; // ~5h
-        else if (diffMin >= 58 && diffMin <= 62) targetType = 'EVENT_1H'; // ~1h
+        if (diffMin >= 1435 && diffMin <= 1445) targetType = 'EVENT_1D'; // ~24h
+        else if (diffMin >= 295 && diffMin <= 305) targetType = 'EVENT_5H'; // ~5h
+        else if (diffMin >= 55 && diffMin <= 65) targetType = 'EVENT_1H'; // ~1h
 
         if (!targetType) continue;
 
