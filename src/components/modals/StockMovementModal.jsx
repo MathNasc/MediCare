@@ -56,7 +56,7 @@ export function StockMovementModal({ med, quantityBefore, quantityAfter, onConfi
       role="dialog"
       aria-modal="true"
       aria-label={isIncrease ? 'Reposição de estoque' : 'Ajuste de estoque'}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 340, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+      className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 340,  justifyContent: 'center' }}
     >
       <div
         className="anim-fadeUp"

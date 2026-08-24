@@ -23,7 +23,7 @@ function RepeatTreatmentModal({ med, onConfirm, onClose, T, scale }) {
   };
 
   return (
-    <div onClick={onClose} role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(14px)', zIndex: 320, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 16 }}>
+    <div onClick={onClose} role="dialog" aria-modal="true" className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(14px)', zIndex: 320,  justifyContent: 'center', padding: 16 }}>
       <div onClick={e => e.stopPropagation()} className="anim-scaleIn" style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 22, width: '100%', maxWidth: 420, padding: 22 }}>
         <p style={{ color: T.txt, fontWeight: 800, fontSize: 16 * scale, marginBottom: 6 }}>🔁 Repetir tratamento</p>
         <p style={{ color: T.sub, fontSize: 12 * scale, marginBottom: 16, lineHeight: 1.5 }}>

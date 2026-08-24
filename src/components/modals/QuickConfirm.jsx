@@ -17,7 +17,7 @@ export function QuickConfirm({ dose, onConfirm, onSnooze, onClose, T }) {
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)',
         backdropFilter: 'blur(14px)', zIndex: 300,
-        display: 'flex', alignItems: 'flex-end',
+        /* flex-end */
         justifyContent: 'center', padding: 16,
       }}
     >

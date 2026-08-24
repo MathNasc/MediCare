@@ -195,3 +195,28 @@ button, .btn {
 .high-contrast span {
   text-shadow: 0 1px 1px rgba(0,0,0,0.1); /* slight definition */
 }
+
+/* Responsive Bottom Sheet / Modal */
+.bottom-sheet-overlay {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.bottom-sheet-content {
+  border-radius: 28px 28px 0 0;
+  width: 100%;
+  max-width: 480px;
+  max-height: 92vh;
+  transition: all 0.3s ease;
+}
+
+@media (min-width: 768px) {
+  .bottom-sheet-overlay {
+    align-items: center;
+  }
+  .bottom-sheet-content {
+    border-radius: 28px;
+    max-width: 540px;
+    max-height: 85vh;
+  }
+}

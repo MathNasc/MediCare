@@ -34,7 +34,7 @@ export function SOSQuickLogModal({ med, onConfirm, onClose, T, scale = 1 }) {
       role="dialog"
       aria-modal="true"
       aria-label={`Registrar uso de ${med.nome}`}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(14px)', zIndex: 320, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 16 }}
+      className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(14px)', zIndex: 320,  justifyContent: 'center', padding: 16 }}
     >
       <div
         className="anim-scaleIn"

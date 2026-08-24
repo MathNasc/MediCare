@@ -35,7 +35,7 @@ const STEPS = { SEARCH: 'search', TREATMENT: 'treatment', FORM: 'form' };
 function CatalogPreview({ item, T, scale }) {
   const cfg = MEDICINE_TYPES[item.medicine_type] || MEDICINE_TYPES.outro;
   return (
-    <div style={{ background: `${cfg.color}10`, border: `1.5px solid ${cfg.color}40`, borderRadius: 16, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+    <div style={{ background: `${cfg.color}10`, border: `1.5px solid ${cfg.color}40`, borderRadius: 16, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
       <div style={{ width: 44, height: 44, borderRadius: 12, background: cfg.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
         {item.is_custom ? '✨' : '💊'}
       </div>
@@ -250,9 +250,8 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   if (step === STEPS.SEARCH) {
     return (
       <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Adicionar medicamento"
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-        <div className="anim-fadeUp" onClick={e => e.stopPropagation()}
-          style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480, height: '90vh', display: 'flex', flexDirection: 'column' }}>
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300,  justifyContent: 'center' }}>
+        <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1,  height: '90vh', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px 16px 12px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
             <div style={{ width: 44, height: 44, borderRadius: 13, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>💊</div>
             <div style={{ flex: 1 }}>
@@ -274,9 +273,8 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   if (step === STEPS.TREATMENT) {
     return (
       <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Tipo de tratamento"
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-        <div className="anim-fadeUp" onClick={e => e.stopPropagation()}
-          style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto', paddingBottom: 32 }}>
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300,  justifyContent: 'center' }}>
+        <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1,  maxHeight: '92vh', overflowY: 'auto', paddingBottom: 32 }}>
           <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 10, position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
             <button onClick={() => setStep(STEPS.SEARCH)} aria-label="Voltar" style={{ width: 36, height: 36, borderRadius: '50%', background: T.bg3, border: 'none', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <div>
@@ -306,9 +304,9 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
   return (
     <div onClick={onClose} role="dialog" aria-modal="true" aria-label={isEditing ? 'Editar medicamento' : 'Novo medicamento'}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300,  justifyContent: 'center' }}>
       <div className="anim-fadeUp" onClick={e => e.stopPropagation()}
-        style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto', paddingBottom: 36 }}>
+        style={{ background: T.bg1,  maxHeight: '92vh', overflowY: 'auto', paddingBottom: 36 }}>
 
         <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

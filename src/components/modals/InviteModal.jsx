@@ -307,7 +307,7 @@ export function InviteModal({ onGenerate, onClose, T, scale = 1 }) {
         background: 'rgba(0,0,0,.82)',
         backdropFilter: 'blur(16px)',
         zIndex: 300,
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        /* flex-end */ justifyContent: 'center',
       }}
     >
       <div

@@ -58,7 +58,7 @@ export function RetroactiveConfirmModal({
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)',
-        zIndex: 350, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        zIndex: 350, /* flex-end */ justifyContent: 'center',
       }}
     >
       <div

@@ -39,8 +39,8 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
   const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(12px)', zIndex: 400, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} className="anim-fadeUp" style={{ background: T.bg1, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, padding: 24, paddingBottom: 36 }}>
+    <div onClick={onClose} className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(12px)', zIndex: 400 }}>
+      <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1, padding: 24, paddingBottom: 36 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h3 style={{ color: T.txt, fontSize: 17 * scale, fontWeight: 800 }}>{note ? 'Editar anotação' : 'Nova anotação'}</h3>
           <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: '50%', background: T.bg3, color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
@@ -79,8 +79,8 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
   const manualTypes = ['consulta', 'exame', 'procedimento', 'outro'];
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(12px)', zIndex: 400, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} className="anim-fadeUp" style={{ background: T.bg1, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, padding: 24, paddingBottom: 36, maxHeight: '90vh', overflowY: 'auto' }}>
+    <div onClick={onClose} className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(12px)', zIndex: 400 }}>
+      <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1, padding: 24, paddingBottom: 36, overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h3 style={{ color: T.txt, fontSize: 17 * scale, fontWeight: 800 }}>{event ? 'Editar evento' : 'Novo evento'}</h3>
           <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: '50%', background: T.bg3, color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
@@ -189,8 +189,8 @@ function DayPanel({
   };
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(14px)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} className="anim-fadeUp" style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto', paddingBottom: 32 }}>
+    <div onClick={onClose} className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(14px)', zIndex: 300 }}>
+      <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1, overflowY: 'auto', paddingBottom: 32 }}>
         {/* Header */}
         <div style={{ padding: '20px 20px 14px', borderBottom: `1px solid ${T.bdr}`, position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>

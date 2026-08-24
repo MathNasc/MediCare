@@ -24,7 +24,7 @@ export function MedDetail({ med, history, onClose, T, scale = 1 }) {
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)',
         backdropFilter: 'blur(16px)', zIndex: 300,
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        /* flex-end */ justifyContent: 'center',
       }}
     >
       <div
