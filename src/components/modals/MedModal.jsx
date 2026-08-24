@@ -1,4 +1,5 @@
 'use client';
+import { BrDateInput } from "@/components/ui/BrDateInput";
 // src/components/modals/MedModal.jsx
 // Modal de cadastro/edição de medicamento com catálogo + tipo de tratamento
 // + detecção automática de reposição/ajuste de estoque.
@@ -399,7 +400,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
                 <div>
                   <label style={{ color: T.sub, fontSize: 10.5 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', display: 'block', marginBottom: 6 }}>Início</label>
-                  <input type="date" style={inp} value={startDate} onChange={e => setStartDate(e.target.value)} />
+                  <BrDateInput style={inp} value={startDate} onChange={e => setStartDate(e.target.value)} />
                 </div>
                 <div>
                   <label style={{ color: T.sub, fontSize: 10.5 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', display: 'block', marginBottom: 6 }}>Duração (dias)</label>

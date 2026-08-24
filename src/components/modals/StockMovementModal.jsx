@@ -1,4 +1,5 @@
 'use client';
+import { BrDateInput } from "@/components/ui/BrDateInput";
 // src/components/modals/StockMovementModal.jsx
 // Modal exibido automaticamente quando o usuário altera manualmente a
 // quantidade de um medicamento (dentro de MedModal, ao editar).
@@ -120,7 +121,7 @@ export function StockMovementModal({ med, quantityBefore, quantityAfter, onConfi
               </div>
               <div>
                 <label style={label}>Data de validade</label>
-                <input type="date" style={inp} value={expirationDate} onChange={e => setExpirationDate(e.target.value)} />
+                <BrDateInput style={inp} value={expirationDate} onChange={e => setExpirationDate(e.target.value)} />
               </div>
             </div>
           )}

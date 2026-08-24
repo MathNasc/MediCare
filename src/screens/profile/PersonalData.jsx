@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { BrDateInput } from "@/components/ui/BrDateInput";
 import { ProfileDB } from '@/lib/profileDb';
 import { C } from '@/lib/theme';
 
@@ -62,7 +63,7 @@ export function PersonalData({ user, profile, onUpdate, onBack, T, scale }) {
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}>
             <label style={lbl}>Data de nascimento</label>
-            <input type="date" style={inp} value={form.dob} onChange={e => handleChange('dob', e.target.value)} />
+            <BrDateInput style={inp} value={form.dob} onChange={e => handleChange('dob', e.target.value)} />
           </div>
           <div style={{ flex: 1 }}>
             <label style={lbl}>Sexo</label>

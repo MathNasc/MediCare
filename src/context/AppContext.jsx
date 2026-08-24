@@ -69,7 +69,22 @@ export function AppProvider({ children }) {
       await checkExpiredTreatments(userId, ms);
       ms = await MedDB.list(userId);
 
-      const hist = await HistDB.list(userId);
+      const [histRaw, auditLogs] = await Promise.all([
+        HistDB.list(userId),
+        AuditDB.listLogs(userId, 500)
+      ]);
+
+      const hist = histRaw.map(h => {
+        if (h.is_retroactive) {
+          const log = auditLogs.find(a => 
+             (a.action === 'dose_status_updated' && a.old_value?.id === h.id) ||
+             (a.action === 'dose_confirmed_retroactively' && a.new_value?.hora === h.hora && a.new_value?.date === new Date(h.created_at).toISOString().slice(0, 10))
+          );
+          if (log && log.reason) h.motivo_correcao = log.reason;
+        }
+        return h;
+      });
+
       dispatch({ type: 'SET_DATA', meds: ms, history: hist });
     } catch (err) {
       dispatch({ type: 'SET_ERROR', error: err.message });

@@ -12,7 +12,7 @@ import { C } from '@/lib/theme';
  * @param {boolean} props.isRetroactive    - true se a dose foi confirmada fora do horário original
  * @param {string}  props.correctedAt      - timestamp ISO da correção
  */
-export function CaregiverBadge({ correctedByOther, correctorName, isRetroactive, correctedAt, scale = 1 }) {
+export function CaregiverBadge({ correctedByOther, correctorName, isRetroactive, correctedAt, reason, scale = 1 }) {
   if (!correctedByOther && !isRetroactive) return null;
 
   const label = correctedByOther
@@ -40,7 +40,7 @@ export function CaregiverBadge({ correctedByOther, correctorName, isRetroactive,
         fontWeight: 700,
         color: correctedByOther ? '#8b5cf6' : C.amber,
       }}>
-        {label}{dateLabel ? ` · ${dateLabel}` : ''}
+        {label}{dateLabel ? ` · ${dateLabel}` : ''}{reason ? ` · Motivo: ${reason}` : ''}
       </span>
     </div>
   );

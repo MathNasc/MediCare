@@ -1,4 +1,5 @@
 'use client';
+import { BrDateInput } from "@/components/ui/BrDateInput";
 import { useState } from 'react';
 import { useBackButton } from '@/hooks/useBackButton';
 import { C } from '@/lib/theme';
@@ -131,7 +132,7 @@ export function OnboardingWizard({ profile, onComplete, T, scale }) {
             <input style={inp} value={personal.social_name} onChange={e => setPersonal(p => ({ ...p, social_name: e.target.value }))} placeholder="Como gostaria de ser chamado?" />
             
             <label style={lbl}>Data de Nascimento</label>
-            <input type="date" style={inp} value={personal.dob} onChange={e => setPersonal(p => ({ ...p, dob: e.target.value }))} />
+            <BrDateInput style={inp} value={personal.dob} onChange={e => setPersonal(p => ({ ...p, dob: e.target.value }))} />
             
             <label style={lbl}>Tipo Sanguíneo</label>
             <select style={inp} value={personal.blood_type} onChange={e => setPersonal(p => ({ ...p, blood_type: e.target.value }))}>

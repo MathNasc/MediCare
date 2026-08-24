@@ -1,4 +1,5 @@
 'use client';
+import { BrDateInput } from "@/components/ui/BrDateInput";
 // src/screens/CaregiverDashboard.jsx
 // Dashboard do CUIDADOR — acompanha um paciente em tempo real.
 // Abas: Resumo, Remédios, Histórico, Calendário (correção retroativa), Notas.
@@ -113,7 +114,7 @@ function HistoryList({ history, T, scale }) {
                 </span>
               </div>
               {h.performed_by && h.performed_by !== h.user_id && (
-                <CaregiverBadge correctedByOther correctorName="você" isRetroactive={h.is_retroactive} correctedAt={h.corrected_at} scale={scale} />
+                <CaregiverBadge correctedByOther correctorName="você" isRetroactive={h.is_retroactive} correctedAt={h.corrected_at} reason={h.motivo_correcao} scale={scale} />
               )}
             </div>
           ))}
@@ -221,7 +222,7 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
               )}
             </div>
             {d.record?.performed_by && d.record.performed_by !== patientId && (
-              <CaregiverBadge correctedByOther correctorName="você" isRetroactive={d.record.is_retroactive} correctedAt={d.record.corrected_at} scale={scale} />
+              <CaregiverBadge correctedByOther correctorName="você" isRetroactive={d.record.is_retroactive} correctedAt={d.record.corrected_at} reason={d.record.motivo_correcao} scale={scale} />
             )}
           </div>
         ))}

@@ -115,6 +115,7 @@ export function RetroactiveDoseRow({ dose, selectedDate, role, userId, onConfirm
           correctedByOther={dose.record.performed_by !== userId}
           isRetroactive={dose.record.is_retroactive}
           correctedAt={dose.record.corrected_at}
+          reason={dose.record.motivo_correcao}
           scale={scale}
         />
       )}

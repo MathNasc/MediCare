@@ -72,3 +72,27 @@ body { overscroll-behavior-y: contain; }
 button, .btn {
   min-height: 44px;
 }
+
+/* Brazilian Date Input Wrapper */
+.br-date-input {
+  color: transparent !important;
+}
+.br-date-input::-webkit-datetime-edit {
+  color: transparent !important;
+}
+.br-date-input::-webkit-datetime-edit-fields-wrapper {
+  color: transparent !important;
+}
+.br-date-input::-webkit-datetime-edit-text {
+  color: transparent !important;
+}
+.br-date-input::-webkit-datetime-edit-month-field,
+.br-date-input::-webkit-datetime-edit-day-field,
+.br-date-input::-webkit-datetime-edit-year-field {
+  color: transparent !important;
+}
+.br-date-input::-webkit-calendar-picker-indicator {
+  opacity: 1 !important;
+  color: inherit !important;
+  filter: invert(0.8); /* Optional: ensures it's visible on dark backgrounds if it relies on text color */
+}

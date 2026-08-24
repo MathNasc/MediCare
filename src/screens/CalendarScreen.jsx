@@ -7,6 +7,7 @@ import { C } from '@/lib/theme';
 import { NotesDB, EventsDB, ObsDB } from '@/lib/supabaseCalendar';
 import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
 import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
+import { BrDateInput } from '@/components/ui/BrDateInput';
 import { TreatmentBadge } from '@/components/ui/TreatmentBadge';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
           <input style={inp} placeholder="Título *" value={title} onChange={e => setTitle(e.target.value)} />
           <textarea rows={4} style={{ ...inp, resize: 'none' }} placeholder="Descreva como foi o dia, sintomas, observações…" value={description} onChange={e => setDescription(e.target.value)} />
           <div style={{ display: 'flex', gap: 10 }}>
-            <input type="date" style={{ ...inp, flex: 1 }} value={currentDate} onChange={e => setCurrentDate(e.target.value)} />
+            <BrDateInput style={{ ...inp, flex: 1 }} value={currentDate} onChange={e => setCurrentDate(e.target.value)} />
             <input type="time" style={{ ...inp, flex: 1 }} value={time} onChange={e => setTime(e.target.value)} />
           </div>
         </div>
@@ -97,7 +98,7 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
           <input style={inp} placeholder="Médico / Especialidade" value={doctor} onChange={e => setDoctor(e.target.value)} />
           <input style={inp} placeholder="Local / Clínica" value={location} onChange={e => setLocation(e.target.value)} />
           <div style={{ display: 'flex', gap: 10 }}>
-            <input type="date" style={{ ...inp, flex: 1 }} value={currentDate} onChange={e => setCurrentDate(e.target.value)} />
+            <BrDateInput style={{ ...inp, flex: 1 }} value={currentDate} onChange={e => setCurrentDate(e.target.value)} />
             <input type="time" style={{ ...inp, flex: 1 }} value={time} onChange={e => setTime(e.target.value)} />
           </div>
           <textarea rows={3} style={{ ...inp, resize: 'none' }} placeholder="Observações opcionais…" value={description} onChange={e => setDesc(e.target.value)} />
@@ -253,6 +254,7 @@ function DayPanel({
                         correctedByOther={correctedByOther}
                         isRetroactive={hist.is_retroactive}
                         correctedAt={hist.corrected_at}
+                        reason={hist.motivo_correcao}
                         scale={scale}
                       />
                     )}
