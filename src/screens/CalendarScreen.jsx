@@ -29,6 +29,7 @@ const EVENT_LABELS = { consulta: 'Consulta', exame: 'Exame', procedimento: 'Proc
 
 // ─── Modal de nova nota ───────────────────────────────────────────────────────
 function NoteModal({ date, note, onSave, onClose, T, scale }) {
+  const [currentDate, setCurrentDate] = useState(note?.date || date);
   const [title, setTitle] = useState(note?.title || '');
   const [description, setDescription] = useState(note?.description || '');
   const [time, setTime] = useState(note?.time || '');
@@ -45,10 +46,13 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <input style={inp} placeholder="Título *" value={title} onChange={e => setTitle(e.target.value)} />
           <textarea rows={4} style={{ ...inp, resize: 'none' }} placeholder="Descreva como foi o dia, sintomas, observações…" value={description} onChange={e => setDescription(e.target.value)} />
-          <input type="time" style={inp} value={time} onChange={e => setTime(e.target.value)} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input type="date" style={{ ...inp, flex: 1 }} value={currentDate} onChange={e => setCurrentDate(e.target.value)} />
+            <input type="time" style={{ ...inp, flex: 1 }} value={time} onChange={e => setTime(e.target.value)} />
+          </div>
         </div>
         <button
-          onClick={() => { if (title.trim()) onSave({ title, description, time, date }); }}
+          onClick={() => { if (title.trim() && currentDate) onSave({ title, description, time, date: currentDate }); }}
           style={{ marginTop: 16, width: '100%', padding: 16, borderRadius: 13, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', fontWeight: 800, fontSize: 15 * scale, border: 'none' }}
         >
           {note ? 'Salvar alterações' : 'Adicionar anotação'}
@@ -61,6 +65,7 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
 // ─── Modal de novo evento ─────────────────────────────────────────────────────
 // (tipo 'estoque' não é selecionável manualmente — é gerado automaticamente)
 function EventModal({ date, event, onSave, onClose, T, scale }) {
+  const [currentDate, setCurrentDate] = useState(event?.date || date);
   const [type, setType]         = useState(event?.type && event.type !== 'estoque' ? event.type : 'consulta');
   const [title, setTitle]       = useState(event?.title || '');
   const [description, setDesc]  = useState(event?.description || '');
@@ -91,11 +96,14 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
           <input style={inp} placeholder="Título *" value={title} onChange={e => setTitle(e.target.value)} />
           <input style={inp} placeholder="Médico / Especialidade" value={doctor} onChange={e => setDoctor(e.target.value)} />
           <input style={inp} placeholder="Local / Clínica" value={location} onChange={e => setLocation(e.target.value)} />
-          <input type="time" style={inp} value={time} onChange={e => setTime(e.target.value)} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input type="date" style={{ ...inp, flex: 1 }} value={currentDate} onChange={e => setCurrentDate(e.target.value)} />
+            <input type="time" style={{ ...inp, flex: 1 }} value={time} onChange={e => setTime(e.target.value)} />
+          </div>
           <textarea rows={3} style={{ ...inp, resize: 'none' }} placeholder="Observações opcionais…" value={description} onChange={e => setDesc(e.target.value)} />
         </div>
         <button
-          onClick={() => { if (title.trim()) onSave({ type, title, description, time, doctor, location, date }); }}
+          onClick={() => { if (title.trim() && currentDate) onSave({ type, title, description, time, doctor, location, date: currentDate }); }}
           style={{ marginTop: 16, width: '100%', padding: 16, borderRadius: 13, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', fontWeight: 800, fontSize: 15 * scale, border: 'none' }}
         >
           {event ? 'Salvar alterações' : 'Adicionar evento'}
