@@ -58,7 +58,11 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
         body: JSON.stringify({ prompt }),
       });
       const data = await res.json();
-      setMessages([...newMessages, { role: 'assistant', text: data.text }]);
+      if (!res.ok || data.error) {
+        setMessages([...newMessages, { role: 'assistant', text: 'Desculpe, ocorreu um erro: ' + (data.error || 'Falha ao conectar com a IA.') }]);
+      } else {
+        setMessages([...newMessages, { role: 'assistant', text: data.text }]);
+      }
     } catch(e) {
       setMessages([...newMessages, { role: 'assistant', text: 'Desculpe, tive um problema de conexão ao tentar responder.' }]);
     }
@@ -73,7 +77,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
   };
 
   const handleShare = () => {
-    const text = `Meu Resumo de Saúde:\n\nMedicamentos Ativos:\n${meds.map(m => `- ${m.nome} (${m.dosagem})`).join('\n')}\n\nAdesão:\nTomadas ${history.filter(h => h.status === 'confirmed').length} de ${history.length} doses registradas.`;
+    const text = `Meu Resumo de Saúde:\n\nMedicamentos Ativos:\n${meds.filter(m => m.treatment_type !== 'sos').map(m => `- ${m.nome} (${m.dosagem})`).join('\n')}\n\nAdesão:\nTomadas ${history.filter(h => h.status === 'confirmed').length} de ${history.length} doses registradas.`;
     if (navigator.share) {
         navigator.share({ title: 'Resumo de Saúde', text }).catch(console.error);
     } else {
@@ -158,7 +162,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
                   <span style={{ fontSize: 24 }}>⏰</span>
                   <p style={{ color: T.txt, fontWeight: 800, fontSize: 15 * scale }}>Doses com Atraso</p>
                 </div>
-                <p style={{ color: T.sub, fontSize: 14 * scale }}>Você registrou ${lateDoses.length} dose(s) com atraso recentemente. Tente ajustar seus alarmes.</p>
+                <p style={{ color: T.sub, fontSize: 14 * scale }}>Você registrou {lateDoses.length} dose(s) com atraso recentemente. Tente ajustar seus alarmes.</p>
               </div>
             )}
             {lowStock.length > 0 && (
@@ -167,7 +171,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
                   <span style={{ fontSize: 24 }}>📦</span>
                   <p style={{ color: T.txt, fontWeight: 800, fontSize: 15 * scale }}>Estoque Baixo</p>
                 </div>
-                <p style={{ color: T.sub, fontSize: 14 * scale }}>${lowStock.length} medicamento(s) estão acabando (10 ou menos unidades).</p>
+                <p style={{ color: T.sub, fontSize: 14 * scale }}>{lowStock.length} medicamento(s) estão acabando (10 ou menos unidades).</p>
               </div>
             )}
             {missedDosesAll > 5 && (
@@ -246,7 +250,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
             <div style={{ padding: 16, background: T.bg2, borderRadius: 12, marginBottom: 20 }}>
               <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 800, marginBottom: 8 }}>Medicamentos Ativos:</p>
               <ul style={{ paddingLeft: 20, color: T.sub, fontSize: 13 * scale, marginBottom: 16 }}>
-                {meds.map(m => <li key={m.id}>{m.nome} — {m.dosagem}</li>)}
+                {meds.filter(m => m.treatment_type !== 'sos').map(m => <li key={m.id}>{m.nome} — {m.dosagem}</li>)}
               </ul>
 
               <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 800, marginBottom: 8 }}>Adesão Recente:</p>
