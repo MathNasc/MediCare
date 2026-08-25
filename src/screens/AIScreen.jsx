@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
+import { useBackButton } from '@/hooks/useBackButton';
 
 export function AIScreen({ T, scale }) {
   const { meds, history } = useApp();
@@ -11,6 +12,8 @@ export function AIScreen({ T, scale }) {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
+
+  useBackButton(activeView !== 'main', () => setActiveView('main'));
 
   const getLocalDateISO = (d) => {
     const tzOffset = d.getTimezoneOffset() * 60000;
@@ -150,7 +153,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
 
       {activeView === 'attention' && (
         <div className="anim-scaleIn">
-          <button onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
             ‹ Voltar
           </button>
           <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900, marginBottom: 20 }}>O que merece atenção?</h2>
@@ -196,7 +199,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
 
       {activeView === 'meds' && (
         <div className="anim-scaleIn">
-          <button onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
             ‹ Voltar
           </button>
           <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900, marginBottom: 20 }}>Explicar meus medicamentos</h2>
@@ -214,7 +217,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
 
       {activeView === 'stock' && (
         <div className="anim-scaleIn">
-          <button onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
             ‹ Voltar
           </button>
           <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900, marginBottom: 20 }}>Meu Estoque</h2>
@@ -239,7 +242,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
 
       {activeView === 'consult' && (
         <div className="anim-scaleIn">
-          <button onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
             ‹ Voltar
           </button>
           <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900, marginBottom: 20 }}>Preparar Consulta</h2>
@@ -273,7 +276,7 @@ Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
 
       {activeView === 'chat' && (
         <div className="anim-scaleIn" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <button onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', flexShrink: 0 }}>
+          <button type="button" onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', flexShrink: 0 }}>
             ‹ Voltar
           </button>
           
