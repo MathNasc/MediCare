@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
 import { useBackButton } from '@/hooks/useBackButton';
+import Markdown from 'react-markdown';
 
 export function AIScreen({ T, scale }) {
   const { meds, history } = useApp();
@@ -294,8 +295,8 @@ Doses pendentes hoje: ${pendingDoses.length > 0 ? pendingDoses.map(d=>`${d.med.n
                   {m.role === 'assistant' && (
                     <div style={{ width: 36, height: 36, borderRadius: 12, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🩺</div>
                   )}
-                  <div style={{ background: m.role === 'user' ? '#3b82f6' : T.bg2, color: m.role === 'user' ? '#fff' : T.txt, padding: '12px 16px', borderRadius: 16, borderTopRightRadius: m.role === 'user' ? 4 : 16, borderTopLeftRadius: m.role === 'assistant' ? 4 : 16, fontSize: 15 * scale, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                    {m.text}
+                  <div className={m.role === 'assistant' ? 'markdown-body' : ''} style={{ background: m.role === 'user' ? '#3b82f6' : T.bg2, color: m.role === 'user' ? '#fff' : T.txt, padding: '12px 16px', borderRadius: 16, borderTopRightRadius: m.role === 'user' ? 4 : 16, borderTopLeftRadius: m.role === 'assistant' ? 4 : 16, fontSize: 15 * scale, lineHeight: 1.5, whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal' }}>
+                    {m.role === 'assistant' ? <Markdown>{m.text}</Markdown> : m.text}
                   </div>
                 </div>
               ))}
