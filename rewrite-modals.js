@@ -1,43 +1,20 @@
-'use client';
-import { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { useBackButton } from '@/hooks/useBackButton';
-import { useApp } from '@/context/AppContext';
-import { usePermissions } from '@/hooks/usePermissions';
-import { C } from '@/lib/theme';
-import { NotesDB, EventsDB, ObsDB } from '@/lib/supabaseCalendar';
-import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
-import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
-import { BrDateInput } from '@/components/ui/BrDateInput';
-import { TreatmentBadge } from '@/components/ui/TreatmentBadge';
+const fs = require('fs');
+let code = fs.readFileSync('src/screens/CalendarScreen.jsx', 'utf8');
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-const WEEK_LABELS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
-import { getLocalDateISO, getLocalTime } from "@/lib/dateUtils";
-const toISO = (d) => getLocalDateISO(d);
-const today = () => toISO(new Date());
+// I will extract everything BEFORE function NoteModal
+const topPart = code.split('function NoteModal')[0];
 
-function getDaysInMonth(year, month) {
-  return new Date(year, month + 1, 0).getDate();
-}
-function getFirstWeekday(year, month) {
-  return new Date(year, month, 1).getDay();
-}
+// I will extract everything AFTER CalendarScreen principal
+const bottomPart = '\n// ─── CalendarScreen principal ' + code.split('// ─── CalendarScreen principal ')[1];
 
-// 'estoque' é criado automaticamente pelo sistema (reposição de estoque) —
-// não aparece como opção no EventModal manual, apenas na visualização/filtro.
-const EVENT_ICONS = { consulta: '👨‍⚕️', exame: '🧪', procedimento: '💉', outro: '📌', estoque: '📦' };
-const EVENT_LABELS = { consulta: 'Consulta', exame: 'Exame', procedimento: 'Procedimento', outro: 'Evento', estoque: 'Estoque' };
-
-// ─── Modal de nova nota ───────────────────────────────────────────────────────
-function NoteModal({ date, note, onSave, onClose, T, scale }) {
+// Now I will reconstruct the Modals cleanly
+const rebuilt = `function NoteModal({ date, note, onSave, onClose, T, scale }) {
   const [currentDate, setCurrentDate] = useState(note?.date || date);
   const [title, setTitle] = useState(note?.title || '');
   const [description, setDescription] = useState(note?.description || '');
   const [time, setTime] = useState(note?.time || '');
 
-  const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
+  const inp = { background: T.inp, border: \`1.5px solid \${T.inpB}\`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
 
   return (
     <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 300, overflowY: 'auto' }}>
@@ -67,7 +44,7 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
   const [doctor, setDoctor] = useState(event?.doctor || '');
   const [location, setLocation] = useState(event?.location || '');
   
-  const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
+  const inp = { background: T.inp, border: \`1.5px solid \${T.inpB}\`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
 
   return (
     <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 300, overflowY: 'auto' }}>
@@ -167,15 +144,11 @@ function DayPanel({
     return true;
   };
 
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
-
-  return createPortal(
+  return (
     <>
-      <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 9999, overflowY: 'auto' }}>
+      <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 300, overflowY: 'auto' }}>
         {/* Header */}
-        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 16px) 16px 14px', borderBottom: `1px solid ${T.bdr}`, position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
+        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 16px) 16px 14px', borderBottom: \`1px solid \${T.bdr}\`, position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
           <div className="main-container" style={{ padding: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div>
@@ -217,9 +190,9 @@ function DayPanel({
                 const correctedByOther = Boolean(hist?.performed_by && hist.performed_by !== user.id);
 
                 return (
-                  <div key={`${med.id}-${hora}`} style={{ background: bgColor, border: `1px solid ${color}22`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                  <div key={\`\${med.id}-\${hora}\`} style={{ background: bgColor, border: \`1px solid \${color}22\`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontWeight: 900, fontSize: 14, flexShrink: 0 }}>{icon}</div>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: \`\${color}20\`, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontWeight: 900, fontSize: 14, flexShrink: 0 }}>{icon}</div>
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -270,7 +243,7 @@ function DayPanel({
                     {!isFuture && !obsTarget && (
                       <button
                         onClick={() => setObsTarget({ med_id: med.id, hora, date: dateStr, hist_id: hist?.id })}
-                        style={{ marginTop: 8, background: 'none', color: T.muted, border: `1px dashed ${T.bdr}`, borderRadius: 8, padding: '6px 10px', fontSize: 11 * scale, width: '100%' }}
+                        style={{ marginTop: 8, background: 'none', color: T.muted, border: \`1px dashed \${T.bdr}\`, borderRadius: 8, padding: '6px 10px', fontSize: 11 * scale, width: '100%' }}
                       >
                         + Adicionar observação
                       </button>
@@ -283,7 +256,7 @@ function DayPanel({
                           value={obsText}
                           onChange={e => setObsText(e.target.value)}
                           placeholder="Como você se sentiu? Ex: leve tontura após tomar"
-                          style={{ width: '100%', background: T.inp, border: `1px solid ${T.inpB}`, borderRadius: 10, padding: 10, color: T.txt, fontSize: 12 * scale, resize: 'none' }}
+                          style={{ width: '100%', background: T.inp, border: \`1px solid \${T.inpB}\`, borderRadius: 10, padding: 10, color: T.txt, fontSize: 12 * scale, resize: 'none' }}
                         />
                         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                           <button
@@ -308,7 +281,7 @@ function DayPanel({
               })}
 
               {sosUsages.map(({ med, hist }) => (
-                <div key={`sos-${hist.id}`} style={{ background: 'rgba(59,130,246,.06)', border: '1px solid rgba(59,130,246,.25)', borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                <div key={\`sos-\${hist.id}\`} style={{ background: 'rgba(59,130,246,.06)', border: '1px solid rgba(59,130,246,.25)', borderRadius: 14, padding: 14, marginBottom: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(59,130,246,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6', fontWeight: 900, fontSize: 14, flexShrink: 0 }}>✓</div>
                     <div style={{ flex: 1 }}>
@@ -333,13 +306,13 @@ function DayPanel({
             <div style={{ marginBottom: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <p style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px' }}>Anotações</p>
-                <button onClick={() => onAddNote(dateStr)} style={{ color: C.blue, background: 'none', border: `1px solid rgba(59,130,246,.3)`, borderRadius: 99, padding: '4px 10px', fontSize: 11 * scale, fontWeight: 700 }}>+ Nova</button>
+                <button onClick={() => onAddNote(dateStr)} style={{ color: C.blue, background: 'none', border: \`1px solid rgba(59,130,246,.3)\`, borderRadius: 99, padding: '4px 10px', fontSize: 11 * scale, fontWeight: 700 }}>+ Nova</button>
               </div>
               {dayNotes.length === 0 && (
                 <p style={{ color: T.muted, fontSize: 13 * scale }}>Nenhuma anotação para este dia</p>
               )}
               {dayNotes.map(note => (
-                <div key={note.id} style={{ background: T.bg2, borderRadius: 14, padding: 14, marginBottom: 8, border: `1px solid ${T.bdr}` }}>
+                <div key={note.id} style={{ background: T.bg2, borderRadius: 14, padding: 14, marginBottom: 8, border: \`1px solid \${T.bdr}\` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
                       <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 * scale }}>{note.title}</p>
@@ -361,13 +334,13 @@ function DayPanel({
             <div style={{ marginBottom: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <p style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px' }}>Eventos de Saúde</p>
-                <button onClick={() => onAddEvent(dateStr)} style={{ color: C.blue, background: 'none', border: `1px solid rgba(59,130,246,.3)`, borderRadius: 99, padding: '4px 10px', fontSize: 11 * scale, fontWeight: 700 }}>+ Novo</button>
+                <button onClick={() => onAddEvent(dateStr)} style={{ color: C.blue, background: 'none', border: \`1px solid rgba(59,130,246,.3)\`, borderRadius: 99, padding: '4px 10px', fontSize: 11 * scale, fontWeight: 700 }}>+ Novo</button>
               </div>
               {dayEvents.length === 0 && (
                 <p style={{ color: T.muted, fontSize: 13 * scale }}>Nenhum evento para este dia</p>
               )}
               {dayEvents.map(ev => (
-                <div key={ev.id} style={{ background: T.bg2, borderRadius: 14, padding: 14, marginBottom: 8, border: `1px solid rgba(59,130,246,.2)` }}>
+                <div key={ev.id} style={{ background: T.bg2, borderRadius: 14, padding: 14, marginBottom: 8, border: \`1px solid rgba(59,130,246,.2)\` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -427,368 +400,6 @@ function DayPanel({
     </>
   );
 }
+`;
 
-// ─── CalendarScreen principal ─────────────────────────────────────────────────
-export function CalendarScreen({ T, scale }) {
-  const { user, history, meds, confirmDoseRetroactive } = useApp();
-  const { role } = usePermissions();
-
-  const now = new Date();
-  const [viewYear,  setViewYear]  = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const [selected,  setSelected]  = useState(null);
-  const [notes,     setNotes]     = useState([]);
-  const [events,    setEvents]    = useState([]);
-  const [obs,       setObs]       = useState([]);
-  const [search,    setSearch]    = useState('');
-  const [showSearch, setShowSearch] = useState(false);
-
-  const [noteModal,  setNoteModal]  = useState(null);
-  const [eventModal, setEventModal] = useState(null);
-
-  useBackButton(noteModal !== null, () => setNoteModal(null));
-  useBackButton(eventModal !== null, () => setEventModal(null));
-  useBackButton(showSearch, () => setShowSearch(false));
-  useBackButton(selected !== null, () => setSelected(null));
-
-  const loadMonth = useCallback(async (year, month) => {
-    if (!user) return;
-    const from = `${year}-${String(month + 1).padStart(2, '0')}-01`;
-    const lastDay = getDaysInMonth(year, month);
-    const to   = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`;
-    const [n, e, o] = await Promise.all([
-      NotesDB.list(user.id, from, to),
-      EventsDB.list(user.id, from, to),
-      ObsDB.list(user.id, from, to),
-    ]);
-    setNotes(n);
-    setEvents(e);
-    setObs(o);
-  }, [user]);
-
-  useEffect(() => { loadMonth(viewYear, viewMonth); }, [viewYear, viewMonth, loadMonth]);
-
-  const prevMonth = () => {
-    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
-    else setViewMonth(m => m - 1);
-  };
-  const nextMonth = () => {
-    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
-    else setViewMonth(m => m + 1);
-  };
-
-  const getDayIndicator = (dateStr) => {
-    const dayHist   = history.filter(h => getLocalDateISO(new Date(h.created_at)) === dateStr);
-    const dayNotes  = notes.filter(n => n.date === dateStr);
-    const dayAllEvents = events.filter(e => e.date === dateStr);
-    const dayStock  = dayAllEvents.filter(e => e.type === 'estoque');
-    const dayEvents = dayAllEvents.filter(e => e.type !== 'estoque');
-    const isPast    = dateStr < today();
-    const isToday   = dateStr === today();
-
-    if (dayStock.length  > 0) return 'stock';
-    if (dayEvents.length > 0) return 'event';
-    if (dayNotes.length  > 0) return 'note';
-    if (isPast || isToday) {
-      const activeMeds  = meds.filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos');
-      if (activeMeds.length === 0) return null;
-      const confirmed = dayHist.filter(h => h.status === 'confirmed').length;
-      const total     = activeMeds.reduce((acc, m) => acc + (m.horarios?.length || 1), 0);
-      if (confirmed === 0 && isPast && !isToday) return 'missed';
-      if (confirmed === total) return 'done';
-      if (confirmed > 0)       return 'partial';
-      return isToday ? null : 'missed';
-    }
-    return null;
-  };
-
-  const indicatorColor = { done: C.green, partial: C.amber, missed: C.red, note: C.blue, event: '#8b5cf6', stock: '#22c55e' };
-  const indicatorDot   = { done: '●', partial: '◐', missed: '●', note: '●', event: '●', stock: '●' };
-
-  const monthPrefix = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
-  const monthHist   = history.filter(h => new Date(h.created_at).toISOString().startsWith(monthPrefix));
-
-  const monthSOS    = monthHist.filter(h => meds.find(m => m.id === h.med_id)?.treatment_type === 'sos').length;
-  const monthConf   = monthHist.filter(h => h.status === 'confirmed' && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
-  const monthLate   = monthHist.filter(h => h.atraso_minutos > 0 && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
-
-  let monthMissed = 0;
-  let monthTotal = 0;
-
-  const activeContinuousMeds = meds.filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos');
-  const expectedPerDay = activeContinuousMeds.reduce((acc, m) => acc + (m.horarios?.length || 1), 0);
-  const lastDayOfMonth = getDaysInMonth(viewYear, viewMonth);
-
-  for (let d = 1; d <= lastDayOfMonth; d++) {
-    const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    if (dateStr >= today()) {
-      if (dateStr === today()) {
-        const todayHist = monthHist.filter(h => getLocalDateISO(new Date(h.created_at)) === today());
-        const todayConf = todayHist.filter(h => h.status === 'confirmed' && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
-        monthTotal += todayConf;
-      }
-      break; 
-    }
-
-    const dayHist = monthHist.filter(h => getLocalDateISO(new Date(h.created_at)) === dateStr);
-    const confirmedNonSOS = dayHist.filter(h => h.status === 'confirmed' && meds.find(m => m.id === h.med_id)?.treatment_type !== 'sos').length;
-    
-    monthTotal += expectedPerDay;
-    if (confirmedNonSOS < expectedPerDay) {
-      monthMissed += (expectedPerDay - confirmedNonSOS);
-    }
-  }
-
-  const monthAdh    = monthTotal > 0 ? Math.round((monthConf / monthTotal) * 100) : 0;
-  const monthNotes  = notes.length;
-  const monthEvents = events.filter(e => e.type === 'consulta').length;
-  const monthStock  = events.filter(e => e.type === 'estoque').length;
-
-  const upcomingEvents = events.filter(e => e.date >= today() && e.type !== 'estoque').slice(0, 3);
-
-  const handleSaveNote = async (data) => {
-    if (noteModal.note) {
-      await NotesDB.update(noteModal.note.id, { ...data, updated_at: new Date().toISOString() });
-    } else {
-      await NotesDB.add({ ...data, user_id: user.id });
-    }
-    setNoteModal(null);
-    await loadMonth(viewYear, viewMonth);
-  };
-
-  const handleDeleteNote = async (id) => {
-    await NotesDB.delete(id);
-    await loadMonth(viewYear, viewMonth);
-  };
-
-  const handleSaveEvent = async (data) => {
-    if (eventModal.event) {
-      await EventsDB.update(eventModal.event.id, data);
-    } else {
-      await EventsDB.add({ ...data, user_id: user.id });
-    }
-    setEventModal(null);
-    await loadMonth(viewYear, viewMonth);
-  };
-
-  const handleDeleteEvent = async (id) => {
-    await EventsDB.delete(id);
-    await loadMonth(viewYear, viewMonth);
-  };
-
-  const searchResults = search.length > 1 ? (() => {
-    const term = search.toLowerCase();
-    const res = [];
-    
-    notes.filter(n => n.title?.toLowerCase().includes(term) || n.description?.toLowerCase().includes(term))
-         .forEach(n => res.push({ id: `note-${n.id}`, date: n.date, title: n.title, sub: 'Nota' }));
-         
-    events.filter(e => e.title?.toLowerCase().includes(term) || e.doctor?.toLowerCase().includes(term) || e.description?.toLowerCase().includes(term) || e.location?.toLowerCase().includes(term))
-          .forEach(e => res.push({ id: `ev-${e.id}`, date: e.date, title: e.title, sub: EVENT_LABELS[e.type] || 'Evento' }));
-          
-    obs.filter(o => o.observation?.toLowerCase().includes(term))
-       .forEach(o => {
-         const med = meds.find(m => m.id === o.med_id);
-         res.push({ id: `obs-${o.id}`, date: o.date, title: `Obs: ${med?.nome || 'Medicamento'}`, sub: 'Observação da dose' });
-       });
-
-    history.forEach(h => {
-      const med = meds.find(m => m.id === h.med_id);
-      if (med && med.nome.toLowerCase().includes(term)) {
-        const dateStr = getLocalDateISO(new Date(h.created_at));
-        if (!res.some(r => r.date === dateStr && r.title === med.nome)) {
-          res.push({ id: `hist-${h.id}`, date: dateStr, title: med.nome, sub: 'Registro de medicamento' });
-        }
-      }
-    });
-
-    return res.sort((a, b) => b.date.localeCompare(a.date));
-  })() : [];
-
-  const firstWeekday = getFirstWeekday(viewYear, viewMonth);
-  const daysInMonth  = getDaysInMonth(viewYear, viewMonth);
-  const cells        = [...Array(firstWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
-
-  return (
-    <div className="anim-fadeUp">
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900 }}>Calendário</h2>
-        <button onClick={() => setShowSearch(s => !s)} style={{ width: 40, height: 40, borderRadius: 12, background: T.bg1, border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔍</button>
-      </div>
-
-      <div className="calendar-responsive">
-        <div>
-      {showSearch && (
-        <div style={{ marginBottom: 14 }}>
-          <input
-            autoFocus
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar notas, eventos, medicamentos…"
-            style={{ width: '100%', background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale }}
-          />
-          {searchResults.length > 0 && (
-            <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 14, marginTop: 8, overflow: 'hidden' }}>
-              {searchResults.map((r, i) => (
-                <div key={r.id} onClick={() => { setSelected(r.date); setShowSearch(false); setSearch(''); }} style={{ padding: '12px 14px', borderBottom: i < searchResults.length - 1 ? `1px solid ${T.bdr}` : 'none', cursor: 'pointer' }}>
-                  <p style={{ color: T.txt, fontWeight: 600, fontSize: 13 * scale }}>{r.title}</p>
-                  <p style={{ color: T.muted, fontSize: 11 * scale }}>{r.date.split('-').reverse().join('/')} · {r.sub}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Mini-calendário */}
-      <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 22, padding: 16, marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <button onClick={prevMonth} style={{ width: 36, height: 36, borderRadius: 10, background: T.bg3, border: 'none', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>‹</button>
-          <div style={{ textAlign: 'center' }}>
-            <p style={{ color: T.txt, fontSize: 16 * scale, fontWeight: 800 }}>{MONTHS[viewMonth]}</p>
-            <p style={{ color: T.muted, fontSize: 12 * scale }}>{viewYear}</p>
-          </div>
-          <button onClick={nextMonth} style={{ width: 36, height: 36, borderRadius: 10, background: T.bg3, border: 'none', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>›</button>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: 6 }}>
-          {WEEK_LABELS.map(d => (
-            <div key={d} style={{ textAlign: 'center', color: T.muted, fontSize: 10 * scale, fontWeight: 700, padding: '2px 0' }}>{d}</div>
-          ))}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
-          {cells.map((day, idx) => {
-            if (!day) return <div key={`e-${idx}`} />;
-            const dateStr   = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const isToday   = dateStr === today();
-            const isSel     = dateStr === selected;
-            const indicator = getDayIndicator(dateStr);
-
-            return (
-              <button
-                key={dateStr}
-                onClick={() => setSelected(isSel ? null : dateStr)}
-                style={{
-                  padding: '6px 2px 4px', borderRadius: 10, border: 'none',
-                  background: isSel ? '#3b82f6' : isToday ? 'rgba(59,130,246,.15)' : 'transparent',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                  cursor: 'pointer', outline: isToday && !isSel ? `2px solid rgba(59,130,246,.4)` : 'none',
-                }}
-              >
-                <span style={{ color: isSel ? '#fff' : isToday ? C.blue : T.txt, fontSize: 13 * scale, fontWeight: isToday || isSel ? 900 : 500, lineHeight: 1 }}>{day}</span>
-                {indicator && (
-                  <span style={{ fontSize: 5, color: isSel ? '#fff' : indicatorColor[indicator], lineHeight: 1 }}>{indicatorDot[indicator]}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-          {[
-            { color: C.green,   label: 'Tomado' },
-            { color: C.amber,   label: 'Parcial' },
-            { color: C.red,     label: 'Perdido' },
-            { color: C.blue,    label: 'Nota' },
-            { color: '#8b5cf6', label: 'Evento' },
-            { color: '#22c55e', label: 'Estoque' },
-          ].map(l => (
-            <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: l.color }} />
-              <span style={{ color: T.muted, fontSize: 10 * scale }}>{l.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Próximos eventos */}
-      {upcomingEvents.length > 0 && (
-        <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 16, marginBottom: 14 }}>
-          <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 700, marginBottom: 10 }}>📅 Próximos eventos</p>
-          {upcomingEvents.map(ev => (
-            <div key={ev.id} onClick={() => setSelected(ev.date)} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: `1px solid ${T.bdr}`, cursor: 'pointer' }}>
-              <span style={{ fontSize: 20 }}>{EVENT_ICONS[ev.type]}</span>
-              <div style={{ flex: 1 }}>
-                <p style={{ color: T.txt, fontSize: 13 * scale, fontWeight: 600 }}>{ev.title}</p>
-                <p style={{ color: T.muted, fontSize: 11 * scale }}>{new Date(ev.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}{ev.time ? ` · ${ev.time}` : ''}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Botões de ação rápida */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-        <button
-          onClick={() => setNoteModal({ date: today() })}
-          style={{ padding: '14px', borderRadius: 14, background: T.bg1, border: `1px solid ${T.bdr}`, color: T.txt, fontWeight: 700, fontSize: 13 * scale, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          📝 Nova anotação
-        </button>
-        <button
-          onClick={() => setEventModal({ date: today() })}
-          style={{ padding: '14px', borderRadius: 14, background: T.bg1, border: `1px solid ${T.bdr}`, color: T.txt, fontWeight: 700, fontSize: 13 * scale, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          📅 Novo evento
-        </button>
-      </div>
-      {/* Resumo mensal */}
-      <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 16, marginBottom: 14 }}>
-        <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 700, marginBottom: 14 }}>📊 Resumo — {MONTHS[viewMonth]} {viewYear}</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-          {[
-            { label: 'Adesão',     value: `${monthAdh}%`, color: monthAdh >= 80 ? C.green : C.amber },
-            { label: 'Tomadas',    value: monthConf,      color: C.green  },
-            { label: 'Atrasos',    value: monthLate,      color: C.amber  },
-            { label: 'Perdidas',   value: monthMissed,    color: C.red    },
-            { label: 'Anotações',  value: monthNotes,     color: C.blue   },
-            { label: 'Consultas',  value: monthEvents,    color: '#8b5cf6'},
-            { label: 'Uso SOS',    value: monthSOS,        color: '#3b82f6'},
-            { label: 'Reposições', value: monthStock,      color: '#22c55e'},
-          ].map(s => (
-            <div key={s.label} style={{ background: T.bg2, borderRadius: 12, padding: '12px 8px', textAlign: 'center' }}>
-              <p style={{ color: s.color, fontSize: 22 * scale, fontWeight: 900, lineHeight: 1 }}>{s.value}</p>
-              <p style={{ color: T.muted, fontSize: 10 * scale, marginTop: 3 }}>{s.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-      </div>
-      </div>
-
-      {/* Painel do dia selecionado */}
-      {selected && (
-        <DayPanel
-          dateStr={selected}
-          history={history}
-          meds={meds}
-          notes={notes}
-          events={events}
-          obs={obs}
-          onAddObs={(newObs) => setObs(prev => [...prev, newObs])}
-          user={user}
-          role={role}
-          onAddNote={(date) => setNoteModal({ date })}
-          onEditNote={(note) => setNoteModal({ date: note.date, note })}
-          onDeleteNote={handleDeleteNote}
-          onAddEvent={(date) => setEventModal({ date })}
-          onEditEvent={(event) => setEventModal({ date: event.date, event })}
-          onDeleteEvent={handleDeleteEvent}
-          onConfirmRetroactive={confirmDoseRetroactive}
-          onClose={() => setSelected(null)}
-          T={T}
-          scale={scale}
-        />
-      )}
-
-      {noteModal && (
-        <NoteModal date={noteModal.date} note={noteModal.note} onSave={handleSaveNote} onClose={() => setNoteModal(null)} T={T} scale={scale} />
-      )}
-      {eventModal && (
-        <EventModal date={eventModal.date} event={eventModal.event} onSave={handleSaveEvent} onClose={() => setEventModal(null)} T={T} scale={scale} />
-      )}
-    </div>
-  );
-}
+fs.writeFileSync('src/screens/CalendarScreen.jsx', topPart + rebuilt + bottomPart);

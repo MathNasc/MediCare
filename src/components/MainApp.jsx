@@ -255,6 +255,10 @@ function InnerApp() {
       document.body.style.color = T.txt;
       document.body.style.transition = 'background 0.3s ease, color 0.3s ease';
     }
+    
+    const handleCloseAssistant = () => setTab('home');
+    window.addEventListener('close-assistant', handleCloseAssistant);
+    return () => window.removeEventListener('close-assistant', handleCloseAssistant);
   }, [T.bg0, T.txt]);
   const [showAdd,   setShowAdd]   = useState(false);
   const [editMed,   setEditMed]   = useState(null);
