@@ -97,6 +97,9 @@ export function AppProvider({ children }) {
     AuthDB.current().then((user) => {
       dispatch({ type: 'BOOT', user });
       if (user) loadAll(user.id);
+    }).catch(err => {
+      console.error('Failed to boot auth:', err);
+      dispatch({ type: 'BOOT', user: null });
     });
   }, [loadAll]);
 

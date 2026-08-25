@@ -220,6 +220,9 @@ function InnerApp() {
       import('@/lib/profileDb').then(m => m.ProfileDB.getProfile(user.id)).then(p => {
         setProfile(p);
         setProfileLoading(false);
+      }).catch(err => {
+        console.error('Failed to load profile:', err);
+        setProfileLoading(false);
       });
     } else {
       setProfileLoading(false);
