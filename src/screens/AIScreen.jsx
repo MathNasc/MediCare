@@ -96,12 +96,7 @@ Diretrizes:
   );
 
   return (
-    <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 9999, overflowY: 'auto' }}>
-      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 16px) 16px 14px', borderBottom: `1px solid ${T.bdr}`, position: 'sticky', top: 0, background: T.bg1, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h2 style={{ color: T.txt, fontSize: 18 * scale, fontWeight: 900 }}>Assistente de Saúde</h2>
-        <button onClick={() => window.dispatchEvent(new CustomEvent('close-assistant'))} style={{ background: T.bg3, border: 'none', width: 34, height: 34, borderRadius: '50%', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
-      </div>
-      <div className="main-container" style={{ padding: '16px 16px 96px' }}>
+    <div className="anim-fadeUp main-container">
       {activeView === 'main' && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24, paddingTop: 10 }}>
@@ -308,7 +303,6 @@ Diretrizes:
           </div>
         </div>
       )}
-    </div>
     </div>
   );
 }
