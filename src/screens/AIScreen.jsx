@@ -8,6 +8,46 @@ export function AIScreen({ T, scale }) {
   const [insights, setInsights] = useState([]);
   const [loading, setLoading]   = useState(false);
 
+  const [activeView, setActiveView] = useState('main');
+  const [chatRes, setChatRes] = useState('');
+  
+  const getLocalDateISO = (d) => {
+    const tzOffset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - tzOffset).toISOString().split('T')[0];
+  };
+  const today = getLocalDateISO(new Date());
+
+  const todayHist = history.filter(h => getLocalDateISO(new Date(h.created_at)) === today);
+  const pendingDoses = meds.filter(m => m.ativo && m.treatment_type !== 'sos').flatMap(m => (m.horarios||[]).map(hora => ({med:m, hora}))).filter(d => !todayHist.find(h => h.med_id === d.med.id && h.hora === d.hora)).sort((a,b) => a.hora.localeCompare(b.hora));
+  const lateDoses = history.filter(h => h.atraso_minutos > 0 && h.status === 'confirmed');
+  const missedDosesAll = history.filter(h => h.status === 'missed').length;
+  const lowStock = meds.filter(m => m.quantidade !== null && m.quantidade <= 10);
+  
+  let resumoTexto = 'Tudo ótimo por aqui!';
+  if (pendingDoses.length > 0) resumoTexto = `Você tem ${pendingDoses.length} medicamento(s) pendente(s) hoje.`;
+  else if (lateDoses.length > 0) resumoTexto = 'Você tomou alguns medicamentos com atraso recentemente.';
+
+  const askAI = async (promptMsg) => {
+    setActiveView('chat');
+    setLoading(true);
+    setChatRes('');
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Você é um assistente de saúde para pacientes. Responda de forma simples, acolhedora e direta. ${promptMsg} \n\nDados do paciente: Adesão: ${adhesion}%. Remédios ativos: ${meds.map(m=>m.nome).join(', ')}`
+        }),
+      });
+      const data = await res.json();
+      setChatRes(data.text);
+    } catch(e) {
+      setChatRes('Desculpe, tive um problema ao buscar a resposta.');
+    }
+    setLoading(false);
+  };
+
+
   const histConf = history.filter((h) => h.status === 'confirmed').length;
   const adhesion = history.length > 0 ? Math.round((histConf / history.length) * 100) : 0;
 
