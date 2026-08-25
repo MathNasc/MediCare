@@ -53,7 +53,8 @@ Mensagem do paciente: ${msg}
 
 Dados do paciente para contexto:
 Adesão geral: ${adhesion}%
-Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
+Remédios e Estoque: ${meds.map(m=>`${m.nome} (${m.dosagem}, ${m.quantidade !== null ? m.quantidade + ' unidades restando' : 'sem controle de estoque'})`).join('; ') || 'Nenhum'}
+Doses pendentes hoje: ${pendingDoses.length > 0 ? pendingDoses.map(d=>`${d.med.nome} às ${d.hora}`).join(', ') : 'Nenhuma'}`;
 
       const res = await fetch('/api/ai', {
         method: 'POST',
