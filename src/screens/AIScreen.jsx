@@ -1,16 +1,17 @@
+
 'use client';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { C } from '@/lib/theme';
 
 export function AIScreen({ T, scale }) {
   const { meds, history } = useApp();
-  const [insights, setInsights] = useState([]);
-  const [loading, setLoading]   = useState(false);
-
+  const [loading, setLoading] = useState(false);
   const [activeView, setActiveView] = useState('main');
-  const [chatRes, setChatRes] = useState('');
-  
+  const [messages, setMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef(null);
+
   const getLocalDateISO = (d) => {
     const tzOffset = d.getTimezoneOffset() * 60000;
     return new Date(d.getTime() - tzOffset).toISOString().split('T')[0];
@@ -23,72 +24,64 @@ export function AIScreen({ T, scale }) {
   const missedDosesAll = history.filter(h => h.status === 'missed').length;
   const lowStock = meds.filter(m => m.quantidade !== null && m.quantidade <= 10);
   
+  const histConf = history.filter((h) => h.status === 'confirmed').length;
+  const adhesion = history.length > 0 ? Math.round((histConf / history.length) * 100) : 0;
+
   let resumoTexto = 'Tudo ótimo por aqui!';
   if (pendingDoses.length > 0) resumoTexto = `Você tem ${pendingDoses.length} medicamento(s) pendente(s) hoje.`;
   else if (lateDoses.length > 0) resumoTexto = 'Você tomou alguns medicamentos com atraso recentemente.';
 
-  const askAI = async (promptMsg) => {
-    setActiveView('chat');
+  useEffect(() => {
+    if (activeView === 'chat' && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, activeView]);
+
+  const sendChatMessage = async (msg) => {
+    if (!msg.trim()) return;
+    const newMessages = [...messages, { role: 'user', text: msg }];
+    setMessages(newMessages);
+    setChatInput('');
     setLoading(true);
-    setChatRes('');
+
     try {
+      const prompt = `Você é um assistente de saúde para pacientes. Responda de forma simples, acolhedora e direta. 
+Mensagem do paciente: ${msg}
+
+Dados do paciente para contexto:
+Adesão geral: ${adhesion}%
+Remédios ativos: ${meds.map(m=>m.nome).join(', ') || 'Nenhum'}`;
+
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Você é um assistente de saúde para pacientes. Responda de forma simples, acolhedora e direta. ${promptMsg} \n\nDados do paciente: Adesão: ${adhesion}%. Remédios ativos: ${meds.map(m=>m.nome).join(', ')}`
-        }),
+        body: JSON.stringify({ prompt }),
       });
       const data = await res.json();
-      setChatRes(data.text);
+      setMessages([...newMessages, { role: 'assistant', text: data.text }]);
     } catch(e) {
-      setChatRes('Desculpe, tive um problema ao buscar a resposta.');
+      setMessages([...newMessages, { role: 'assistant', text: 'Desculpe, tive um problema de conexão ao tentar responder.' }]);
     }
     setLoading(false);
   };
 
-
-  const histConf = history.filter((h) => h.status === 'confirmed').length;
-  const adhesion = history.length > 0 ? Math.round((histConf / history.length) * 100) : 0;
-
-  const getAI = async () => {
-    setLoading(true);
-    const lateCount = history.filter((h) => h.atraso_minutos > 30).length;
-    try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Você é um assistente de saúde inteligente para um paciente. Analise estes dados de adesão a medicamentos e crie 3 insights úteis, práticos e motivacionais em português brasileiro.
-Medicamentos: ${meds.map((m) => m.nome).join(', ') || 'nenhum registrado'}
-Taxa de adesão (doses tomadas / total): ${adhesion}%
-Doses totais registradas: ${history.length}, confirmadas: ${histConf}
-Doses com atraso >30min: ${lateCount}
-
-Diretrizes:
-- Use uma linguagem acolhedora, clara e encorajadora.
-- Foque em dicas práticas baseadas nos dados (ex: se há muito atraso, sugira dicas para lembrar; se a adesão é alta, elogie e mostre os benefícios).
-- Crie um título bem chamativo.
-- Responda OBRIGATORIAMENTE em JSON no formato exato:
-{"insights":[{"icone":"<emoji que represente>","titulo":"<titulo curto>","texto":"<texto motivacional/prático>"}]}
-`
-        }),
-      });
-      const data = await res.json();
-      const txt = (data.text || '').trim();
-      setInsights(JSON.parse(txt).insights || []);
-    } catch (e) {
-      console.error(e);
-      setInsights([
-        { icone: '📊', titulo: 'Sua adesão', texto: `Você mantém ${adhesion}% de adesão ao tratamento. ${adhesion >= 80 ? 'Excelente resultado!' : adhesion >= 60 ? 'Você está progredindo bem!' : 'Cada dose conta, vamos melhorar juntos.'}` },
-        { icone: '💊', titulo: 'Medicamentos', texto: `${meds.length} medicamento${meds.length !== 1 ? 's' : ''} no tratamento. ${meds.filter((m) => m.quantidade <= 10).length > 0 ? 'Fique atento ao estoque.' : 'Todos com estoque adequado.'}` },
-        { icone: '💡', titulo: 'Dica do dia', texto: 'Associar os medicamentos a rotinas fixas como refeições aumenta muito a regularidade. Continue firme!' },
-      ]);
+  const askAI = (promptMsg) => {
+    setActiveView('chat');
+    if (messages.length === 0 || messages[messages.length-1].text !== promptMsg) {
+       sendChatMessage(promptMsg);
     }
-    setLoading(false);
   };
 
-    const BigAction = ({ icon, title, onClick }) => (
+  const handleShare = () => {
+    const text = `Meu Resumo de Saúde:\n\nMedicamentos Ativos:\n${meds.map(m => `- ${m.nome} (${m.dosagem})`).join('\n')}\n\nAdesão:\nTomadas ${history.filter(h => h.status === 'confirmed').length} de ${history.length} doses registradas.`;
+    if (navigator.share) {
+        navigator.share({ title: 'Resumo de Saúde', text }).catch(console.error);
+    } else {
+        alert('Compartilhamento não suportado neste navegador. As informações são:\n\n' + text);
+    }
+  };
+
+  const BigAction = ({ icon, title, onClick }) => (
     <button onClick={onClick} style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: '20px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, cursor: 'pointer', transition: 'all 0.2s', width: '100%', minHeight: 44 }}>
       <span style={{ fontSize: 32 }}>{icon}</span>
       <span style={{ color: T.txt, fontWeight: 700, fontSize: 14 * scale, textAlign: 'center', lineHeight: 1.2 }}>{title}</span>
@@ -130,8 +123,8 @@ Diretrizes:
             <BigAction icon="🩺" title="Preparar consulta" onClick={() => setActiveView('consult')} />
           </div>
 
-          <button onClick={() => alert('Recurso de voz em desenvolvimento e será liberado em breve.')} style={{ width: '100%', padding: '16px', background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', fontSize: 16 * scale, fontWeight: 800, border: 'none', borderRadius: 16, minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 24, boxShadow: '0 4px 18px rgba(59,130,246,.3)' }}>
-            <span style={{ fontSize: 24 }}>🎙️</span> Falar com o Assistente
+          <button onClick={() => setActiveView('chat')} style={{ width: '100%', padding: '16px', background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', fontSize: 16 * scale, fontWeight: 800, border: 'none', borderRadius: 16, minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 24, boxShadow: '0 4px 18px rgba(59,130,246,.3)' }}>
+            <span style={{ fontSize: 24 }}>💬</span> Falar com o Assistente
           </button>
 
           <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 20 }}>
@@ -158,27 +151,25 @@ Diretrizes:
           </button>
           <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900, marginBottom: 20 }}>O que merece atenção?</h2>
           
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {lateDoses.length > 0 && (
-              <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 16, padding: 18 }}>
+              <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                   <span style={{ fontSize: 24 }}>⏰</span>
-                  <p style={{ color: '#ef4444', fontWeight: 800, fontSize: 15 * scale }}>Doses Atrasadas Hoje</p>
+                  <p style={{ color: T.txt, fontWeight: 800, fontSize: 15 * scale }}>Doses com Atraso</p>
                 </div>
-                <p style={{ color: T.txt, fontSize: 14 * scale }}>Percebi que você tem {lateDoses.length} dose(s) pendente(s) hoje. Tente tomar assim que possível para manter a eficácia.</p>
+                <p style={{ color: T.sub, fontSize: 14 * scale }}>Você registrou ${lateDoses.length} dose(s) com atraso recentemente. Tente ajustar seus alarmes.</p>
               </div>
             )}
-
             {lowStock.length > 0 && (
-              <div style={{ background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', borderRadius: 16, padding: 18 }}>
+              <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                   <span style={{ fontSize: 24 }}>📦</span>
-                  <p style={{ color: '#f59e0b', fontWeight: 800, fontSize: 15 * scale }}>Estoque Baixo</p>
+                  <p style={{ color: T.txt, fontWeight: 800, fontSize: 15 * scale }}>Estoque Baixo</p>
                 </div>
-                <p style={{ color: T.txt, fontSize: 14 * scale }}>Os seguintes medicamentos estão acabando: {lowStock.map(m => m.nome).join(', ')}.</p>
+                <p style={{ color: T.sub, fontSize: 14 * scale }}>${lowStock.length} medicamento(s) estão acabando (10 ou menos unidades).</p>
               </div>
             )}
-
             {missedDosesAll > 5 && (
               <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -188,7 +179,6 @@ Diretrizes:
                 <p style={{ color: T.sub, fontSize: 14 * scale }}>Você tem algumas doses perdidas no histórico. Pode ser útil conversar com seu médico ou familiar para ajudar a lembrar dos horários.</p>
               </div>
             )}
-
             {lateDoses.length === 0 && lowStock.length === 0 && missedDosesAll <= 5 && (
               <div style={{ background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: 24, textAlign: 'center' }}>
                 <span style={{ fontSize: 40, display: 'block', marginBottom: 10 }}>✅</span>
@@ -207,10 +197,9 @@ Diretrizes:
           </button>
           <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900, marginBottom: 20 }}>Explicar meus medicamentos</h2>
           <p style={{ color: T.sub, fontSize: 14 * scale, marginBottom: 20 }}>Toque em um medicamento para perguntar à Inteligência Artificial sobre ele.</p>
-
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {meds.map(m => (
-              <button key={m.id} onClick={() => askAI(`Explique de forma simples e clara para que serve o medicamento ${m.nome}. Responda como se eu fosse um idoso leigo em medicina. Não dê recomendações médicas, apenas explique o uso geral.`)} style={{ background: T.bg1, border: `1px solid ${T.bdr}`, padding: '16px', borderRadius: 16, minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button key={m.id} onClick={() => askAI(`Explique de forma simples e clara para que serve o medicamento ${m.nome}. Responda como se eu fosse um leigo em medicina. Não dê recomendações médicas, apenas explique o uso geral.`)} style={{ background: T.bg1, border: `1px solid ${T.bdr}`, padding: '16px', borderRadius: 16, minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ color: T.txt, fontSize: 16 * scale, fontWeight: 700 }}>{m.nome}</span>
                 <span style={{ color: '#3b82f6', fontSize: 20 }}>›</span>
               </button>
@@ -265,13 +254,13 @@ Diretrizes:
 
               <p style={{ color: T.txt, fontSize: 14 * scale, fontWeight: 800, marginBottom: 8 }}>Vale conversar sobre:</p>
               <ul style={{ paddingLeft: 20, color: T.sub, fontSize: 13 * scale }}>
-                {lateDoses.length > 0 && <li>Dificuldade com os horários de hoje.</li>}
+                {lateDoses.length > 0 && <li>Dificuldade com os horários recentemente.</li>}
                 {missedDosesAll > 0 && <li>Estratégias para não esquecer doses.</li>}
                 {lateDoses.length === 0 && missedDosesAll === 0 && <li>Tudo parece bem com a sua adesão atual!</li>}
               </ul>
             </div>
             
-            <button style={{ width: '100%', padding: '16px', background: '#3b82f6', color: '#fff', fontSize: 15 * scale, fontWeight: 800, border: 'none', borderRadius: 12, minHeight: 44 }}>
+            <button onClick={handleShare} style={{ width: '100%', padding: '16px', background: '#3b82f6', color: '#fff', fontSize: 15 * scale, fontWeight: 800, border: 'none', borderRadius: 12, minHeight: 44 }}>
               Compartilhar Resumo
             </button>
           </div>
@@ -280,26 +269,58 @@ Diretrizes:
 
       {activeView === 'chat' && (
         <div className="anim-scaleIn" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <button onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start' }}>
+          <button onClick={() => setActiveView('main')} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 16 * scale, fontWeight: 700, padding: '10px 0', marginBottom: 10, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start', flexShrink: 0 }}>
             ‹ Voltar
           </button>
           
-          <div style={{ flex: 1, background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, padding: 20, display: 'flex', flexDirection: 'column' }}>
-            {loading ? (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-                <span className="anim-spin" style={{ fontSize: 32 }}>⏳</span>
-                <p style={{ color: T.sub, fontSize: 16 * scale, fontWeight: 600 }}>O assistente está pensando...</p>
-              </div>
-            ) : (
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🩺</div>
-                  <div style={{ color: T.txt, fontSize: 15 * scale, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                    {chatRes}
+          <div style={{ flex: 1, background: T.bg1, border: `1px solid ${T.bdr}`, borderRadius: 20, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Chat History */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {messages.length === 0 && !loading && (
+                <div style={{ textAlign: 'center', color: T.muted, fontSize: 14 * scale, marginTop: 20 }}>
+                  Olá! Como posso ajudar você com sua saúde e medicamentos hoje?
+                </div>
+              )}
+              {messages.map((m, i) => (
+                <div key={i} style={{ display: 'flex', gap: 12, alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                  {m.role === 'assistant' && (
+                    <div style={{ width: 36, height: 36, borderRadius: 12, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🩺</div>
+                  )}
+                  <div style={{ background: m.role === 'user' ? '#3b82f6' : T.bg2, color: m.role === 'user' ? '#fff' : T.txt, padding: '12px 16px', borderRadius: 16, borderTopRightRadius: m.role === 'user' ? 4 : 16, borderTopLeftRadius: m.role === 'assistant' ? 4 : 16, fontSize: 15 * scale, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                    {m.text}
                   </div>
                 </div>
-              </div>
-            )}
+              ))}
+              {loading && (
+                <div style={{ display: 'flex', gap: 12, alignSelf: 'flex-start' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 12, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🩺</div>
+                  <div style={{ background: T.bg2, padding: '12px 16px', borderRadius: 16, borderTopLeftRadius: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                     <span className="anim-pulse" style={{ width: 6, height: 6, background: T.sub, borderRadius: '50%' }} />
+                     <span className="anim-pulse" style={{ width: 6, height: 6, background: T.sub, borderRadius: '50%', animationDelay: '150ms' }} />
+                     <span className="anim-pulse" style={{ width: 6, height: 6, background: T.sub, borderRadius: '50%', animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Chat Input */}
+            <div style={{ padding: 12, borderTop: `1px solid ${T.bdr}`, background: T.bg2, display: 'flex', gap: 8 }}>
+              <input 
+                type="text" 
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendChatMessage(chatInput)}
+                placeholder="Pergunte ao assistente..."
+                style={{ flex: 1, background: T.inp, border: `1px solid ${T.inpB}`, color: T.txt, padding: '12px 16px', borderRadius: 24, fontSize: 15 * scale }}
+              />
+              <button 
+                onClick={() => sendChatMessage(chatInput)}
+                disabled={!chatInput.trim() || loading}
+                style={{ width: 48, height: 48, borderRadius: '50%', background: chatInput.trim() && !loading ? '#3b82f6' : T.bg3, color: chatInput.trim() && !loading ? '#fff' : T.muted, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, transition: 'all 0.2s' }}>
+                ↑
+              </button>
+            </div>
           </div>
         </div>
       )}

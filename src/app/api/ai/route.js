@@ -1,18 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req) {
   try {
-    const { prompt } = await req.json();
+    const { prompt, jsonMode } = await req.json();
+    
+    const config = {};
+    if (jsonMode) {
+      config.responseMimeType = "application/json";
+    }
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
+      config,
     });
+    
     return NextResponse.json({ text: response.text });
   } catch (error) {
     console.error("AI Error:", error);
