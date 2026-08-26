@@ -27,27 +27,71 @@ export const CaregiverDB = {
    */
   async listMyCaregivers(patientId) {
     if (!supabase) return [];
-    const { data } = await supabase
+    
+    const { data: rels, error } = await supabase
       .from('caregiver_relationships')
-      .select('*, caregiver:caregiver_id(id, nome, email)')
+      .select('*')
       .eq('patient_id', patientId)
       .neq('status', 'revoked')
       .order('created_at', { ascending: false });
-    return data || [];
+      
+    if (error || !rels || rels.length === 0) return [];
+    
+    const caregiverIds = rels.map(r => r.caregiver_id).filter(Boolean);
+    if (caregiverIds.length === 0) return rels;
+    
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, nome, email')
+      .in('id', caregiverIds);
+      
+    const profilesMap = (profiles || []).reduce((acc, p) => ({ ...acc, [p.id]: p }), {});
+    
+    return rels.map(r => ({
+      ...r,
+      caregiver: r.caregiver_id ? (profilesMap[r.caregiver_id] || { id: r.caregiver_id, nome: 'Cuidador Desconhecido' }) : null
+    }));
   },
 
   /**
    * Lista todos os pacientes que um cuidador acompanha.
    */
   async listMyPatients(caregiverId) {
-    if (!supabase) return [];
-    const { data } = await supabase
+    if (!supabase) return { error: 'No supabase client' };
+    
+    // Fallback: fetch relationships first
+    const { data: rels, error: relsErr } = await supabase
       .from('caregiver_relationships')
-      .select('*, patient:patient_id(id, nome, email)')
+      .select('*')
       .eq('caregiver_id', caregiverId)
       .eq('status', 'active')
       .order('accepted_at', { ascending: false });
-    return data || [];
+      
+    if (relsErr) {
+      console.error("ListMyPatients Rels Error:", relsErr);
+      return [];
+    }
+    
+    if (!rels || rels.length === 0) return [];
+
+    // Fetch profiles for all patient_ids
+    const patientIds = rels.map(r => r.patient_id);
+    const { data: profiles, error: profErr } = await supabase
+      .from('profiles')
+      .select('id, nome, email')
+      .in('id', patientIds);
+      
+    if (profErr) {
+      console.error("ListMyPatients Profiles Error:", profErr);
+    }
+    
+    const profilesMap = (profiles || []).reduce((acc, p) => ({ ...acc, [p.id]: p }), {});
+    
+    // Attach patient profile to each relationship
+    return rels.map(r => ({
+      ...r,
+      patient: profilesMap[r.patient_id] || { id: r.patient_id, nome: 'Paciente Desconhecido' }
+    }));
   },
 
   /**
@@ -89,13 +133,25 @@ export const CaregiverDB = {
    */
   async getInviteByToken(token) {
     if (!supabase) return null;
-    const { data } = await supabase
+    const { data: rel, error } = await supabase
       .from('caregiver_relationships')
-      .select('*, patient:patient_id(nome, email)')
+      .select('*')
       .eq('invite_token', token)
       .eq('status', 'pending')
       .maybeSingle();
-    return data;
+      
+    if (error || !rel) return null;
+    
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('nome, email')
+      .eq('id', rel.patient_id)
+      .maybeSingle();
+      
+    return {
+      ...rel,
+      patient: prof || { nome: 'Paciente' }
+    };
   },
 
   /**
@@ -242,13 +298,30 @@ export const CaregiverDashDB = {
 export const CaregiverNotesDB = {
   async list(patientId, limit = 30) {
     if (!supabase) return [];
-    const { data } = await supabase
+    
+    const { data: notes, error } = await supabase
       .from('caregiver_notes')
-      .select('*, caregiver:caregiver_id(nome)')
+      .select('*')
       .eq('patient_id', patientId)
       .order('created_at', { ascending: false })
       .limit(limit);
-    return data || [];
+      
+    if (error || !notes || notes.length === 0) return [];
+    
+    const caregiverIds = notes.map(n => n.caregiver_id).filter(Boolean);
+    if (caregiverIds.length === 0) return notes;
+    
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, nome')
+      .in('id', caregiverIds);
+      
+    const profilesMap = (profiles || []).reduce((acc, p) => ({ ...acc, [p.id]: p }), {});
+    
+    return notes.map(n => ({
+      ...n,
+      caregiver: n.caregiver_id ? (profilesMap[n.caregiver_id] || { nome: 'Cuidador' }) : null
+    }));
   },
 
   async add({ relationshipId, patientId, caregiverId, title, description, metadata = {} }) {

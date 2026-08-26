@@ -162,9 +162,17 @@ export function useMyPatients(caregiverId) {
   useEffect(() => {
     if (!caregiverId) return;
     setLoading(true);
-    CaregiverDB.listMyPatients(caregiverId)
-      .then(setPatients)
-      .finally(() => setLoading(false));
+    CaregiverDB.listMyPatients(caregiverId).then(res => {
+      if (res.error) {
+        console.error("ListMyPatients Error:", res.error);
+        setPatients([{ patient_id: 'error', patient: { nome: 'Error: ' + JSON.stringify(res.error) } }]);
+      } else {
+        setPatients(res);
+      }
+    }).catch(err => {
+      console.error("ListMyPatients Catch:", err);
+      setPatients([{ patient_id: 'error', patient: { nome: 'Catch: ' + err.message } }]);
+    }).finally(() => setLoading(false));
   }, [caregiverId]);
 
   return { patients, loading };
