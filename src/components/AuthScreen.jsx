@@ -10,6 +10,7 @@ export function AuthScreen({ onLogin, T }) {
   const [email, setEmail] = useState('');
   const [pass, setPass]   = useState('');
   const [err, setErr]     = useState('');
+  const [msg, setMsg]     = useState('');
   const [load, setLoad]   = useState(false);
   useBackButton(mode === 'register', () => setMode('login'));
 
@@ -21,7 +22,7 @@ export function AuthScreen({ onLogin, T }) {
   // setLoad(false) nunca ser chamado no caminho de sucesso — por isso
   // o botão ficava preso em "Aguarde..." indefinidamente.
   const submit = async () => {
-    setErr('');
+    setErr(''); setMsg('');
     setLoad(true);
 
     // Pequeno delay apenas para manter a transição visual do "Aguarde...",
@@ -46,6 +47,11 @@ export function AuthScreen({ onLogin, T }) {
         const r = await AuthDB.register(nome, email, pass);
         if (r.error) {
           setErr(r.error);
+          setLoad(false);
+          return;
+        }
+        if (r.message) {
+          setMsg(r.message);
           setLoad(false);
           return;
         }
@@ -117,7 +123,7 @@ export function AuthScreen({ onLogin, T }) {
             {['login', 'register'].map((m) => (
               <button
                 key={m}
-                onClick={() => { setMode(m); setErr(''); }}
+                onClick={() => { setMode(m); setErr(''); setMsg(''); setMsg(''); }}
                 aria-pressed={mode === m}
                 disabled={load}
                 style={{
@@ -145,6 +151,11 @@ export function AuthScreen({ onLogin, T }) {
           {err && (
             <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 10, background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.3)' }}>
               <p style={{ color: '#f87171', fontSize: 13, fontWeight: 500 }}>{err}</p>
+            </div>
+          )}
+          {msg && (
+            <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 10, background: 'rgba(34,197,94,.12)', border: '1px solid rgba(34,197,94,.3)' }}>
+              <p style={{ color: '#4ade80', fontSize: 13, fontWeight: 500 }}>{msg}</p>
             </div>
           )}
 

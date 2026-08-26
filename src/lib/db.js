@@ -30,7 +30,7 @@ export const AuthDB = {
       if (data?.user?.identities && data.user.identities.length === 0) {
         return { error: 'Este e-mail já está cadastrado. Faça login.' };
       }
-      return { error: 'Conta criada. Verifique seu e-mail para confirmar sua conta.' };
+      return { message: 'Conta criada. Verifique seu e-mail para confirmar sua conta.' };
     }
     
     return { user: { id: data.user.id, nome, email, role, created_at: data.user.created_at } };

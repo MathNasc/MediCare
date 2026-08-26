@@ -250,7 +250,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   if (step === STEPS.SEARCH) {
     return (
       <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Adicionar medicamento"
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300,  justifyContent: 'center' }}>
+        className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300 }}>
         <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1,  height: '90vh', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px 16px 12px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
             <div style={{ width: 44, height: 44, borderRadius: 13, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>💊</div>
@@ -273,7 +273,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   if (step === STEPS.TREATMENT) {
     return (
       <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Tipo de tratamento"
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300,  justifyContent: 'center' }}>
+        className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300 }}>
         <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1,   overflowY: 'auto', paddingBottom: 32 }}>
           <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 10, position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
             <button onClick={() => setStep(STEPS.SEARCH)} aria-label="Voltar" style={{ width: 36, height: 36, borderRadius: '50%', background: T.bg3, border: 'none', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
@@ -304,8 +304,8 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
   return (
     <div onClick={onClose} role="dialog" aria-modal="true" aria-label={isEditing ? 'Editar medicamento' : 'Novo medicamento'}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300,  justifyContent: 'center' }}>
-      <div className="anim-fadeUp" onClick={e => e.stopPropagation()}
+      className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300 }}>
+      <div className="anim-fadeUp bottom-sheet-content" onClick={e => e.stopPropagation()}
         style={{ background: T.bg1,   overflowY: 'auto', paddingBottom: 36 }}>
 
         <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>

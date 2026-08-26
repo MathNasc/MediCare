@@ -292,12 +292,8 @@ function InnerApp() {
   useBackButton(tab !== 'home', () => setTab('home'));
   useBackButton(viewMed !== null, () => setViewMed(null));
   useBackButton(showAdd, () => {
-    if (window.confirm('Fechar sem salvar?')) {
-      setShowAdd(false);
-      setEditMed(null);
-    } else {
-      window.history.pushState({}, '', '/');
-    }
+    setShowAdd(false);
+    setEditMed(null);
   });
   useBackButton(timeWarning !== null, () => setTimeWarning(null));
   useBackButton(undoWarning !== null, () => setUndoWarning(null));
