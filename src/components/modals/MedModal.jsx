@@ -240,7 +240,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
   // ── Salvar: detecta alteração de estoque antes de confirmar ────────────────
   const handleSave = async () => {
-    if (!form.nome.trim()) { if (toast) toast('Informe o nome do medicamento', 'err'); return; }
+    if (!form.nome || !form.nome.trim()) { if (toast) toast('Informe o nome do medicamento', 'err'); return; }
     const payload = buildPayload();
 
     const quantityChanged = isEditing && Number(payload.quantidade) !== Number(med.quantidade);
@@ -472,13 +472,13 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
           <button
             onClick={handleSave}
-            disabled={saving || !form.nome.trim()}
+            disabled={saving}
             style={{
               width: '100%', padding: '17px', borderRadius: 14,
-              background: !form.nome.trim() ? T.bg3 : 'linear-gradient(135deg,#3b82f6,#6366f1)',
-              color: !form.nome.trim() ? T.muted : '#fff', fontWeight: 800, fontSize: 16 * scale, border: 'none',
-              boxShadow: form.nome.trim() ? '0 4px 20px rgba(59,130,246,.35)' : 'none',
-              letterSpacing: '.3px', cursor: form.nome.trim() ? 'pointer' : 'not-allowed',
+              background: 'linear-gradient(135deg,#3b82f6,#6366f1)',
+              color: '#fff', fontWeight: 800, fontSize: 16 * scale, border: 'none',
+              boxShadow: '0 4px 20px rgba(59,130,246,.35)',
+              letterSpacing: '.3px', cursor: 'pointer',
               opacity: saving ? .7 : 1, transition: 'all .2s', marginTop: isSOS ? 0 : 4,
             }}
           >

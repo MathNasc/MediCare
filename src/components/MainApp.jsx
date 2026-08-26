@@ -285,6 +285,7 @@ function InnerApp() {
       if (dose && dose.status !== 'confirmed') handleDoseAction(dose, action === 'snooze' ? 'snooze' : 'confirm');
     }
     if (action || tabParam) window.history.replaceState({}, '', '/');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doses, loading, syncing]);
 
   // ── Hardware Back Button Interceptors ───────────────────────────────────────
