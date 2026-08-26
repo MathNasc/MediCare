@@ -98,7 +98,7 @@ function useCaregiverInvite() {
 
     CaregiverDB.getInviteByToken(found).then((data) => {
       setInvite(data);
-      setStatus(data ? 'ready' : 'error');
+      setStatus('ready'); // Supabase RLS may block preview read, assume valid until RPC acceptance
     });
   }, []);
 
@@ -154,21 +154,23 @@ function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
           </div>
         )}
 
-        {status === 'ready' && invite && (
+        {status === 'ready' && (
           <div style={{ textAlign: 'center' }}>
             <p style={{ fontSize: 44, marginBottom: 12 }}>🤝</p>
             <p style={{ color: T.txt, fontWeight: 900, fontSize: 18, lineHeight: 1.35, marginBottom: 8 }}>
-              {invite.patient?.nome || 'Alguém'} deseja compartilhar o tratamento com você.
+              {invite?.patient?.nome || 'Um paciente'} deseja compartilhar o tratamento com você.
             </p>
             <p style={{ color: T.sub, fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>
               Você poderá acompanhar medicamentos, histórico e receber alertas.
             </p>
+            {permLabel && (
             <div style={{ background: T.bg2, borderRadius: 12, padding: 12, marginBottom: 20, textAlign: 'left' }}>
               <p style={{ color: T.muted, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
                 Seu nível de acesso
               </p>
               <p style={{ color: T.txt, fontWeight: 700, fontSize: 14 }}>{permLabel}</p>
             </div>
+            )}
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 onClick={onDismiss}
@@ -369,16 +371,12 @@ function InnerApp() {
   if (!user) {
     return (
       <>
-        <AuthScreen onLogin={login} T={T} />
         {invite.status && (
-          <CaregiverInviteModal
-            status={invite.status}
-            invite={invite.invite}
-            onAccept={invite.accept}
-            onDismiss={invite.dismiss}
-            T={T}
-          />
+          <div style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff', padding: '16px 20px', textAlign: 'center', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+            <span>🤝</span> Você tem um convite de cuidador. Faça login ou crie uma conta para aceitá-lo.
+          </div>
         )}
+        <AuthScreen onLogin={login} T={T} />
       </>
     );
   }
