@@ -232,7 +232,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
       }
     }
 
-    onSave(payload, payload.horarios, payload.dias_semana);
+    await onSave(payload, payload.horarios, payload.dias_semana);
 
     setSaving(false);
     setPendingPayload(null);
@@ -240,6 +240,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
   // ── Salvar: detecta alteração de estoque antes de confirmar ────────────────
   const handleSave = async () => {
+    if (saving) return;
     if (!form.nome || !form.nome.trim()) { if (toast) toast('Informe o nome do medicamento', 'err'); return; }
     const payload = buildPayload();
 
