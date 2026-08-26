@@ -39,8 +39,12 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
 
   const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
 
-  return (
-    <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 300, overflowY: 'auto' }}>
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 10000, overflowY: 'auto' }}>
       <div className="main-container" style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 22px) 16px 96px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <h3 style={{ color: T.txt, fontSize: 18 * scale, fontWeight: 800 }}>{note ? 'Editar Anotação' : 'Nova Anotação'}</h3>
@@ -54,7 +58,8 @@ function NoteModal({ date, note, onSave, onClose, T, scale }) {
           <button onClick={() => { if(title) onSave({ ...note, date: currentDate, title, description, time }); onClose(); }} style={{ width: '100%', padding: '14px', borderRadius: 12, background: '#3b82f6', color: '#fff', fontWeight: 800, border: 'none', fontSize: 15 * scale, marginTop: 10 }}>Salvar Anotação</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -69,8 +74,12 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
   
   const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%' };
 
-  return (
-    <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 300, overflowY: 'auto' }}>
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="anim-fadeUp" style={{ position: 'fixed', inset: 0, background: T.bg1, zIndex: 10000, overflowY: 'auto' }}>
       <div className="main-container" style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 22px) 16px 96px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <h3 style={{ color: T.txt, fontSize: 18 * scale, fontWeight: 800 }}>{event ? 'Editar Evento' : 'Novo Evento'}</h3>
@@ -92,7 +101,8 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
           <button onClick={() => { if(title) onSave({ ...event, type, date: currentDate, title, description, time, doctor, location }); onClose(); }} style={{ width: '100%', padding: '14px', borderRadius: 12, background: '#3b82f6', color: '#fff', fontWeight: 800, border: 'none', fontSize: 15 * scale, marginTop: 10 }}>Salvar Evento</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
