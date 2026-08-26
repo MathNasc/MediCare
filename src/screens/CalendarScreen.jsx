@@ -97,9 +97,9 @@ function EventModal({ date, event, onSave, onClose, T, scale }) {
 }
 
 function DayPanel({
-  dateStr, history, meds, notes, events, obs, user, role,
+  dateStr, history = [], meds = [], notes = [], events = [], obs = [], user, role,
   onAddNote, onEditNote, onDeleteNote, onAddEvent, onEditEvent, onDeleteEvent,
-  onConfirmRetroactive, onAddObs, onClose, T, scale,
+  onConfirmRetroactive, onAddObs, onClose, T, scale = 1,
 }) {
   const [filter, setFilter] = useState('todos');
   const [obsText, setObsText] = useState('');
@@ -110,35 +110,36 @@ function DayPanel({
   useBackButton(retroTarget !== null, () => setRetroTarget(null));
 
   const date = new Date(dateStr + 'T12:00:00');
-  const label = date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const label = isNaN(date) ? dateStr : date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const isFuture = dateStr > today();
   const nowTime = getLocalTime();
 
-  const dayHistory = history.filter(h => getLocalDateISO(new Date(h.created_at)) === dateStr);
+  const dayHistory = (history || []).filter(h => h && h.created_at && getLocalDateISO(new Date(h.created_at)) === dateStr);
 
-  const scheduledDoses = meds
-    .filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos')
+  const scheduledDoses = (meds || [])
+    .filter(m => m && m.ativo && (m.treatment_type || 'continuous') !== 'sos')
     .flatMap(med => {
-      return (med.horarios || []).map(hora => {
+      const horas = Array.isArray(med.horarios) ? med.horarios : (typeof med.horarios === 'string' ? [med.horarios] : []);
+      return horas.map(hora => {
         const hist = dayHistory.find(h => h.med_id === med.id && h.hora === hora);
-        const obsEntry = obs.find(o => o.med_id === med.id && o.hora === hora && o.date === dateStr);
-        return { med, hora, hist, obs: obsEntry };
+        const obsEntry = (obs || []).find(o => o.med_id === med.id && o.hora === hora && o.date === dateStr);
+        return { med, hora: String(hora || ''), hist, obs: obsEntry };
       });
     }).sort((a,b) => a.hora.localeCompare(b.hora));
 
   const sosUsages = dayHistory
     .filter(h => {
-       const m = meds.find(mx => mx.id === h.med_id);
+       const m = (meds || []).find(mx => mx && mx.id === h.med_id);
        return m && (m.treatment_type === 'sos');
     })
     .map(hist => {
-       const med = meds.find(mx => mx.id === hist.med_id);
+       const med = (meds || []).find(mx => mx && mx.id === hist.med_id);
        return { med, hist };
     });
 
-  const dayNotes = notes.filter(n => n.date === dateStr);
-  const dayEvents = events.filter(e => e.date === dateStr && e.type !== 'estoque');
-  const dayStock = events.filter(e => e.date === dateStr && e.type === 'estoque');
+  const dayNotes = (notes || []).filter(n => n && n.date === dateStr);
+  const dayEvents = (events || []).filter(e => e && e.date === dateStr && e.type !== 'estoque');
+  const dayStock = (events || []).filter(e => e && e.date === dateStr && e.type === 'estoque');
 
   const filters = [
     { id: 'todos', label: 'Todos' },
@@ -478,9 +479,9 @@ export function CalendarScreen({ T, scale }) {
   };
 
   const getDayIndicator = (dateStr) => {
-    const dayHist   = history.filter(h => getLocalDateISO(new Date(h.created_at)) === dateStr);
-    const dayNotes  = notes.filter(n => n.date === dateStr);
-    const dayAllEvents = events.filter(e => e.date === dateStr);
+    const dayHist   = (history || []).filter(h => h && h.created_at && getLocalDateISO(new Date(h.created_at)) === dateStr);
+    const dayNotes  = (notes || []).filter(n => n && n.date === dateStr);
+    const dayAllEvents = (events || []).filter(e => e && e.date === dateStr);
     const dayStock  = dayAllEvents.filter(e => e.type === 'estoque');
     const dayEvents = dayAllEvents.filter(e => e.type !== 'estoque');
     const isPast    = dateStr < today();
@@ -490,12 +491,15 @@ export function CalendarScreen({ T, scale }) {
     if (dayEvents.length > 0) return 'event';
     if (dayNotes.length  > 0) return 'note';
     if (isPast || isToday) {
-      const activeMeds  = meds.filter(m => m.ativo && (m.treatment_type || 'continuous') !== 'sos');
+      const activeMeds  = (meds || []).filter(m => m && m.ativo && (m.treatment_type || 'continuous') !== 'sos');
       if (activeMeds.length === 0) return null;
       const confirmed = dayHist.filter(h => h.status === 'confirmed').length;
-      const total     = activeMeds.reduce((acc, m) => acc + (m.horarios?.length || 1), 0);
+      const total     = activeMeds.reduce((acc, m) => {
+        const horas = Array.isArray(m.horarios) ? m.horarios : (typeof m.horarios === 'string' ? [m.horarios] : []);
+        return acc + (horas.length || 1);
+      }, 0);
       if (confirmed === 0 && isPast && !isToday) return 'missed';
-      if (confirmed === total) return 'done';
+      if (confirmed === total && total > 0) return 'done';
       if (confirmed > 0)       return 'partial';
       return isToday ? null : 'missed';
     }
