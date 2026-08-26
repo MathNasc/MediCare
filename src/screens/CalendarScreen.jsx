@@ -163,7 +163,7 @@ function DayPanel({
 
   const isEditableBySelf = (hora, hist) => {
     if (!hist) return true;
-    if (hist.performed_by && hist.performed_by !== user.id) return false;
+    if (hist.performed_by && hist.performed_by !== user?.id) return false;
     if (hist.status === 'confirmed') return false;
     return true;
   };
@@ -215,7 +215,7 @@ function DayPanel({
 
                 const canOfferRetro = !isDoseFuture && !confirmed;
                 const editableNow   = canOfferRetro && isEditableBySelf(hora, hist);
-                const correctedByOther = Boolean(hist?.performed_by && hist.performed_by !== user.id);
+                const correctedByOther = Boolean(hist?.performed_by && hist.performed_by !== user?.id);
 
                 return (
                   <div key={`${med.id}-${hora}`} style={{ background: bgColor, border: `1px solid ${color}22`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
@@ -289,7 +289,7 @@ function DayPanel({
                         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                           <button
                             onClick={async () => {
-                              if (!obsText.trim()) return;
+                              if (!obsText.trim() || !user) return;
                               try {
                                 const newObs = await ObsDB.add({ user_id: user.id, med_id: med.id, hora, date: dateStr, hist_id: hist?.id || null, observation: obsText });
                                 if (onAddObs) onAddObs(newObs);
@@ -425,7 +425,8 @@ function DayPanel({
           scale={scale}
         />
       )}
-    </>
+    </>,
+    document.body
   );
 }
 
