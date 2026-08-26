@@ -94,10 +94,30 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
     med?.treatment_days || (med?.start_date && med?.end_date ? calcTreatmentDays(med.start_date, med.end_date) : 7)
   );
 
-  const [form, setForm] = useState(med || {
-    nome: '', dosagem: '', quantidade: 30,
-    unidade: 'comprimido', cor: PILL_COLORS[0],
-    observacoes: '', ativo: true, important_for_emergency: false,
+  const [form, setForm] = useState(() => {
+    if (!med) return { nome: '', dosagem: '', quantidade: 30, unidade: 'comprimido', cor: PILL_COLORS[0], observacoes: '', ativo: true, important_for_emergency: false };
+    
+    // Parse observacoes if needed
+    let obs = med.observacoes || '';
+    let _manufacturer = '';
+    let _activeIngredient = '';
+    
+    if (obs) {
+      const lines = obs.split('\n');
+      const filteredLines = [];
+      for (const line of lines) {
+        if (line.startsWith('Fabricante: ')) {
+          _manufacturer = line.replace('Fabricante: ', '');
+        } else if (line.startsWith('Princípio ativo: ')) {
+          _activeIngredient = line.replace('Princípio ativo: ', '');
+        } else {
+          filteredLines.push(line);
+        }
+      }
+      obs = filteredLines.join('\n');
+    }
+    
+    return { ...med, observacoes: obs, _manufacturer, _activeIngredient };
   });
 
   const [horarios, setHorarios] = useState(
@@ -147,7 +167,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
     return {
       nome: form.nome, dosagem: form.dosagem, quantidade: form.quantidade,
-      unidade: form.unidade, cor: form.cor, observacoes: form.observacoes,
+      unidade: form.unidade, cor: form.cor, observacoes: [form.observacoes, form._activeIngredient ? `Princípio ativo: ${form._activeIngredient}` : '', form._manufacturer ? `Fabricante: ${form._manufacturer}` : ''].filter(Boolean).join('\n'),
       ativo: form.ativo !== false, important_for_emergency: form.important_for_emergency || false,
       horarios: isSOS ? [] : (horarios.length > 0 ? horarios : ['08:00']),
       dias_semana: isSOS ? [] : (dias.length > 0 ? dias : [1,2,3,4,5,6,7]),
@@ -220,7 +240,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
 
   // ── Salvar: detecta alteração de estoque antes de confirmar ────────────────
   const handleSave = async () => {
-    if (!form.nome.trim()) return;
+    if (!form.nome.trim()) { if (toast) toast('Informe o nome do medicamento', 'err'); return; }
     const payload = buildPayload();
 
     const quantityChanged = isEditing && Number(payload.quantidade) !== Number(med.quantidade);
@@ -344,13 +364,10 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
               <input style={inp} placeholder="Nome do medicamento" value={form.nome} onChange={e => set('nome', e.target.value)} />
             </div>
 
-            {form._activeIngredient && (
+            {true && (
               <div>
                 <label style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', display: 'block', marginBottom: 6 }}>Princípio ativo</label>
-                <div style={{ ...inp, background: T.bg2, color: T.sub, border: `1.5px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 13 }}>🧬</span>
-                  <span style={{ fontSize: 14 * scale }}>{form._activeIngredient}</span>
-                </div>
+                <input style={inp} placeholder="Princípio ativo" value={form._activeIngredient || ''} onChange={e => set('_activeIngredient', e.target.value)} />
               </div>
             )}
 
@@ -363,7 +380,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
                 <label style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', display: 'block', marginBottom: 6 }}>
                   Qtd. disponível {isEditing && <span title="Alterar este valor registra automaticamente uma movimentação de estoque" style={{ cursor: 'help' }}>ℹ️</span>}
                 </label>
-                <input type="number" min="0" style={{...inp, opacity: user?.role === 'paciente' ? 0.6 : 1}} value={form.quantidade} onChange={e => set('quantidade', Math.max(0, +e.target.value))} disabled={user?.role === 'paciente'} />
+                <input type="number" min="0" style={{...inp}} value={form.quantidade} onChange={e => set('quantidade', Math.max(0, +e.target.value))} />
               </div>
             </div>
 
@@ -374,10 +391,10 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
               </select>
             </div>
 
-            {form._manufacturer && (
+            {true && (
               <div>
                 <label style={{ color: T.sub, fontSize: 11 * scale, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', display: 'block', marginBottom: 6 }}>Fabricante</label>
-                <div style={{ ...inp, background: T.bg2, color: T.sub, border: `1.5px solid ${T.bdr}` }}>{form._manufacturer}</div>
+                <input style={inp} placeholder="Fabricante" value={form._manufacturer || ""} onChange={e => set('_manufacturer', e.target.value)} />
               </div>
             )}
 
