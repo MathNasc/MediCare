@@ -54,7 +54,7 @@ export function RetroactiveConfirmModal({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Confirmar medicamento retroativamente"
+      aria-label={dose?.isUndo ? "Desmarcar medicamento" : "Confirmar medicamento retroativamente"}
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)',
@@ -79,7 +79,7 @@ export function RetroactiveConfirmModal({
             }}>🕐</div>
             <div>
               <h3 style={{ color: T.txt, fontSize: 17 * scale, fontWeight: 900, lineHeight: 1.25 }}>
-                Confirmar medicamento retroativamente
+                {dose?.isUndo ? 'Desmarcar confirmação' : 'Confirmar medicamento retroativamente'}
               </h3>
               <p style={{ color: T.sub, fontSize: 12 * scale, marginTop: 3 }}>
                 {dose?.nome} · {dose?.dosagem} · {dose?.hora}

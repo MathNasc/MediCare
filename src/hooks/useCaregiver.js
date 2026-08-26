@@ -126,6 +126,12 @@ export function usePatientDashboard(patientId) {
     setNotes(n => n.filter(x => x.id !== noteId));
   }, []);
 
+  const updateMed = useCallback(async (medId, updates) => {
+    const { MedDB } = await import('@/lib/db');
+    await MedDB.update(medId, updates);
+    setMeds(ms => ms.map(m => m.id === medId ? { ...m, ...updates } : m));
+  }, []);
+
   // Métricas derivadas do histórico
   const today = new Date().toDateString();
   const todayHistory   = history.filter(h => new Date(h.created_at).toDateString() === today);
@@ -146,6 +152,7 @@ export function usePatientDashboard(patientId) {
     confirmDose,
     addNote,
     deleteNote,
+    updateMed,
     // métricas
     confirmedToday,
     totalToday,

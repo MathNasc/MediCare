@@ -66,7 +66,18 @@ function PatientSummary({ summary, confirmedToday, totalToday, progressToday, ad
   );
 }
 
-function MedsList({ meds, T, scale }) {
+function MedsList({ meds, onUpdateQty, isAdmin, T, scale }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editQty, setEditQty] = useState('');
+
+  const handleSave = async (med) => {
+    const qty = parseInt(editQty, 10);
+    if (!isNaN(qty) && qty >= 0 && qty !== med.quantidade) {
+      await onUpdateQty(med.id, { quantidade: qty });
+    }
+    setEditingId(null);
+  };
+
   if (!meds.length) return <p style={{ color: T.muted, fontSize: 13 * scale, textAlign: 'center', padding: '12px 0' }}>Nenhum medicamento ativo.</p>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -78,8 +89,33 @@ function MedsList({ meds, T, scale }) {
             <p style={{ color: T.muted, fontSize: 11 * scale }}>{med.dosagem} · {(med.horarios || []).join(', ')}</p>
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
-            <p style={{ color: T.sub, fontSize: 10 * scale }}>{med.quantidade ?? '—'}</p>
-            <p style={{ color: T.muted, fontSize: 9 * scale }}>{med.unidade}</p>
+            {editingId === med.id ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input 
+                  type="number" 
+                  autoFocus
+                  value={editQty} 
+                  onChange={e => setEditQty(e.target.value)}
+                  style={{ width: 50, padding: '4px', borderRadius: 6, background: T.inp, border: `1px solid ${T.inpB}`, color: T.txt, fontSize: 12 * scale }}
+                />
+                <button onClick={() => handleSave(med)} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12 * scale, fontWeight: 700 }}>✓</button>
+              </div>
+            ) : (
+              <div 
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', cursor: isAdmin ? 'pointer' : 'default' }}
+                onClick={() => {
+                  if (isAdmin) {
+                    setEditingId(med.id);
+                    setEditQty(med.quantidade || 0);
+                  }
+                }}
+              >
+                <p style={{ color: T.sub, fontSize: 10 * scale }}>
+                  {med.quantidade ?? '—'} {isAdmin && <span style={{ opacity: 0.5, marginLeft: 4 }}>✎</span>}
+                </p>
+                <p style={{ color: T.muted, fontSize: 9 * scale }}>{med.unidade}</p>
+              </div>
+            )}
           </div>
         </div>
       ))}
@@ -140,10 +176,12 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
 
   useBackButton(modalDose !== null, () => setModalDose(null));
 
-  const isPast = (dateStr) => dateStr < getLocalDateISO();
+  const isPast = (dateStr) => dateStr <= getLocalDateISO();
 
   // Monta a lista de doses esperadas para a data selecionada, cruzando com o histórico
-  const dosesForDate = meds.flatMap(med =>
+  const dosesForDate = meds
+    .filter(m => m.treatment_type !== 'sos')
+    .flatMap(med =>
     (med.horarios || []).map(hora => {
       const record = history.find(h =>
         h.med_id === med.id && h.hora === hora && getLocalDateISO(new Date(h.created_at)) === selectedDate
@@ -166,12 +204,12 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
       medId: modalDose.medId,
       hora: modalDose.hora,
       doseDate: selectedDate,
-      newStatus: 'confirmed',
+      newStatus: modalDose.isUndo ? 'pending' : 'confirmed',
       reason,
     });
     if (result?.success) {
       setModalDose(null);
-      setToast('✓ Dose confirmada retroativamente!');
+      setToast(modalDose.isUndo ? '✓ Confirmação desmarcada!' : '✓ Dose confirmada retroativamente!');
       setTimeout(() => setToast(''), 2500);
     }
     return result;
@@ -214,17 +252,19 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
                   {d.confirmed ? '✓ Confirmada' : 'Não confirmada'}
                 </p>
               </div>
-              {!d.confirmed && isPast(selectedDate) && (
+              {isPast(selectedDate) && (
                 <button
-                  onClick={() => setModalDose(d)}
+                  onClick={() => setModalDose({ ...d, isUndo: d.confirmed })}
                   style={{
                     padding: '8px 14px', borderRadius: 10, fontSize: 11 * scale, fontWeight: 700,
-                    background: 'rgba(245,158,11,.12)', color: C.amber,
-                    border: '1px solid rgba(245,158,11,.3)', cursor: 'pointer', flexShrink: 0,
+                    background: d.confirmed ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)', 
+                    color: d.confirmed ? C.red : C.amber,
+                    border: d.confirmed ? `1px solid rgba(239,68,68,.3)` : '1px solid rgba(245,158,11,.3)', 
+                    cursor: 'pointer', flexShrink: 0,
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  🕐 Confirmar retroativamente
+                  {d.confirmed ? 'Desmarcar' : '🕐 Confirmar'}
                 </button>
               )}
             </div>
@@ -237,7 +277,7 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
 
       {modalDose && (
         <RetroactiveConfirmModal
-          dose={{ nome: modalDose.nome, dosagem: modalDose.dosagem, hora: modalDose.hora, date: selectedDate }}
+          dose={{ nome: modalDose.nome, dosagem: modalDose.dosagem, hora: modalDose.hora, date: selectedDate, isUndo: modalDose.isUndo }}
           requireReason={true} // cuidador SEMPRE justifica
           onConfirm={handleConfirm}
           onClose={() => setModalDose(null)}
@@ -253,6 +293,7 @@ function NotesSection({ notes, onAdd, onDelete, caregiverId, relationshipId, T, 
   const [showForm, setShowForm]       = useState(false);
   const [title, setTitle]             = useState('');
   const [description, setDescription] = useState('');
+  const [category, setCategory]       = useState('geral');
   const [saving, setSaving]           = useState(false);
 
   useBackButton(showForm, () => setShowForm(false));
@@ -260,8 +301,8 @@ function NotesSection({ notes, onAdd, onDelete, caregiverId, relationshipId, T, 
   const handleAdd = async () => {
     if (!title.trim()) return;
     setSaving(true);
-    await onAdd({ relationshipId, caregiverId, title, description });
-    setTitle(''); setDescription(''); setShowForm(false); setSaving(false);
+    await onAdd({ relationshipId, caregiverId, title, description, metadata: { category } });
+    setTitle(''); setDescription(''); setCategory('geral'); setShowForm(false); setSaving(false);
   };
 
   const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '12px 14px', color: T.txt, fontSize: 13 * scale, width: '100%', outline: 'none' };
@@ -277,6 +318,12 @@ function NotesSection({ notes, onAdd, onDelete, caregiverId, relationshipId, T, 
 
       {showForm && (
         <div style={{ background: T.bg2, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+          <select value={category} onChange={e => setCategory(e.target.value)} style={{ ...inp, marginBottom: 8, padding: '10px 14px' }}>
+            <option value="geral">Geral (Observação)</option>
+            <option value="exame">Exame</option>
+            <option value="consulta">Consulta</option>
+            <option value="sos">Uso de S.O.S</option>
+          </select>
           <input style={{ ...inp, marginBottom: 8 }} placeholder="Título (ex: Pressão medida)" value={title} onChange={e => setTitle(e.target.value)} />
           <textarea rows={3} style={{ ...inp, resize: 'none', marginBottom: 10 }} placeholder="Observação detalhada…" value={description} onChange={e => setDescription(e.target.value)} />
           <div style={{ display: 'flex', gap: 8 }}>
@@ -293,7 +340,14 @@ function NotesSection({ notes, onAdd, onDelete, caregiverId, relationshipId, T, 
       {notes.map(note => (
         <div key={note.id} style={{ background: T.bg2, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: '12px 14px', marginBottom: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <p style={{ color: T.txt, fontWeight: 700, fontSize: 13 * scale }}>{note.title}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {note.metadata?.category && (
+                <span style={{ background: '#3b82f622', color: '#3b82f6', fontSize: 10 * scale, fontWeight: 700, padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase' }}>
+                  {note.metadata.category}
+                </span>
+              )}
+              <p style={{ color: T.txt, fontWeight: 700, fontSize: 13 * scale }}>{note.title}</p>
+            </div>
             {note.caregiver_id === caregiverId && (
               <button onClick={() => onDelete(note.id, caregiverId)} style={{ color: C.red, background: 'none', border: 'none', fontSize: 14, cursor: 'pointer' }}>✕</button>
             )}
@@ -318,7 +372,7 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
   const {
     summary, meds, history, notes, loading,
     confirmedToday, totalToday, progressToday, adhesion,
-    addNote, deleteNote,
+    addNote, deleteNote, updateMed,
   } = usePatientDashboard(patientId);
 
   const perm = PERMISSION_LEVELS[relationship?.permission_level] || PERMISSION_LEVELS.viewer;
@@ -406,7 +460,7 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
       ) : (
         <>
           {tab === 'summary'  && <PatientSummary summary={summary} confirmedToday={confirmedToday} totalToday={totalToday} progressToday={progressToday} adhesion={adhesion} T={T} scale={scale} />}
-          {tab === 'meds'     && <MedsList     meds={meds}    T={T} scale={scale} />}
+          {tab === 'meds'     && <MedsList     meds={meds} onUpdateQty={updateMed} isAdmin={user?.role === 'admin'} T={T} scale={scale} />}
           {tab === 'history'  && <HistoryList  history={history} T={T} scale={scale} />}
           {tab === 'calendar' && canCorrect && (
             <CalendarCorrectionTab meds={meds} history={history} patientId={patientId} T={T} scale={scale} />
