@@ -323,6 +323,7 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
 
   const perm = PERMISSION_LEVELS[relationship?.permission_level] || PERMISSION_LEVELS.viewer;
   const canCorrect = ['caregiver', 'admin'].includes(relationship?.permission_level);
+  const swapPin = user?.role_change_pin || null;
 
   if (loadingPatients) return (
     <div style={{ textAlign: 'center', padding: '60px 0' }}>

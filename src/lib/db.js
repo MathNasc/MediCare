@@ -67,8 +67,9 @@ export const AuthDB = {
       const session = await SupabaseAuth.getSession();
       if (!session) return null;
       const u = session.user;
-      const role = await SupabaseAuth.getProfileRole(u.id);
-      return { id: u.id, nome: u.user_metadata?.nome || u.email, email: u.email, role, created_at: u.created_at };
+      const { supabase } = await import('./supabase');
+      const { data } = await supabase.from('profiles').select('*').eq('id', u.id).single();
+      return { id: u.id, nome: u.user_metadata?.nome || u.email, email: u.email, role: data?.role || 'independente', created_at: u.created_at, role_change_pin: data?.role_change_pin };
     } catch { return null; }
   },
 
