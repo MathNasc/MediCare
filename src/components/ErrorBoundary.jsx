@@ -33,7 +33,7 @@ export class ErrorBoundary extends React.Component {
             Ops, algo deu errado!
           </h2>
           <p style={{ color: T?.sub || '#666', fontSize: 15 * (scale || 1), lineHeight: 1.5, marginBottom: 24 }}>
-            Infelizmente ocorreu um erro inesperado ao carregar esta tela. Já registramos o problema para correção.
+            Erro: {this.state.error?.message || String(this.state.error)}
           </p>
           <button
             onClick={() => {

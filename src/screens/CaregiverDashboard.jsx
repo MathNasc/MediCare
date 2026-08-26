@@ -59,7 +59,7 @@ function PatientSummary({ summary, confirmedToday, totalToday, progressToday, ad
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <MetricCard icon="📋" label="Adesão 30d" value={`${adhesion}%`} color={adhesion >= 80 ? '#22c55e' : C.amber} T={T} scale={scale} />
         <MetricCard icon="💊" label="Medicamentos" value={summary?.meds_count ?? '—'} sub="ativos" T={T} scale={scale} />
-        <MetricCard icon="⏱" label="Última dose" value={lastDose ? lastDose.hora : '—'} sub={lastDose ? new Date(lastDose.at).toLocaleDateString('pt-BR') : 'Sem registro'} color={T.txt} T={T} scale={scale} />
+        <MetricCard icon="⏱" label="Última dose" value={lastDose ? lastDose.hora : '—'} sub={lastDose && lastDose.at && !isNaN(new Date(lastDose.at)) ? new Date(lastDose.at).toLocaleDateString('pt-BR') : 'Sem registro'} color={T.txt} T={T} scale={scale} />
         <MetricCard icon="✅" label="Hoje" value={`${progressToday}%`} color={progressToday >= 80 ? '#22c55e' : C.amber} T={T} scale={scale} />
       </div>
     </div>
@@ -91,7 +91,13 @@ function HistoryList({ history, T, scale }) {
   const recent = history.slice(0, 20);
   if (!recent.length) return <p style={{ color: T.muted, fontSize: 13 * scale, textAlign: 'center', padding: '12px 0' }}>Sem registros recentes.</p>;
   const grouped = recent.reduce((acc, h) => {
-    const d = new Date(h.created_at).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' });
+    let d = 'Data Inválida';
+    if (h.created_at) {
+      const parsed = new Date(h.created_at);
+      if (!isNaN(parsed)) {
+        d = parsed.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' });
+      }
+    }
     if (!acc[d]) acc[d] = [];
     acc[d].push(h);
     return acc;
