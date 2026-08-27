@@ -3,7 +3,6 @@ import webpush from 'npm:web-push@3.6.7';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-
 const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')!;
 const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!;
 const VAPID_CONTACT_EMAIL = Deno.env.get('VAPID_CONTACT_EMAIL') || 'suporte@medicare-amber-five.vercel.app';
@@ -28,21 +27,38 @@ Deno.serve(async (_req) => {
   const { data: events } = await supabase
     .from('health_events')
     .select('*')
-    .eq('completed', false);
+    .gte('date', now.toISOString().split('T')[0]);
 
-  // Busca todas as inscrições de Web Push
-  const { data: allSubs } = await supabase.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth, timezone');
-
-  if (!allSubs?.length) {
-    return new Response(JSON.stringify({ ok: true, sent: 0, reason: 'no_subs' }), { status: 200 });
+  // Busca TODAS as assinaturas de push (pacientes e cuidadores)
+  const { data: pushSubs } = await supabase.from('push_subscriptions').select('*');
+  const subsByUser = new Map<string, any[]>();
+  if (pushSubs) {
+    for (const sub of pushSubs) {
+      if (!subsByUser.has(sub.user_id)) subsByUser.set(sub.user_id, []);
+      subsByUser.get(sub.user_id)!.push(sub);
+    }
   }
 
-  // Agrupa as inscrições por user_id
-  const subsByUser = new Map<string, any[]>();
-  for (const sub of allSubs) {
-    const arr = subsByUser.get(sub.user_id) || [];
-    arr.push(sub);
-    subsByUser.set(sub.user_id, arr);
+  // Busca cuidadores ativos para poder notificá-los
+  const { data: caregivers } = await supabase
+    .from('caregiver_relationships')
+    .select('patient_id, caregiver_id')
+    .eq('status', 'active');
+  const caregiversByPatient = new Map<string, string[]>();
+  if (caregivers) {
+    for (const rel of caregivers) {
+      if (!caregiversByPatient.has(rel.patient_id)) caregiversByPatient.set(rel.patient_id, []);
+      caregiversByPatient.get(rel.patient_id)!.push(rel.caregiver_id);
+    }
+  }
+
+  // Perfis para nome do paciente (útil para notificar o cuidador)
+  const { data: profiles } = await supabase.from('profiles').select('id, nome');
+  const patientNames = new Map<string, string>();
+  if (profiles) {
+    for (const profile of profiles) {
+      patientNames.set(profile.id, profile.nome);
+    }
   }
 
   let sent = 0;
@@ -54,72 +70,76 @@ Deno.serve(async (_req) => {
     for (const med of meds) {
       if (med.treatment_type === 'sos') continue;
 
-      const userSubs = subsByUser.get(med.user_id);
-      if (!userSubs?.length) continue;
+      const userSubs = subsByUser.get(med.user_id) || [];
+      const caregiverIds = caregiversByPatient.get(med.user_id) || [];
+      const hasAnyCaregiverSub = caregiverIds.some(cgId => (subsByUser.get(cgId) || []).length > 0);
+
+      if (userSubs.length === 0 && !hasAnyCaregiverSub) continue;
+
+      let defaultTz = 'America/Sao_Paulo';
+      if (userSubs.length > 0 && userSubs[0].timezone) defaultTz = userSubs[0].timezone;
+      else {
+          for (const cgId of caregiverIds) {
+             const cSubs = subsByUser.get(cgId);
+             if (cSubs && cSubs.length > 0 && cSubs[0].timezone) {
+                 defaultTz = cSubs[0].timezone;
+                 break;
+             }
+          }
+      }
 
       const horarios: string[] = med.horarios || [];
+      let nowLocal;
+      let startOfDayUTC;
+      let endOfDayUTC;
 
-      for (const sub of userSubs) {
-        const tz = sub.timezone || 'America/Sao_Paulo';
-        let nowLocal;
-        let startOfDayUTC;
-        let endOfDayUTC;
-
-        try {
-          // Formata a data atual (now) para o timezone do usuário
-          const formatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          const parts = formatter.formatToParts(now);
-          const map: any = {};
-          parts.forEach(p => map[p.type] = p.value);
-          
-          nowLocal = new Date(`${map.year}-${map.month}-${map.day}T${map.hour === '24' ? '00' : map.hour}:${map.minute}:${map.second}Z`);
-          
-          const offsetMs = now.getTime() - nowLocal.getTime();
-          
-          const startOfDayFakeUTC = new Date(nowLocal);
-          startOfDayFakeUTC.setUTCHours(0,0,0,0);
-          startOfDayUTC = new Date(startOfDayFakeUTC.getTime() + offsetMs).toISOString();
-          
-          const endOfDayFakeUTC = new Date(nowLocal);
-          endOfDayFakeUTC.setUTCHours(23,59,59,999);
-          endOfDayUTC = new Date(endOfDayFakeUTC.getTime() + offsetMs).toISOString();
-
-        } catch (e) {
-          nowLocal = now; 
-          startOfDayUTC = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate(), 0, 0, 0, 0).toISOString();
-          endOfDayUTC = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate(), 23, 59, 59, 999).toISOString();
-        }
+      try {
+        const formatter = new Intl.DateTimeFormat('en-US', { timeZone: defaultTz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const parts = formatter.formatToParts(now);
+        const map: any = {};
+        parts.forEach(p => map[p.type] = p.value);
+        nowLocal = new Date(`${map.year}-${map.month}-${map.day}T${map.hour === '24' ? '00' : map.hour}:${map.minute}:${map.second}Z`);
+        const offsetMs = now.getTime() - nowLocal.getTime();
         
-        const todayISO = `${nowLocal.getUTCFullYear()}-${String(nowLocal.getUTCMonth()+1).padStart(2, '0')}-${String(nowLocal.getUTCDate()).padStart(2, '0')}`;
-        // Frontend usa: 1=Domingo, 2=Segunda, ..., 7=Sábado. 
-        // getUTCDay() retorna: 0=Domingo, 1=Segunda, ..., 6=Sábado.
-        const dayOfWeek = nowLocal.getUTCDay() + 1;
+        const startOfDayFakeUTC = new Date(nowLocal);
+        startOfDayFakeUTC.setUTCHours(0,0,0,0);
+        startOfDayUTC = new Date(startOfDayFakeUTC.getTime() + offsetMs).toISOString();
+        
+        const endOfDayFakeUTC = new Date(nowLocal);
+        endOfDayFakeUTC.setUTCHours(23,59,59,999);
+        endOfDayUTC = new Date(endOfDayFakeUTC.getTime() + offsetMs).toISOString();
+      } catch (e) {
+        nowLocal = now; 
+        startOfDayUTC = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate(), 0, 0, 0, 0).toISOString();
+        endOfDayUTC = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate(), 23, 59, 59, 999).toISOString();
+      }
 
-        // 1.A. Verificação de Estoque Baixo
-        if (med.quantidade != null && med.quantidade <= 5) {
-          const { data: existingStockNotif } = await supabase
-            .from('audit_logs')
-            .select('id')
-            .eq('patient_id', med.user_id)
-            .eq('action', 'SYSTEM_NOTIF_LOW_STOCK')
-            .contains('new_value', { med_id: med.id, date: todayISO })
-            .limit(1);
+      const todayISO = `${nowLocal.getUTCFullYear()}-${String(nowLocal.getUTCMonth()+1).padStart(2, '0')}-${String(nowLocal.getUTCDate()).padStart(2, '0')}`;
+      const dayOfWeek = nowLocal.getUTCDay() + 1;
 
-          if (!existingStockNotif || existingStockNotif.length === 0) {
-            const payload = JSON.stringify({
-              title: `⚠️ Estoque Baixo: ${med.nome}`,
-              body: `Restam apenas ${med.quantidade} ${med.unidade || 'unidade'}(s). Lembre-se de repor!`,
-              tag: `stock-${med.id}`,
-              url: `/?tab=meds`,
-            });
+      // 1.A. Verificação de Estoque Baixo (enviado ao paciente)
+      if (med.quantidade != null && med.quantidade <= 5 && userSubs.length > 0) {
+        const { data: existingStockNotif } = await supabase
+          .from('audit_logs')
+          .select('id')
+          .eq('patient_id', med.user_id)
+          .eq('action', 'SYSTEM_NOTIF_LOW_STOCK')
+          .contains('new_value', { med_id: med.id, date: todayISO })
+          .limit(1);
+
+        if (!existingStockNotif || existingStockNotif.length === 0) {
+          const payload = JSON.stringify({
+            title: `⚠️ Estoque Baixo: ${med.nome}`,
+            body: `Restam apenas ${med.quantidade} ${med.unidade || 'unidade'}(s). Lembre-se de repor!`,
+            tag: `stock-${med.id}`,
+            url: `/?tab=meds`,
+          });
+          let notifSent = false;
+          for (const sub of userSubs) {
             try {
               await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, { urgency: 'high' });
-              await supabase.from('audit_logs').insert({
-                patient_id: med.user_id,
-                action: 'SYSTEM_NOTIF_LOW_STOCK',
-                new_value: { med_id: med.id, date: todayISO }
-              });
               sent++;
+              notifSent = true;
             } catch (err: any) {
               failed++;
               if (err?.statusCode === 404 || err?.statusCode === 410) {
@@ -127,98 +147,141 @@ Deno.serve(async (_req) => {
               }
             }
           }
+          if (notifSent) {
+             await supabase.from('audit_logs').insert({
+                patient_id: med.user_id,
+                action: 'SYSTEM_NOTIF_LOW_STOCK',
+                new_value: { med_id: med.id, date: todayISO }
+             });
+          }
+        }
+      }
+
+      if (horarios.length === 0) continue;
+
+      if (med.treatment_type === 'temporary') {
+        if (med.start_date && todayISO < med.start_date) continue;
+        if (med.end_date && todayISO > med.end_date) continue;
+      }
+
+      if (med.dias_semana && med.dias_semana.length > 0 && !med.dias_semana.map(String).includes(String(dayOfWeek))) continue;
+
+      for (const hora of horarios) {
+        const [h, m] = hora.split(':').map(Number);
+        const doseTime = new Date(nowLocal);
+        doseTime.setUTCHours(h, m, 0, 0);
+        
+        const diffMin = Math.floor((nowLocal.getTime() - doseTime.getTime()) / 60000);
+        
+        let targetType = null;
+        if (diffMin >= 0 && diffMin <= 4) targetType = 'DOSE';
+        else if (diffMin >= 10 && diffMin <= 14) targetType = 'REMINDER_1';
+        else if (diffMin >= 20 && diffMin <= 24) targetType = 'REMINDER_2';
+
+        if (!targetType) continue;
+        
+        const { data: hist } = await supabase
+          .from('historico_doses')
+          .select('id, status')
+          .eq('med_id', med.id)
+          .eq('hora', hora)
+          .gte('created_at', startOfDayUTC)
+          .lte('created_at', endOfDayUTC)
+          .limit(1);
+
+        if (hist && hist.length > 0 && hist[0].status === 'confirmed') {
+           ignored++;
+           continue;
         }
 
-        if (horarios.length === 0) continue;
+        const { data: existingLog } = await supabase
+          .from('notification_logs')
+          .select('id')
+          .eq('med_id', med.id)
+          .eq('dose_hora', hora)
+          .eq('data_referencia', todayISO)
+          .eq('tipo', targetType)
+          .limit(1);
 
-        if (med.treatment_type === 'temporary') {
-          if (med.start_date && todayISO < med.start_date) continue;
-          if (med.end_date && todayISO > med.end_date) continue;
+        if (existingLog && existingLog.length > 0) {
+           ignored++;
+           continue;
         }
 
-        if (med.dias_semana && med.dias_semana.length > 0 && !med.dias_semana.map(String).includes(String(dayOfWeek))) continue;
+        let title = `💊 ${med.nome}`;
+        let body = `${med.dosagem} · Horário: ${hora}`;
 
-        for (const hora of horarios) {
-          const [h, m] = hora.split(':').map(Number);
-          const doseTime = new Date(nowLocal);
-          doseTime.setUTCHours(h, m, 0, 0);
-          
-          const diffMin = Math.floor((nowLocal.getTime() - doseTime.getTime()) / 60000);
-          
-          let targetType = null;
-          if (diffMin >= 0 && diffMin <= 4) targetType = 'DOSE';
-          else if (diffMin >= 10 && diffMin <= 14) targetType = 'REMINDER_1';
-          else if (diffMin >= 20 && diffMin <= 24) targetType = 'REMINDER_2';
+        if (targetType === 'REMINDER_1') {
+            title = `⚠️ Lembrete de Dose: ${med.nome}`;
+            body = `Você esqueceu? Dose agendada para ${hora}.`;
+        } else if (targetType === 'REMINDER_2') {
+            title = `🚨 Último Lembrete: ${med.nome}`;
+            body = `Não esqueça de tomar o seu medicamento! (${hora})`;
+        }
 
-          if (!targetType) continue;
-          
-          // Verifica se já tomou a dose hoje usando as boundaries corretas para o fuso do usuário
-          const { data: hist } = await supabase
-            .from('historico_doses')
-            .select('id, status')
-            .eq('med_id', med.id)
-            .eq('hora', hora)
-            .gte('created_at', startOfDayUTC)
-            .lte('created_at', endOfDayUTC)
-            .limit(1);
+        const payload = JSON.stringify({
+          title,
+          body,
+          tag: `dose-${med.id}-${hora}`,
+          medId: med.id,
+          hora,
+          doseId: `${med.id}-${hora.replace(':', '')}`,
+          url: `/?action=confirm&medId=${med.id}&hora=${hora}`,
+        });
 
-          if (hist && hist.length > 0 && hist[0].status === 'confirmed') {
-             ignored++;
-             continue;
-          }
+        // Enviar para o paciente (se tiver subscrições)
+        let anySent = false;
+        for (const sub of userSubs) {
+           try {
+             await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, { urgency: 'high' });
+             sent++;
+             anySent = true;
+           } catch (err: any) {
+             failed++;
+             if (err?.statusCode === 404 || err?.statusCode === 410) {
+               await supabase.from('push_subscriptions').delete().eq('id', sub.id);
+             }
+           }
+        }
 
-          // Verifica se JÁ ENVIOU este alerta hoje
-          const { data: existingLog } = await supabase
-            .from('notification_logs')
-            .select('id')
-            .eq('med_id', med.id)
-            .eq('dose_hora', hora)
-            .eq('data_referencia', todayISO)
-            .eq('tipo', targetType)
-            .limit(1);
+        // Se o paciente esquecer (REMINDER_2), notifica os cuidadores!
+        if (targetType === 'REMINDER_2') {
+           const patientName = patientNames.get(med.user_id) || 'Seu paciente';
+           const cgPayload = JSON.stringify({
+              title: `🚨 Paciente Atrasado: ${med.nome}`,
+              body: `${patientName} esqueceu a dose das ${hora}.`,
+              tag: `cg-dose-${med.id}-${hora}`,
+              url: `/?tab=history`,
+           });
+           
+           for (const cgId of caregiverIds) {
+               const cgSubs = subsByUser.get(cgId);
+               if (cgSubs) {
+                   for (const cgSub of cgSubs) {
+                       try {
+                           await webpush.sendNotification({ endpoint: cgSub.endpoint, keys: { p256dh: cgSub.p256dh, auth: cgSub.auth } }, cgPayload, { urgency: 'high' });
+                           sent++;
+                           anySent = true;
+                       } catch(e: any) {
+                           failed++;
+                           if (e?.statusCode === 404 || e?.statusCode === 410) {
+                               await supabase.from('push_subscriptions').delete().eq('id', cgSub.id);
+                           }
+                       }
+                   }
+               }
+           }
+        }
 
-          if (existingLog && existingLog.length > 0) {
-             ignored++;
-             continue;
-          }
-
-          let title = `💊 ${med.nome}`;
-          let body = `${med.dosagem} · Horário: ${hora}`;
-
-          if (targetType === 'REMINDER_1') {
-              title = `⚠️ Lembrete de Dose: ${med.nome}`;
-              body = `Você esqueceu? Dose agendada para ${hora}.`;
-          } else if (targetType === 'REMINDER_2') {
-              title = `🚨 Último Lembrete: ${med.nome}`;
-              body = `Não esqueça de tomar o seu medicamento! (${hora})`;
-          }
-
-          const payload = JSON.stringify({
-            title,
-            body,
-            tag: `dose-${med.id}-${hora}`,
-            medId: med.id,
-            hora,
-            doseId: `${med.id}-${hora.replace(':', '')}`,
-            url: `/?action=confirm&medId=${med.id}&hora=${hora}`,
-          });
-
-          try {
-            await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, { urgency: 'high' });
-            await supabase.from('notification_logs').insert({
-                user_id: med.user_id,
-                med_id: med.id,
-                dose_hora: hora,
-                data_referencia: todayISO,
-                tipo: targetType
-            });
-            sent++;
-          } catch (err: any) {
-            failed++;
-            if (err?.statusCode === 404 || err?.statusCode === 410) {
-              await supabase.from('push_subscriptions').delete().eq('id', sub.id);
-            }
-          }
+        if (anySent || userSubs.length === 0) {
+           // Registra o log para não enviar novamente
+           await supabase.from('notification_logs').insert({
+              user_id: med.user_id,
+              med_id: med.id,
+              dose_hora: hora,
+              data_referencia: todayISO,
+              tipo: targetType
+           });
         }
       }
     }
@@ -228,7 +291,6 @@ Deno.serve(async (_req) => {
   if (events) {
     for (const ev of events) {
       if (!ev.date || !ev.time) continue;
-
       const userSubs = subsByUser.get(ev.user_id);
       if (!userSubs?.length) continue;
 

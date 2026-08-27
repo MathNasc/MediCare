@@ -223,7 +223,7 @@ function HistoryList({ history, T, scale }) {
 }
 
 // ─── Aba Calendário: correção retroativa (justificativa obrigatória) ──────────
-function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
+function CalendarCorrectionTab({ meds, history, patientId, onReload, T, scale }) {
   const { confirmDoseRetroactive } = useApp();
   const [selectedDate, setSelectedDate] = useState(() => getLocalDateISO());
   const [modalDose, setModalDose]       = useState(null);
@@ -263,6 +263,7 @@ function CalendarCorrectionTab({ meds, history, patientId, T, scale }) {
       reason,
     });
     if (result?.success) {
+      if (onReload) onReload();
       setModalDose(null);
       setToast(modalDose.isUndo ? '✓ Confirmação desmarcada!' : '✓ Dose confirmada retroativamente!');
       setTimeout(() => setToast(''), 2500);
@@ -425,7 +426,7 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
   const relationship = patients.find(p => p.patient_id === patientId);
 
   const {
-    summary, meds, history, notes, loading,
+    summary, meds, history, notes, loading, reload,
     confirmedToday, totalToday, progressToday, adhesion,
     addNote, deleteNote, updateMed,
   } = usePatientDashboard(patientId);
@@ -540,7 +541,7 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
           {tab === 'meds'     && <MedsList     meds={meds} onUpdateQty={updateMed} isAdmin={relationship?.permission_level === 'admin'} T={T} scale={scale} />}
           {tab === 'history'  && <HistoryList  history={history} T={T} scale={scale} />}
           {tab === 'calendar' && canCorrect && (
-            <CalendarCorrectionTab meds={meds} history={history} patientId={patientId} T={T} scale={scale} />
+            <CalendarCorrectionTab meds={meds} history={history} patientId={patientId} onReload={reload} T={T} scale={scale} />
           )}
           {tab === 'notes'    && (
             <NotesSection notes={notes} onAdd={addNote} onDelete={deleteNote} caregiverId={user?.id} relationshipId={relationship?.id} T={T} scale={scale} />
