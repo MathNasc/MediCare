@@ -96,9 +96,9 @@ function MedsList({ meds, onUpdateQty, isAdmin, T, scale }) {
                   autoFocus
                   value={editQty} 
                   onChange={e => setEditQty(e.target.value)}
-                  style={{ width: 50, padding: '4px', borderRadius: 6, background: T.inp, border: `1px solid ${T.inpB}`, color: T.txt, fontSize: 12 * scale }}
+                  style={{ width: 60, padding: '6px', borderRadius: 6, background: T.inp, border: `1px solid ${T.inpB}`, color: T.txt, fontSize: 14 * scale }}
                 />
-                <button onClick={() => handleSave(med)} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12 * scale, fontWeight: 700 }}>✓</button>
+                <button onClick={() => handleSave(med)} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 14 * scale, fontWeight: 700 }}>✓</button>
               </div>
             ) : (
               <div 
@@ -110,10 +110,17 @@ function MedsList({ meds, onUpdateQty, isAdmin, T, scale }) {
                   }
                 }}
               >
-                <p style={{ color: T.sub, fontSize: 10 * scale }}>
-                  {med.quantidade ?? '—'} {isAdmin && <span style={{ opacity: 0.5, marginLeft: 4 }}>✎</span>}
-                </p>
-                <p style={{ color: T.muted, fontSize: 9 * scale }}>{med.unidade}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <p style={{ color: T.sub, fontSize: 12 * scale, fontWeight: 700 }}>
+                    {med.quantidade ?? '—'}
+                  </p>
+                  {isAdmin && (
+                    <div style={{ background: 'rgba(59,130,246,.15)', color: '#3b82f6', padding: '2px 6px', borderRadius: 6, fontSize: 10 * scale, fontWeight: 700 }}>
+                      EDITAR
+                    </div>
+                  )}
+                </div>
+                <p style={{ color: T.muted, fontSize: 10 * scale, marginTop: 2 }}>{med.unidade}</p>
               </div>
             )}
           </div>
@@ -406,27 +413,49 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
 
   return (
     <div className="anim-fadeUp">
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 900 }}>Painel do Cuidador</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-          <span style={{ fontSize: 14 }}>{perm.icon}</span>
-          <p style={{ color: T.sub, fontSize: 12 * scale }}>{perm.label}</p>
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ width: 48, height: 48, borderRadius: 24, background: '#3b82f6', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 * scale, fontWeight: 800, flexShrink: 0 }}>
+          {relationship?.patient?.nome?.[0]?.toUpperCase() || 'P'}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {patients.length > 1 ? (
+            <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', width: '100%' }}>
+              <select 
+                value={patientId}
+                onChange={e => setSelectedPatientId(e.target.value)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: T.txt,
+                  fontSize: 20 * scale,
+                  fontWeight: 900,
+                  outline: 'none',
+                  padding: '0 24px 0 0',
+                  appearance: 'none',
+                  cursor: 'pointer',
+                  width: '100%',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden'
+                }}
+              >
+                {patients.map(p => (
+                  <option key={p.patient_id} value={p.patient_id} style={{ color: '#000' }}>{p.patient?.nome || 'Paciente'}</option>
+                ))}
+              </select>
+              <span style={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: T.sub, fontSize: 12 }}>▼</span>
+            </div>
+          ) : (
+            <h2 style={{ color: T.txt, fontSize: 20 * scale, fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {relationship?.patient?.nome || 'Paciente'}
+            </h2>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+            <span style={{ fontSize: 14 }}>{perm.icon}</span>
+            <p style={{ color: T.sub, fontSize: 12 * scale }}>{perm.label}</p>
+          </div>
         </div>
       </div>
-
-      {patients.length > 1 && (
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 16 }}>
-          {patients.map(p => (
-            <button
-              key={p.patient_id}
-              onClick={() => setSelectedPatientId(p.patient_id)}
-              style={{ padding: '8px 16px', borderRadius: 99, whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 12 * scale, fontWeight: 700, background: patientId === p.patient_id ? '#3b82f6' : T.bg3, color: patientId === p.patient_id ? '#fff' : T.sub, border: `1px solid ${patientId === p.patient_id ? '#3b82f6' : T.bdr}` }}
-            >
-              {p.patient?.nome || 'Paciente'}
-            </button>
-          ))}
-        </div>
-      )}
 
       {swapPin && (
         <div style={{ background: T.bg2, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -460,7 +489,7 @@ export function CaregiverDashboard({ user, T, scale = 1 }) {
       ) : (
         <>
           {tab === 'summary'  && <PatientSummary summary={summary} confirmedToday={confirmedToday} totalToday={totalToday} progressToday={progressToday} adhesion={adhesion} T={T} scale={scale} />}
-          {tab === 'meds'     && <MedsList     meds={meds} onUpdateQty={updateMed} isAdmin={user?.role === 'admin'} T={T} scale={scale} />}
+          {tab === 'meds'     && <MedsList     meds={meds} onUpdateQty={updateMed} isAdmin={relationship?.permission_level === 'admin'} T={T} scale={scale} />}
           {tab === 'history'  && <HistoryList  history={history} T={T} scale={scale} />}
           {tab === 'calendar' && canCorrect && (
             <CalendarCorrectionTab meds={meds} history={history} patientId={patientId} T={T} scale={scale} />
