@@ -127,10 +127,23 @@ export function usePatientDashboard(patientId) {
   }, []);
 
   const updateMed = useCallback(async (medId, updates) => {
+    const { supabase } = await import('@/lib/supabase');
+    if (supabase) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Garante que o vínculo exista na tabela legada cuidadores para RLS
+        await supabase.from('cuidadores').upsert({
+          paciente_id: patientId,
+          cuidador_id: user.id,
+          status: 'ativo',
+          nivel_acesso: 'total'
+        }, { onConflict: 'paciente_id, cuidador_id' });
+      }
+    }
     const { MedDB } = await import('@/lib/db');
     await MedDB.update(medId, updates);
     setMeds(ms => ms.map(m => m.id === medId ? { ...m, ...updates } : m));
-  }, []);
+  }, [patientId]);
 
   // Métricas derivadas do histórico
   const today = new Date().toDateString();

@@ -69,12 +69,39 @@ function PatientSummary({ summary, confirmedToday, totalToday, progressToday, ad
 function MedsList({ meds, onUpdateQty, isAdmin, T, scale }) {
   const [editingId, setEditingId] = useState(null);
   const [editQty, setEditQty] = useState('');
+  const [editHours, setEditHours] = useState('');
 
   const handleSave = async (med) => {
     const qty = parseInt(editQty, 10);
+    const updates = {};
+    
     if (!isNaN(qty) && qty >= 0 && qty !== med.quantidade) {
-      await onUpdateQty(med.id, { quantidade: qty });
+      updates.quantidade = qty;
     }
+
+    // Clean and validate the hours input
+    const parsedHours = editHours
+      .split(',')
+      .map(h => h.trim())
+      .filter(h => /^([01]\d|2[0-3]):([0-5]\d)$/.test(h)); // keep only valid HH:MM format
+      
+    // Remove duplicates
+    const uniqueHours = [...new Set(parsedHours)];
+
+    const currentHours = med.horarios || [];
+    const sortedParsed = [...uniqueHours].sort();
+    const sortedCurrent = [...currentHours].sort();
+    
+    const hoursChanged = sortedParsed.length !== sortedCurrent.length || sortedParsed.some((h, i) => h !== sortedCurrent[i]);
+    
+    if (hoursChanged && uniqueHours.length > 0) {
+      updates.horarios = uniqueHours;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await onUpdateQty(med.id, updates);
+    }
+    
     setEditingId(null);
   };
 
@@ -84,21 +111,41 @@ function MedsList({ meds, onUpdateQty, isAdmin, T, scale }) {
       {meds.map(med => (
         <div key={med.id} style={{ background: T.bg2, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 38, height: 38, borderRadius: 10, background: `${med.cor || '#3b82f6'}22`, border: `2px solid ${med.cor || '#3b82f6'}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>💊</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, display: editingId === med.id ? 'none' : 'block' }}>
             <p style={{ color: T.txt, fontWeight: 700, fontSize: 13 * scale, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{med.nome}</p>
             <p style={{ color: T.muted, fontSize: 11 * scale }}>{med.dosagem} · {(med.horarios || []).join(', ')}</p>
           </div>
-          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ textAlign: 'right', flexShrink: 0, width: editingId === med.id ? '100%' : 'auto' }}>
             {editingId === med.id ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input 
-                  type="number" 
-                  autoFocus
-                  value={editQty} 
-                  onChange={e => setEditQty(e.target.value)}
-                  style={{ width: 60, padding: '6px', borderRadius: 6, background: T.inp, border: `1px solid ${T.inpB}`, color: T.txt, fontSize: 14 * scale }}
-                />
-                <button onClick={() => handleSave(med)} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 14 * scale, fontWeight: 700 }}>✓</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', alignItems: 'stretch' }}>
+                <p style={{ color: T.txt, fontWeight: 700, fontSize: 13 * scale, textAlign: 'left', marginBottom: -4 }}>Editando {med.nome}</p>
+                
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <p style={{ color: T.sub, fontSize: 10 * scale, fontWeight: 600, marginBottom: 4 }}>ESTOQUE</p>
+                    <input 
+                      type="number" 
+                      value={editQty} 
+                      onChange={e => setEditQty(e.target.value)}
+                      style={{ width: '100%', padding: '8px', borderRadius: 8, background: T.inp, border: `1px solid ${T.inpB}`, color: T.txt, fontSize: 13 * scale }}
+                    />
+                  </div>
+                  <div style={{ flex: 2, textAlign: 'left' }}>
+                    <p style={{ color: T.sub, fontSize: 10 * scale, fontWeight: 600, marginBottom: 4 }}>HORÁRIOS (08:00, 20:00)</p>
+                    <input 
+                      type="text" 
+                      value={editHours} 
+                      onChange={e => setEditHours(e.target.value)}
+                      style={{ width: '100%', padding: '8px', borderRadius: 8, background: T.inp, border: `1px solid ${T.inpB}`, color: T.txt, fontSize: 13 * scale }}
+                      placeholder="HH:MM, HH:MM"
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button onClick={() => setEditingId(null)} style={{ background: T.bg1, color: T.txt, border: `1px solid ${T.bdr}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12 * scale, fontWeight: 700 }}>Cancelar</button>
+                  <button onClick={() => handleSave(med)} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12 * scale, fontWeight: 700 }}>Salvar</button>
+                </div>
               </div>
             ) : (
               <div 
@@ -107,6 +154,7 @@ function MedsList({ meds, onUpdateQty, isAdmin, T, scale }) {
                   if (isAdmin) {
                     setEditingId(med.id);
                     setEditQty(med.quantidade || 0);
+                    setEditHours((med.horarios || []).join(', '));
                   }
                 }}
               >
