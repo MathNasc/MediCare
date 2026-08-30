@@ -36,7 +36,7 @@ function FullSubScreen({ children, bg }) {
   );
 }
 
-export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggleHc }) {
+export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggleHc, initialView = 'main', initialCgTab = 'summary' }) {
   const { user, logout, meds } = useApp();
   const [permission, setPermission] = useState('default');
   const { setup, disable, isSubscribed } = useNotifications(meds, user?.id);
@@ -45,7 +45,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggl
   const disablePush = async () => { await disable(); };
   
   const [profile, setProfile] = useState(null);
-  const [activeView, setActiveView] = useState('main'); // main, personal, config_card, show_card, health, meds, profs, contacts, caregivers, privacy
+  const [activeView, setActiveView] = useState(initialView); // main, personal, config_card, show_card, health, meds, profs, contacts, caregivers, privacy
   
   const fileInputRef = useRef(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -299,7 +299,7 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggl
             <button onClick={() => setActiveView('caregivers')} style={{ width: 40, height: 40, borderRadius: '50%', background: T.bg2, border: 'none', color: T.txt, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <p style={{ color: T.txt, fontWeight: 800, fontSize: 18 * scale }}>Painel do Cuidador</p>
           </div>
-          <CaregiverDashboard user={user} T={T} scale={scale} />
+          <CaregiverDashboard user={user} T={T} scale={scale} initialTab={initialCgTab} />
         </FullSubScreen>
       )}
 

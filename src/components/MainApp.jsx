@@ -251,6 +251,8 @@ function InnerApp() {
 
 
   const [tab,       setTab]       = useState('home');
+  const [profileView, setProfileView] = useState('main');
+  const [cgTab, setCgTab] = useState('summary');
   const [timeWarning, setTimeWarning] = useState(null);
   const [undoWarning, setUndoWarning] = useState(null);
 
@@ -278,7 +280,17 @@ function InnerApp() {
     if (typeof window === 'undefined' || loading || syncing) return;
     const params = new URLSearchParams(window.location.search);
     const action   = params.get('action');
-    const tabParam = params.get('tab');
+    let tabParam = params.get('tab');
+
+    if (tabParam === 'history' || tabParam === 'caregiver_history') {
+      setProfileView('caregiver_dash');
+      setCgTab('history');
+      tabParam = 'profile';
+    } else if (params.get('view')) {
+      setProfileView(params.get('view'));
+      if (params.get('cgTab')) setCgTab(params.get('cgTab'));
+    }
+
     if (tabParam) setTab(tabParam);
     if (action === 'confirm') {
       const hora   = params.get('hora');
@@ -431,7 +443,7 @@ function InnerApp() {
             {tab === 'calendar' && <CalendarScreen {...screenProps} />}
             {tab === 'stats'    && <StatsScreen    {...screenProps} />}
             {tab === 'ai'       && <AIScreen       {...screenProps} />}
-            {tab === 'profile'  && <ProfileScreen  {...screenProps} dark={dark} toggle={toggle} hc={hc} toggleHc={toggleHc} fsSize={fsSize} setFs={setFs} />}
+            {tab === 'profile'  && <ProfileScreen  {...screenProps} dark={dark} toggle={toggle} hc={hc} toggleHc={toggleHc} fsSize={fsSize} setFs={setFs} initialView={profileView} initialCgTab={cgTab} />}
           </Suspense>
         </ErrorBoundary>
       </main>

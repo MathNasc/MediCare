@@ -417,10 +417,10 @@ function NotesSection({ notes, onAdd, onDelete, caregiverId, relationshipId, T, 
 }
 
 // ─── Tela principal ────────────────────────────────────────────────────────────
-export function CaregiverDashboard({ user, T, scale = 1 }) {
+export function CaregiverDashboard({ user, T, scale = 1, initialTab = 'summary' }) {
   const { patients, loading: loadingPatients } = useMyPatients(user?.id);
   const [selectedPatientId, setSelectedPatientId] = useState(null);
-  const [tab, setTab] = useState('summary'); // 'summary'|'meds'|'history'|'calendar'|'notes'
+  const [tab, setTab] = useState(initialTab); // 'summary'|'meds'|'history'|'calendar'|'notes'
 
   const patientId = selectedPatientId || patients[0]?.patient_id || null;
   const relationship = patients.find(p => p.patient_id === patientId);

@@ -251,7 +251,7 @@ Deno.serve(async (_req) => {
               title: `🚨 Paciente Atrasado: ${med.nome}`,
               body: `${patientName} esqueceu a dose das ${hora}.`,
               tag: `cg-dose-${med.id}-${hora}`,
-              url: `/?tab=history`,
+              url: `/?tab=profile&view=caregiver_dash&cgTab=history`,
            });
            
            for (const cgId of caregiverIds) {
