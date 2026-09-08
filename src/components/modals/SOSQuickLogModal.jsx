@@ -3,7 +3,8 @@
 // Registro rápido de uso de medicamento SOS (sob demanda).
 // Horário preenchido automaticamente (editável), motivo e quantidade opcionais.
 
-import { useState } from 'react';
+import { useState , useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { C } from '@/lib/theme';
 
 const REASON_SUGGESTIONS = ['Dor de cabeça', 'Febre', 'Dor no corpo', 'Alergia', 'Enjoo', 'Cólica'];
@@ -28,7 +29,7 @@ export function SOSQuickLogModal({ med, onConfirm, onClose, T, scale = 1 }) {
     padding: '12px 14px', color: T.txt, fontSize: 14 * scale, width: '100%', outline: 'none',
   };
 
-  return (
+  const [mounted, setMounted] = require('react').useState(false); require('react').useEffect(() => setMounted(true), []); if (!mounted) return null; return require('react-dom').createPortal(
     <div
       onClick={onClose}
       role="dialog"
@@ -95,6 +96,5 @@ export function SOSQuickLogModal({ med, onConfirm, onClose, T, scale = 1 }) {
           </>
         )}
       </div>
-    </div>
-  );
+    </div>, document.getElementById('root') || document.body);
 }

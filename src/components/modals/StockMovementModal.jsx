@@ -11,7 +11,8 @@ import { BrDateInput } from "@/components/ui/BrDateInput";
 // Todos os campos além da quantidade em si são opcionais — o usuário pode
 // simplesmente confirmar sem preencher nada.
 
-import { useState } from 'react';
+import { useState , useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { C } from '@/lib/theme';
 
 const ADJUSTMENT_REASONS = ['Perda', 'Erro de contagem', 'Vencimento', 'Danificado'];
@@ -50,7 +51,7 @@ export function StockMovementModal({ med, quantityBefore, quantityAfter, onConfi
     letterSpacing: '.5px', display: 'block', marginBottom: 6,
   };
 
-  return (
+  const [mounted, setMounted] = require('react').useState(false); require('react').useEffect(() => setMounted(true), []); if (!mounted) return null; return require('react-dom').createPortal(
     <div
       onClick={onClose}
       role="dialog"
@@ -166,6 +167,5 @@ export function StockMovementModal({ med, quantityBefore, quantityAfter, onConfi
           </button>
         </div>
       </div>
-    </div>
-  );
+    </div>, document.getElementById('root') || document.body);
 }

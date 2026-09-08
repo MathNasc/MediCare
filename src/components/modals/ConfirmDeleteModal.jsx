@@ -1,14 +1,16 @@
 'use client';
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { C } from '@/lib/theme';
 
 export function ConfirmDeleteModal({ medName, onConfirm, onCancel, T, scale = 1 }) {
-  return (
+  const [mounted, setMounted] = require('react').useState(false); require('react').useEffect(() => setMounted(true), []); if (!mounted) return null; return require('react-dom').createPortal(
     <div
       onClick={onCancel}
       role="dialog" aria-modal="true" aria-label="Confirmar exclusão"
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)',
-        backdropFilter: 'blur(14px)', zIndex: 300,
+        backdropFilter: 'blur(14px)', zIndex: 9999, display: 'flex', alignItems: 'center',
         /* flex-end */
         justifyContent: 'center', padding: 16,
       }}
@@ -63,6 +65,5 @@ export function ConfirmDeleteModal({ medName, onConfirm, onCancel, T, scale = 1 
           </button>
         </div>
       </div>
-    </div>
-  );
+    </div>, document.getElementById('root') || document.body);
 }

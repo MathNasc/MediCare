@@ -1,14 +1,16 @@
 export function UndoConfirmModal({ dose, onConfirm, onCancel, T, scale = 1 }) {
-  if (!dose) return null;
+  const [mounted, setMounted] = require('react').useState(false);
+  require('react').useEffect(() => setMounted(true), []);
 
-  return (
+  if (!dose || !mounted) return null;
+
+  return require('react-dom').createPortal(
     <div
       onClick={onCancel}
       role="dialog" aria-modal="true"
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)',
-        backdropFilter: 'blur(14px)', zIndex: 300,
-        /* flex-end */
+        backdropFilter: 'blur(14px)', zIndex: 9999, display: 'flex', alignItems: 'center',
         justifyContent: 'center', padding: 16,
       }}
     >
@@ -18,7 +20,8 @@ export function UndoConfirmModal({ dose, onConfirm, onCancel, T, scale = 1 }) {
         style={{
           background: T.bg1, border: `1px solid ${T.bdr}`,
           borderRadius: 28, width: '100%', maxWidth: 480,
-          padding: 28, paddingBottom: 36, textAlign: 'center'
+          padding: 28, paddingBottom: 36, textAlign: 'center',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
         }}
       >
         <div style={{
@@ -63,6 +66,7 @@ export function UndoConfirmModal({ dose, onConfirm, onCancel, T, scale = 1 }) {
           Manter como tomado
         </button>
       </div>
-    </div>
+    </div>,
+    document.getElementById('root') || document.body
   );
 }

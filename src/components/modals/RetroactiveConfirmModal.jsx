@@ -1,10 +1,12 @@
 'use client';
+
 // src/components/modals/RetroactiveConfirmModal.jsx
 // Modal para confirmação/correção retroativa de uma dose.
 // Motivo é OBRIGATÓRIO quando quem corrige não é o próprio paciente (cuidador).
 // Quando é o próprio paciente/independente corrigindo, o motivo é opcional.
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { C } from '@/lib/theme';
 
 const REASON_SUGGESTIONS = [
@@ -25,6 +27,9 @@ export function RetroactiveConfirmModal({
   const [reason, setReason]   = useState('');
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState('');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   const canSubmit = !requireReason || reason.trim().length > 0;
 
@@ -49,7 +54,9 @@ export function RetroactiveConfirmModal({
     resize: 'none', outline: 'none',
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       onClick={onClose}
       role="dialog"
@@ -58,15 +65,16 @@ export function RetroactiveConfirmModal({
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)',
-        zIndex: 350, /* flex-end */ justifyContent: 'center',
+        zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}
     >
       <div
         className="anim-fadeUp"
         onClick={e => e.stopPropagation()}
         style={{
-          background: T.bg1, borderRadius: '28px 28px 0 0',
-          width: '100%', maxWidth: 480, padding: 24, paddingBottom: 32,
+          background: T.bg1, borderRadius: 28,
+          width: '90%', maxWidth: 480, padding: 24, paddingBottom: 32,
+          boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
         }}
       >
         {/* Header */}
@@ -128,7 +136,6 @@ export function RetroactiveConfirmModal({
           value={reason}
           onChange={e => { setReason(e.target.value); setError(''); }}
         />
-
         {error && (
           <p style={{ color: C.red, fontSize: 12 * scale, marginBottom: 10 }}>{error}</p>
         )}
@@ -167,6 +174,7 @@ export function RetroactiveConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.getElementById('root') || document.body
   );
 }

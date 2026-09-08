@@ -18,7 +18,8 @@ import { BrDateInput } from "@/components/ui/BrDateInput";
 // gravada. Remova-os (marcados com "Diagnóstico temporário") assim que
 // confirmar que tudo está funcionando.
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getLocalDateISO } from '@/lib/dateUtils';
 import { useBackButton } from '@/hooks/useBackButton';
 import { PILL_COLORS, UNITS, WEEK_S, C } from '@/lib/theme';
@@ -47,7 +48,8 @@ function CatalogPreview({ item, T, scale }) {
         <p style={{ color: T.sub, fontSize: 12 * scale }}>{item.active_ingredient}{item.dosage ? ` · ${item.dosage}` : ''}</p>
         {item.manufacturer && <p style={{ color: T.muted, fontSize: 11 * scale, marginTop: 2 }}>🏭 {item.manufacturer}</p>}
       </div>
-    </div>
+    </div>,
+    document.getElementById('root') || document.body
   );
 }
 
@@ -81,6 +83,8 @@ function TreatmentTypeSelector({ value, onChange, T, scale }) {
 
 // ─── Componente principal ──────────────────────────────────────────────────────
 export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const { recordStockMovement, user } = useApp();
   const isEditing = Boolean(med);
 

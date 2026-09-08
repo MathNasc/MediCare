@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { C } from '@/lib/theme';
 
 export function TimeWarningModal({ dose, type, diffMin, onConfirm, onClose, T, scale = 1 }) {
@@ -17,13 +19,13 @@ export function TimeWarningModal({ dose, type, diffMin, onConfirm, onClose, T, s
 
   const confirmText = type === 'confirm' ? '✓ Sim, já tomei' : '⏰ Sim, adiar';
 
-  return (
+  const [mounted, setMounted] = require('react').useState(false); require('react').useEffect(() => setMounted(true), []); if (!mounted) return null; return require('react-dom').createPortal(
     <div
       onClick={onClose}
       role="dialog" aria-modal="true"
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)',
-        backdropFilter: 'blur(14px)', zIndex: 300,
+        backdropFilter: 'blur(14px)', zIndex: 9999, display: 'flex', alignItems: 'center',
         /* flex-end */
         justifyContent: 'center', padding: 16,
       }}
@@ -79,6 +81,5 @@ export function TimeWarningModal({ dose, type, diffMin, onConfirm, onClose, T, s
           Cancelar
         </button>
       </div>
-    </div>
-  );
+    </div>, document.getElementById('root') || document.body);
 }
