@@ -80,22 +80,20 @@ export function AuthScreen({ onLogin, T }) {
             de dispositivo. Ver src/lib/supabase.js para o log detalhado. */}
         {!isSupabaseEnabled && (
           <div
-            role="alert"
+            role="status"
             style={{
-              background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.35)',
+              background: 'rgba(59,130,246,.12)', border: '1px solid rgba(59,130,246,.35)',
               borderRadius: 14, padding: '12px 16px', marginBottom: 18,
               display: 'flex', gap: 10, alignItems: 'flex-start',
             }}
           >
-            <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>💾</span>
             <div>
-              <p style={{ color: '#f87171', fontWeight: 800, fontSize: 13 }}>
-                Modo local ativo (sem banco de dados)
+              <p style={{ color: '#60a5fa', fontWeight: 800, fontSize: 13 }}>
+                Modo Offline / Local ativo
               </p>
-              <p style={{ color: '#fca5a5', fontSize: 12, marginTop: 2, lineHeight: 1.5 }}>
-                Contas e dados criados agora ficam só neste navegador e serão
-                perdidos. Verifique as variáveis de ambiente do Supabase e
-                gere um novo deploy.
+              <p style={{ color: '#93c5fd', fontSize: 12, marginTop: 2, lineHeight: 1.5 }}>
+                Seus dados e medicamentos são salvos no navegador. Para sincronização na nuvem entre aparelhos, configure o Supabase.
               </p>
             </div>
           </div>

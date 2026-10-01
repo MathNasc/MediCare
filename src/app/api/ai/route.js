@@ -1,10 +1,17 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 export async function POST(req) {
   try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "Chave da API Gemini não configurada no servidor." },
+        { status: 500 }
+      );
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
     const { prompt, jsonMode } = await req.json();
     
     const config = {};
@@ -13,7 +20,7 @@ export async function POST(req) {
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config,
     });

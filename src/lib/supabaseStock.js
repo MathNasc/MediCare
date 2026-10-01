@@ -28,8 +28,26 @@ export const StockDB = {
     expirationDate = null, notes = null,
   }) {
     if (!supabase) {
-      console.warn('[StockDB.recordMovement] Supabase não configurado — nada foi gravado.');
-      return { success: false, error: 'Supabase não configurado' };
+      const movement = {
+        id: 'sm-' + Math.random().toString(36).slice(2, 9),
+        medication_id: medicationId,
+        movement_type: movementType,
+        quantity_before: quantityBefore,
+        quantity_after: quantityAfter,
+        quantity_delta: quantityAfter - quantityBefore,
+        purchase_price: purchasePrice,
+        purchase_location: purchaseLocation,
+        batch,
+        expiration_date: expirationDate,
+        notes,
+        created_at: new Date().toISOString()
+      };
+      if (typeof window !== 'undefined') {
+        const list = JSON.parse(localStorage.getItem('mc_local_stock_movements') || '[]');
+        list.unshift(movement);
+        localStorage.setItem('mc_local_stock_movements', JSON.stringify(list));
+      }
+      return { success: true, movement };
     }
     try {
       const { data, error } = await supabase.rpc('record_stock_movement', {
@@ -43,15 +61,6 @@ export const StockDB = {
         p_expiration_date: expirationDate,
         p_notes: notes,
       });
-      // ─── Diagnóstico temporário ───────────────────────────────────────────
-      // Remova este console.log assim que confirmar que o fluxo está
-      // funcionando corretamente em produção. Ele mostra exatamente o que
-      // a RPC retornou (ou o erro do PostgREST, se houver).
-      console.log('[StockDB.recordMovement] params ->', {
-        medicationId, movementType, quantityBefore, quantityAfter,
-      });
-      console.log('[StockDB.recordMovement] rpc result ->', { data, error });
-      // ────────────────────────────────────────────────────────────────────
       if (error) return { success: false, error: error.message };
       return data;
     } catch (err) {
@@ -64,7 +73,12 @@ export const StockDB = {
    * Lista movimentações — de um medicamento específico ou de todos.
    */
   async list(medId = null, limit = 50) {
-    if (!supabase) return [];
+    if (!supabase) {
+      if (typeof window === 'undefined') return [];
+      const list = JSON.parse(localStorage.getItem('mc_local_stock_movements') || '[]');
+      const filtered = medId ? list.filter(m => m.medication_id === medId) : list;
+      return filtered.slice(0, limit);
+    }
     try {
       const { data, error } = await supabase.rpc('list_stock_movements', {
         p_med_id: medId,
@@ -81,7 +95,10 @@ export const StockDB = {
    * Previsão de término de estoque para um medicamento específico.
    */
   async getForecast(medId) {
-    if (!supabase) return null;
+    if (!supabase) {
+      const all = await this.getAllForecasts();
+      return all.find(f => f.med_id === medId) || null;
+    }
     try {
       const { data, error } = await supabase.rpc('get_stock_forecast', { p_med_id: medId });
       if (error) throw error;
@@ -97,7 +114,29 @@ export const StockDB = {
    * dashboard "Próxima reposição prevista".
    */
   async getAllForecasts() {
-    if (!supabase) return [];
+    if (!supabase) {
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem('mc_local_meds') : null;
+        const meds = raw ? JSON.parse(raw) : [];
+        return meds.map(m => {
+          const dailyDoses = (m.horarios || []).length || 1;
+          const daysLeft = Math.floor((m.quantidade || 0) / dailyDoses);
+          const depletionDate = new Date();
+          depletionDate.setDate(depletionDate.getDate() + daysLeft);
+          return {
+            med_id: m.id,
+            nome: m.nome,
+            dosagem: m.dosagem,
+            quantidade: m.quantidade,
+            doses_per_day: dailyDoses,
+            days_remaining: daysLeft,
+            depletion_date: depletionDate.toISOString().split('T')[0]
+          };
+        }).sort((a, b) => a.days_remaining - b.days_remaining);
+      } catch {
+        return [];
+      }
+    }
     try {
       const { data, error } = await supabase.rpc('get_all_stock_forecasts');
       if (error) throw error;

@@ -1,0 +1,7 @@
+{
+  "name": "MediCare",
+  "description": "Gerencie seus medicamentos com lembretes inteligentes, confirmação de doses e acompanhamento por cuidadores.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

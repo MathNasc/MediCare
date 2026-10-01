@@ -19,12 +19,7 @@ export const isSupabaseEnabled = Boolean(supabase);
 // foram salvas na Vercel, mas nenhum novo deploy foi gerado depois disso
 // (essas variáveis são embutidas no build, não lidas em tempo real).
 if (typeof window !== 'undefined' && !isSupabaseEnabled) {
-  console.error(
-    '[MediCare] ⚠ Supabase NÃO configurado neste build. ' +
-    'O aplicativo não funcionará corretamente sem o banco de dados. ' +
-    'Verifique NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no ' +
-    'ambiente de deploy e gere um novo deploy.'
-  );
+  console.info('[MediCare] Modo de armazenamento local ativo.');
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────

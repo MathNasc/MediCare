@@ -57,7 +57,7 @@ export const CaregiverDB = {
    * Lista todos os pacientes que um cuidador acompanha.
    */
   async listMyPatients(caregiverId) {
-    if (!supabase) return { error: 'No supabase client' };
+    if (!supabase) return [];
     
     // Fallback: fetch relationships first
     const { data: rels, error: relsErr } = await supabase
