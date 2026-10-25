@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import br.com.medicare.paciente.BuildConfig
 import br.com.medicare.paciente.domain.model.UserProfile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +17,8 @@ import javax.inject.Singleton
 
 /**
  * Gerenciador de sessão seguro com criptografia AES-256-GCM (Android Keystore)
- * para tokens de acesso/refresh e preferências de acessibilidade do paciente.
+ * para tokens de acesso/refresh, preferências de acessibilidade e endpoint do
+ * Servidor Oracle (PostgreSQL).
  */
 @Singleton
 class SessionManager @Inject constructor(
@@ -50,6 +52,21 @@ class SessionManager @Inject constructor(
 
     private val _fontScale = MutableStateFlow(prefs.getFloat("font_scale", 1.0f))
     val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
+
+    private val _oracleBackendUrl = MutableStateFlow(
+        prefs.getString("oracle_backend_url", BuildConfig.BACKEND_URL) ?: ""
+    )
+    val oracleBackendUrl: StateFlow<String> = _oracleBackendUrl.asStateFlow()
+
+    private val _oracleApiKey = MutableStateFlow(
+        prefs.getString("oracle_api_key", BuildConfig.BACKEND_ANON_KEY) ?: ""
+    )
+    val oracleApiKey: StateFlow<String> = _oracleApiKey.asStateFlow()
+
+    private val _lastSyncStatus = MutableStateFlow(
+        prefs.getString("last_sync_status", "Modo Offline-First pronto para sincronizar com Servidor Oracle") ?: ""
+    )
+    val lastSyncStatus: StateFlow<String> = _lastSyncStatus.asStateFlow()
 
     fun getAccessToken(): String? = prefs.getString("access_token", null)
 
@@ -87,6 +104,22 @@ class SessionManager @Inject constructor(
         val clamped = scale.coerceIn(0.85f, 1.35f)
         prefs.edit().putFloat("font_scale", clamped).apply()
         _fontScale.value = clamped
+    }
+
+    fun saveOracleBackendConfig(url: String, apiKey: String) {
+        val cleanUrl = url.trim().trimEnd('/')
+        val cleanKey = apiKey.trim()
+        prefs.edit()
+            .putString("oracle_backend_url", cleanUrl)
+            .putString("oracle_api_key", cleanKey)
+            .apply()
+        _oracleBackendUrl.value = cleanUrl
+        _oracleApiKey.value = cleanKey
+    }
+
+    fun updateLastSyncStatus(status: String) {
+        prefs.edit().putString("last_sync_status", status).apply()
+        _lastSyncStatus.value = status
     }
 
     private fun loadUser(): UserProfile? {

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -42,9 +43,50 @@ class MainActivity : ComponentActivity() {
             val darkTheme by viewModel.sessionManager.darkTheme.collectAsState()
             val highContrast by viewModel.sessionManager.highContrast.collectAsState()
             val fontScale by viewModel.sessionManager.fontScale.collectAsState()
+            val oracleUrl by viewModel.sessionManager.oracleBackendUrl.collectAsState()
+            val oracleKey by viewModel.sessionManager.oracleApiKey.collectAsState()
+            val lastSyncStatus by viewModel.sessionManager.lastSyncStatus.collectAsState()
 
             var currentTab by remember { mutableStateOf(PatientTab.HOME) }
+            val tabHistory = remember { mutableStateListOf<PatientTab>() }
+            var lastBackPressMs by remember { mutableStateOf(0L) }
+
             val snackbarHostState = remember { SnackbarHostState() }
+
+            fun navigateToTab(target: PatientTab) {
+                if (target != currentTab) {
+                    tabHistory.add(currentTab)
+                    currentTab = target
+                }
+            }
+
+            // Interceptação global do botão Voltar do Android:
+            // 1. Fecha modal aberto
+            // 2. Desempilha o histórico de abas/telas visitadas
+            // 3. Volta para o Início (HOME) se estiver em outra aba
+            // 4. Na tela inicial, exige confirmação de duplo toque para não fechar o app acidentalmente
+            BackHandler(enabled = true) {
+                when {
+                    state.selectedDoseForModal != null -> {
+                        viewModel.closeDoseModal()
+                    }
+                    tabHistory.isNotEmpty() -> {
+                        currentTab = tabHistory.removeAt(tabHistory.lastIndex)
+                    }
+                    currentTab != PatientTab.HOME -> {
+                        currentTab = PatientTab.HOME
+                    }
+                    else -> {
+                        val now = System.currentTimeMillis()
+                        if (now - lastBackPressMs < 2000L) {
+                            moveTaskToBack(true)
+                        } else {
+                            lastBackPressMs = now
+                            viewModel.showToast("Pressione voltar novamente para sair do aplicativo")
+                        }
+                    }
+                }
+            }
 
             LaunchedEffect(state.toastMessage) {
                 state.toastMessage?.let { msg ->
@@ -73,7 +115,7 @@ class MainActivity : ComponentActivity() {
                             MediCareBottomNav(
                                 currentTab = currentTab,
                                 criticalStockCount = criticalStockCount,
-                                onSelectTab = { currentTab = it }
+                                onSelectTab = { navigateToTab(it) }
                             )
                         }
                     ) { innerPadding ->
@@ -85,7 +127,7 @@ class MainActivity : ComponentActivity() {
                                     onConfirmDoseDirect = viewModel::confirmDose,
                                     onSnoozeDose = viewModel::snoozeDose,
                                     onUndoDose = viewModel::undoDose,
-                                    onOpenStats = { currentTab = PatientTab.STATS }
+                                    onOpenStats = { navigateToTab(PatientTab.STATS) }
                                 )
                                 PatientTab.MEDS -> PatientMedsScreen(
                                     state = state,
@@ -113,6 +155,14 @@ class MainActivity : ComponentActivity() {
                                     darkTheme = darkTheme,
                                     highContrast = highContrast,
                                     fontScale = fontScale,
+                                    oracleBackendUrl = oracleUrl,
+                                    oracleApiKey = oracleKey,
+                                    lastSyncStatus = lastSyncStatus,
+                                    onSaveOracleConfig = { url, key ->
+                                        viewModel.sessionManager.saveOracleBackendConfig(url, key)
+                                        viewModel.showToast("🌐 Servidor Oracle salvo com sucesso!")
+                                    },
+                                    onSyncOracleNow = viewModel::syncWithOracleBackend,
                                     onToggleDark = viewModel.sessionManager::setDarkTheme,
                                     onToggleHighContrast = viewModel.sessionManager::setHighContrast,
                                     onChangeFontScale = viewModel.sessionManager::setFontScale,
@@ -133,17 +183,28 @@ class MainActivity : ComponentActivity() {
                                 )
                                 PatientTab.STATS -> PatientStatsScreen(
                                     state = state,
-                                    onBackToHome = { currentTab = PatientTab.HOME }
+                                    onBackToHome = {
+                                        if (tabHistory.isNotEmpty()) {
+                                            currentTab = tabHistory.removeAt(tabHistory.lastIndex)
+                                        } else {
+                                            currentTab = PatientTab.HOME
+                                        }
+                                    }
                                 )
                                 PatientTab.STOCK_HISTORY -> PatientStatsScreen(
                                     state = state,
-                                    onBackToHome = { currentTab = PatientTab.PROFILE }
+                                    onBackToHome = {
+                                        if (tabHistory.isNotEmpty()) {
+                                            currentTab = tabHistory.removeAt(tabHistory.lastIndex)
+                                        } else {
+                                            currentTab = PatientTab.PROFILE
+                                        }
+                                    }
                                 )
                             }
                         }
                     }
 
-                    // Modal de confirmação rápida (acionado por clique na Timeline ou por Deep Link da notificação)
                     state.selectedDoseForModal?.let { selectedDose ->
                         QuickConfirmDialog(
                             dose = selectedDose,

@@ -2,6 +2,7 @@ package br.com.medicare.paciente.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -27,7 +28,7 @@ import java.time.Period
 import java.util.UUID
 
 /**
- * Tela de Perfil Completa com todas as 10 sub-telas e Cartão de Emergência (`src/screens/ProfileScreen.jsx`).
+ * Tela de Perfil Completa com todas as sub-telas, Cartão de Emergência e Conexão com Servidor Oracle (`src/screens/ProfileScreen.jsx`).
  */
 @Composable
 fun PatientProfileScreen(
@@ -35,6 +36,11 @@ fun PatientProfileScreen(
     darkTheme: Boolean,
     highContrast: Boolean,
     fontScale: Float,
+    oracleBackendUrl: String = "",
+    oracleApiKey: String = "",
+    lastSyncStatus: String = "",
+    onSaveOracleConfig: (String, String) -> Unit = { _, _ -> },
+    onSyncOracleNow: () -> Unit = {},
     onToggleDark: (Boolean) -> Unit,
     onToggleHighContrast: (Boolean) -> Unit,
     onChangeFontScale: (Float) -> Unit,
@@ -57,6 +63,10 @@ fun PatientProfileScreen(
     val context = LocalContext.current
     var subView by remember { mutableStateOf("main") }
     var showNotifWarningModal by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = subView != "main") {
+        subView = "main"
+    }
 
     val user = state.user ?: UserProfile(id = "user-local", nome = "Paciente MediCare", email = "paciente@medicare.br")
     val userAge = remember(user.dob) {
@@ -203,6 +213,7 @@ fun PatientProfileScreen(
                     Triple("contacts", "👨‍👩‍👧 Contatos", "${state.emergencyContacts.size} contato(s) de emergência"),
                     Triple("caregivers", "🤝 Cuidadores", "${state.caregivers.count { it.status == "active" }} ativo(s) · Convites e permissões"),
                     Triple("stock", "📦 Estoque", "Histórico de compras, preços e lotes"),
+                    Triple("oracle_server", "🌐 Servidor Oracle (PostgreSQL)", "Configurar IP/URL do backend, testar conexão e sincronizar"),
                     Triple("role_swap", "🔄 Mudar Perfil", "Alternar entre Independente, Supervisionado e Cuidador"),
                     Triple("privacy", "🔐 Privacidade", "Segurança dos dados e encerramento de sessão"),
                     Triple("prefs", "⚙️ Preferências", "Tema, tamanho da fonte, alto contraste e alertas")
@@ -750,6 +761,70 @@ fun PatientProfileScreen(
 
             "stock" -> {
                 StockHistorySubScreen(state = state)
+            }
+
+            "oracle_server" -> {
+                var urlInput by remember { mutableStateOf(oracleBackendUrl.ifBlank { "http://SEU_IP_ORACLE:3000" }) }
+                var keyInput by remember { mutableStateOf(oracleApiKey) }
+
+                Text("🌐 Servidor Oracle & PostgreSQL", color = tokens.txt, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text(
+                    text = "Conecte o aplicativo ao banco de dados PostgreSQL hospedado no seu servidor Oracle (OCI / VM Oracle).",
+                    color = tokens.sub,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(tokens.bg1)
+                        .border(1.dp, tokens.bdr, RoundedCornerShape(16.dp))
+                        .padding(16.dp)
+                ) {
+                    Text("STATUS DA SINCRONIZAÇÃO", color = tokens.muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(lastSyncStatus, color = MediCareColors.Green, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Fila offline pendente: ${state.pendingSyncCount} registro(s)", color = tokens.sub, fontSize = 12.sp)
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    label = { Text("URL do Backend no Servidor Oracle (ex: http://150.230.x.x:3000)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
+                    label = { Text("Token / Chave de API (opcional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { onSaveOracleConfig(urlInput, keyInput) },
+                    colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Blue),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                ) {
+                    Text("💾 Salvar Configuração do Servidor Oracle", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onSyncOracleNow,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("🔄 Sincronizar Agora (/api/v1/sync)", color = MediCareColors.Green, fontWeight = FontWeight.ExtraBold)
+                }
             }
 
             "role_swap" -> {

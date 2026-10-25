@@ -421,5 +421,15 @@ class MediCareViewModel @Inject constructor(
         }
     }
 
+    fun syncWithOracleBackend() {
+        val current = sessionManager.currentUser.value ?: return
+        viewModelScope.launch {
+            repository.syncFromServer(current.id)
+            val timestamp = java.time.LocalTime.now().toString().take(8)
+            sessionManager.updateLastSyncStatus("✓ Sincronizado com Servidor Oracle às $timestamp")
+            _toastMessage.value = "🔄 Sincronização com PostgreSQL Oracle concluída!"
+        }
+    }
+
     private data class Quintuple<A, B, C, D, E>(val a: A, val b: B, val c: C, val d: D, val e: E)
 }

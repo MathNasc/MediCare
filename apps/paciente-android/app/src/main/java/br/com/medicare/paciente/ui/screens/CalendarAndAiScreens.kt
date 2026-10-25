@@ -1,6 +1,7 @@
 package br.com.medicare.paciente.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -55,6 +56,15 @@ fun PatientCalendarScreen(
 
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+
+    BackHandler(enabled = showSearch || selectedDateIso != null) {
+        if (selectedDateIso != null) {
+            selectedDateIso = null
+        } else if (showSearch) {
+            showSearch = false
+            searchQuery = ""
+        }
+    }
 
     var showNoteModalForDate by remember { mutableStateOf<String?>(null) }
     var editingNote by remember { mutableStateOf<CalendarNote?>(null) }
@@ -1094,6 +1104,10 @@ fun PatientAiScreen(
     val context = LocalContext.current
     var view by remember { mutableStateOf("main") } // main, meds, attention, stock, consult, chat
     var questionInput by remember { mutableStateOf("") }
+
+    BackHandler(enabled = view != "main") {
+        view = "main"
+    }
 
     val pendingDoses = remember(state.dailyDoses) {
         state.dailyDoses.filter { it.status != DoseStatus.CONFIRMED }
