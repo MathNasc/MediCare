@@ -213,7 +213,7 @@ fun PatientProfileScreen(
                     Triple("contacts", "👨‍👩‍👧 Contatos", "${state.emergencyContacts.size} contato(s) de emergência"),
                     Triple("caregivers", "🤝 Cuidadores", "${state.caregivers.count { it.status == "active" }} ativo(s) · Convites e permissões"),
                     Triple("stock", "📦 Estoque", "Histórico de compras, preços e lotes"),
-                    Triple("oracle_server", "🌐 Servidor Oracle (PostgreSQL)", "Configurar IP/URL do backend, testar conexão e sincronizar"),
+                    Triple("oracle_server", "☁️ Sincronização em Nuvem", "Sincronização automática ativa com o servidor MediCare"),
                     Triple("role_swap", "🔄 Mudar Perfil", "Alternar entre Independente, Supervisionado e Cuidador"),
                     Triple("privacy", "🔐 Privacidade", "Segurança dos dados e encerramento de sessão"),
                     Triple("prefs", "⚙️ Preferências", "Tema, tamanho da fonte, alto contraste e alertas")
@@ -764,12 +764,9 @@ fun PatientProfileScreen(
             }
 
             "oracle_server" -> {
-                var urlInput by remember { mutableStateOf(oracleBackendUrl.ifBlank { "http://SEU_IP_ORACLE:3000" }) }
-                var keyInput by remember { mutableStateOf(oracleApiKey) }
-
-                Text("🌐 Servidor Oracle & PostgreSQL", color = tokens.txt, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text("☁️ Sincronização em Nuvem", color = tokens.txt, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Text(
-                    text = "Conecte o aplicativo ao banco de dados PostgreSQL hospedado no seu servidor Oracle (OCI / VM Oracle).",
+                    text = "Seus medicamentos, histórico de doses e agenda são sincronizados automaticamente com o servidor MediCare.",
                     color = tokens.sub,
                     fontSize = 13.sp
                 )
@@ -783,47 +780,21 @@ fun PatientProfileScreen(
                         .border(1.dp, tokens.bdr, RoundedCornerShape(16.dp))
                         .padding(16.dp)
                 ) {
-                    Text("STATUS DA SINCRONIZAÇÃO", color = tokens.muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("STATUS DA CONEXÃO", color = tokens.muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(lastSyncStatus, color = MediCareColors.Green, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(lastSyncStatus, color = MediCareColors.Green, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Fila offline pendente: ${state.pendingSyncCount} registro(s)", color = tokens.sub, fontSize = 12.sp)
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-                OutlinedTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    label = { Text("URL do Backend no Servidor Oracle (ex: http://150.230.x.x:3000)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = keyInput,
-                    onValueChange = { keyInput = it },
-                    label = { Text("Token / Chave de API (opcional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
-                    onClick = { onSaveOracleConfig(urlInput, keyInput) },
-                    colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Blue),
+                    onClick = onSyncOracleNow,
+                    colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Green),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().height(50.dp)
                 ) {
-                    Text("💾 Salvar Configuração do Servidor Oracle", color = Color.White, fontWeight = FontWeight.ExtraBold)
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedButton(
-                    onClick = onSyncOracleNow,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("🔄 Sincronizar Agora (/api/v1/sync)", color = MediCareColors.Green, fontWeight = FontWeight.ExtraBold)
+                    Text("🔄 Sincronizar Agora", color = Color.White, fontWeight = FontWeight.ExtraBold)
                 }
             }
 

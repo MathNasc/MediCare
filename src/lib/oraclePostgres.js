@@ -7,8 +7,8 @@ export function getOraclePgConfig() {
   const connectionString = process.env.DATABASE_URL?.trim();
   const host = process.env.ORACLE_PG_HOST?.trim();
   const port = parseInt(process.env.ORACLE_PG_PORT || '5432', 10);
-  const database = process.env.ORACLE_PG_DATABASE?.trim() || 'medicare';
-  const user = process.env.ORACLE_PG_USER?.trim() || 'postgres';
+  const database = process.env.ORACLE_PG_DATABASE?.trim() || 'medicare_db';
+  const user = process.env.ORACLE_PG_USER?.trim() || 'medicare_app';
   const password = process.env.ORACLE_PG_PASSWORD || '';
   const useSsl = process.env.ORACLE_PG_SSL === 'true';
 
@@ -58,16 +58,70 @@ export function getPgPool() {
 
 /**
  * Inicializa de forma segura e não-destrutiva (CREATE TABLE IF NOT EXISTS)
- * todas as tabelas necessárias no PostgreSQL do servidor Oracle.
+ * todas as tabelas, índices e funções necessárias no PostgreSQL do servidor Oracle.
  */
 export async function ensureOraclePostgresSchema(client) {
   if (schemaInitialized) return;
   await client.query(`
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+    CREATE OR REPLACE FUNCTION app_current_user_id()
+    RETURNS text LANGUAGE sql STABLE AS $$
+      SELECT NULLIF(current_setting('app.current_user_id', true), '');
+    $$;
+
+    CREATE TABLE IF NOT EXISTS app_users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      raw_user_meta_data JSONB DEFAULT '{}'::jsonb,
+      email_confirmed_at TIMESTAMPTZ DEFAULT NOW(),
+      last_sign_in_at TIMESTAMPTZ,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      refresh_token_hash TEXT NOT NULL UNIQUE,
+      user_agent TEXT,
+      ip_address TEXT,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS roles (
+      code TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      description TEXT,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    INSERT INTO roles (code, label, description, is_active) VALUES
+      ('paciente', 'Paciente', 'Registra seus próprios medicamentos (janela de 24h).', true),
+      ('cuidador', 'Cuidador', 'Acompanha e administra tratamentos de pacientes vinculados.', true),
+      ('independente', 'Independente', 'Controle total sobre os próprios dados.', true)
+    ON CONFLICT (code) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,
       nome TEXT NOT NULL,
       social_name TEXT,
       email TEXT,
+      foto_url TEXT,
       role TEXT DEFAULT 'independente',
       blood_type TEXT DEFAULT 'O+',
       dob TEXT,
@@ -78,8 +132,10 @@ export async function ensureOraclePostgresSchema(client) {
       weight TEXT,
       height TEXT,
       role_change_pin TEXT DEFAULT '123456',
+      role_change_pin_expires_at TIMESTAMPTZ,
       notifications_enabled BOOLEAN DEFAULT TRUE,
       emergency_settings JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -88,13 +144,16 @@ export async function ensureOraclePostgresSchema(client) {
       user_id TEXT NOT NULL,
       nome TEXT NOT NULL,
       active_ingredient TEXT,
+      principio_ativo TEXT,
+      fabricante TEXT,
+      manufacturer TEXT,
       dosagem TEXT NOT NULL,
       unidade TEXT DEFAULT 'comprimido',
       cor TEXT DEFAULT '#3b82f6',
       quantidade INTEGER DEFAULT 30,
       aviso_estoque INTEGER DEFAULT 5,
       horarios JSONB DEFAULT '["08:00"]'::jsonb,
-      dias_semana JSONB DEFAULT '[0,1,2,3,4,5,6]'::jsonb,
+      dias_semana JSONB DEFAULT '[1,2,3,4,5,6,7]'::jsonb,
       observacoes TEXT,
       ativo BOOLEAN DEFAULT TRUE,
       status TEXT DEFAULT 'ativo',
@@ -102,7 +161,7 @@ export async function ensureOraclePostgresSchema(client) {
       start_date TEXT,
       end_date TEXT,
       treatment_days INTEGER,
-      manufacturer TEXT,
+      finished_at TIMESTAMPTZ,
       important_for_emergency BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -116,8 +175,11 @@ export async function ensureOraclePostgresSchema(client) {
       dose_date TEXT NOT NULL,
       status TEXT DEFAULT 'confirmed',
       atraso_minutos INTEGER DEFAULT 0,
+      motivo TEXT,
       quantidade_usada INTEGER DEFAULT 1,
+      performed_by TEXT,
       is_retroactive BOOLEAN DEFAULT FALSE,
+      corrected_at TIMESTAMPTZ,
       correction_reason TEXT,
       confirmed_by_name TEXT,
       confirmed_by_role TEXT,
@@ -137,6 +199,7 @@ export async function ensureOraclePostgresSchema(client) {
       time TEXT,
       doctor TEXT,
       location TEXT,
+      completed BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -146,6 +209,17 @@ export async function ensureOraclePostgresSchema(client) {
       date TEXT NOT NULL,
       content TEXT NOT NULL,
       mood TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS dose_observations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      hist_id TEXT,
+      med_id TEXT,
+      date TEXT NOT NULL,
+      hora TEXT NOT NULL,
+      observation TEXT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -171,14 +245,17 @@ export async function ensureOraclePostgresSchema(client) {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       reaction TEXT,
-      severity TEXT DEFAULT 'Moderada'
+      severity TEXT DEFAULT 'Moderada',
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS health_conditions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      notes TEXT
+      notes TEXT,
+      diagnosed_at TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS emergency_contacts (
@@ -187,7 +264,9 @@ export async function ensureOraclePostgresSchema(client) {
       name TEXT NOT NULL,
       relation TEXT NOT NULL,
       phone TEXT NOT NULL,
-      priority INTEGER DEFAULT 1
+      secondary_phone TEXT,
+      priority INTEGER DEFAULT 1,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS healthcare_professionals (
@@ -197,18 +276,84 @@ export async function ensureOraclePostgresSchema(client) {
       specialty TEXT NOT NULL,
       phone TEXT,
       crm TEXT,
-      location TEXT
+      location TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS caregiver_relationships (
       id TEXT PRIMARY KEY,
       patient_id TEXT NOT NULL,
+      caregiver_id TEXT,
       caregiver_name TEXT,
       invite_email TEXT,
       relationship_label TEXT,
       permission_level TEXT DEFAULT 'caregiver',
       status TEXT DEFAULT 'active',
       invite_token TEXT,
+      invite_expires_at TIMESTAMPTZ,
+      accepted_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS caregiver_notes (
+      id TEXT PRIMARY KEY,
+      relationship_id TEXT,
+      patient_id TEXT NOT NULL,
+      caregiver_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL,
+      performed_by TEXT,
+      action TEXT NOT NULL,
+      old_value JSONB,
+      new_value JSONB,
+      reason TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      timezone TEXT DEFAULT 'America/Sao_Paulo',
+      user_agent TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      med_id TEXT,
+      event_id TEXT,
+      dose_hora TEXT,
+      data_referencia TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      sent_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS medication_catalog (
+      id TEXT PRIMARY KEY,
+      commercial_name TEXT NOT NULL,
+      active_ingredient TEXT NOT NULL,
+      dosage TEXT NOT NULL,
+      pharmaceutical_form TEXT NOT NULL,
+      presentation TEXT,
+      unit TEXT DEFAULT 'comprimido',
+      manufacturer TEXT,
+      medicine_type TEXT DEFAULT 'generico',
+      is_reference BOOLEAN DEFAULT FALSE,
+      is_generic BOOLEAN DEFAULT TRUE,
+      is_similar BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);

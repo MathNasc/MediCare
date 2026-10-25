@@ -33,16 +33,16 @@ android {
             useSupportLibrary = true
         }
 
-        // Configuração segura via local.properties ou variáveis de ambiente (sem expor secrets administrativos no APK)
+        // Configuração embutida diretamente no APK (zero configuração manual pelo paciente)
         val backendUrl = localProps.getProperty("MEDICARE_BACKEND_URL")
-            ?: System.getenv("NEXT_PUBLIC_SUPABASE_URL")
-            ?: "https://nmtgmulqvacdgniqfrjw.supabase.co"
+            ?: System.getenv("NEXT_PUBLIC_APP_URL")
+            ?: "https://ais-pre-j2zyqosj5ltjvb7up7hiws-238922234262.us-east5.run.app"
         val backendAnonKey = localProps.getProperty("MEDICARE_ANON_KEY")
-            ?: System.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+            ?: System.getenv("BACKEND_API_KEY")
             ?: ""
         val aiProxyUrl = localProps.getProperty("MEDICARE_AI_PROXY_URL")
             ?: System.getenv("NEXT_PUBLIC_APP_URL")
-            ?: "https://medicare-amber-five.vercel.app"
+            ?: "https://ais-pre-j2zyqosj5ltjvb7up7hiws-238922234262.us-east5.run.app"
 
         buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
         buildConfigField("String", "BACKEND_ANON_KEY", "\"$backendAnonKey\"")
