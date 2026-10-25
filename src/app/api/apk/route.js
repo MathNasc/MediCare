@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const rootApkPath = path.join(process.cwd(), 'medicare-patient.apk');
@@ -21,9 +24,11 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Disposition': 'attachment; filename="medicare-patient.apk"',
+        'Content-Disposition': 'attachment; filename="medicare-patient-v2.4.apk"',
         'Content-Length': String(fileBuffer.length),
-        'Cache-Control': 'no-store',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       },
     });
   } catch (error) {

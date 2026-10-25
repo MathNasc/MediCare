@@ -60,19 +60,22 @@ with zipfile.ZipFile('medicare-patient.apk', 'r') as zin:
 echo "=== [2/5] Otimizando alinhamento de 4 bytes (zipalign) ==="
 zipalign -f -p 4 "$TMP_DIR/unsigned.apk" "$TMP_DIR/aligned.apk"
 
-echo "=== [3/5] Gerando Keystore seguro de distribuição ==="
-keytool -genkey -v -keystore "$TMP_DIR/medicare.keystore" \
-  -alias medicare \
-  -keyalg RSA \
-  -keysize 2048 \
-  -validity 10000 \
-  -storepass medicare123 \
-  -keypass medicare123 \
-  -dname "CN=MediCare Paciente, OU=Mobile, O=MediCare, L=SaoPaulo, ST=SP, C=BR" >/dev/null 2>&1
+echo "=== [5/6] Gerando/Usando Keystore seguro de distribuição ==="
+KEYSTORE="/tmp/medicare_permanent.keystore"
+if [ ! -f "$KEYSTORE" ]; then
+  keytool -genkey -v -keystore "$KEYSTORE" \
+    -alias medicare \
+    -keyalg RSA \
+    -keysize 2048 \
+    -validity 10000 \
+    -storepass medicare123 \
+    -keypass medicare123 \
+    -dname "CN=MediCare Paciente, OU=Mobile, O=MediCare, L=SaoPaulo, ST=SP, C=BR" >/dev/null 2>&1
+fi
 
-echo "=== [4/5] Assinando com APK Signature Scheme v2 e v3 (Exigido pelo Android 14) ==="
+echo "=== [6/6] Assinando com APK Signature Scheme v2 e v3 (Exigido pelo Android 14) ==="
 apksigner sign \
-  --ks "$TMP_DIR/medicare.keystore" \
+  --ks "$KEYSTORE" \
   --ks-pass pass:medicare123 \
   --ks-key-alias medicare \
   --key-pass pass:medicare123 \
@@ -83,10 +86,11 @@ apksigner sign \
   --out "$TMP_DIR/final_signed.apk" \
   "$TMP_DIR/aligned.apk"
 
-echo "=== [5/5] Validando integridade do APK ==="
+echo "=== Validando integridade e assinaturas do APK ==="
 apksigner verify --verbose "$TMP_DIR/final_signed.apk"
 
 cp "$TMP_DIR/final_signed.apk" "$ROOT_DIR/medicare-patient.apk"
 cp "$TMP_DIR/final_signed.apk" "$ROOT_DIR/public/medicare-patient.apk"
+cp "$TMP_DIR/final_signed.apk" "$ROOT_DIR/public/medicare-patient-v2.4.apk"
 
-echo "✓ SUCESSO: medicare-patient.apk e public/medicare-patient.apk atualizados e prontos para instalação!"
+echo "✓ SUCESSO: APK v2.4 atualizado e pronto para instalação!"

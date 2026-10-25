@@ -601,6 +601,15 @@ public class MainActivity extends Activity {
         textView.setGravity(17);
         linearLayout.addView(textView);
 
+        TextView versionBadge = new TextView(this);
+        versionBadge.setText("Versão 2.4.0 • Atualizado");
+        versionBadge.setTextColor(this.cPrimary);
+        versionBadge.setTextSize(sp(11.0f));
+        versionBadge.setTypeface(null, 1);
+        versionBadge.setGravity(17);
+        versionBadge.setPadding(0, dp(2), 0, dp(4));
+        linearLayout.addView(versionBadge);
+
         TextView textView2 = new TextView(this);
         textView2.setText(this.isRegisterMode ? 
             "Cadastre-se para gerenciar seus medicamentos, doses e receitas com segurança." : 
@@ -643,13 +652,15 @@ public class MainActivity extends Activity {
             });
             cardLayout.addView(loginButton);
 
-            TextView switchRegister = new TextView(this);
-            switchRegister.setText("Não tem uma conta? Cadastre-se");
-            switchRegister.setTextColor(this.cPrimary);
-            switchRegister.setTextSize(sp(13.0f));
-            switchRegister.setTypeface(null, 1);
-            switchRegister.setGravity(17);
-            switchRegister.setPadding(0, dp(18), 0, dp(6));
+            View div = new View(this);
+            div.setBackgroundColor(this.cBorder);
+            LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(-1, dp(1));
+            divParams.topMargin = dp(16);
+            divParams.bottomMargin = dp(14);
+            div.setLayoutParams(divParams);
+            cardLayout.addView(div);
+
+            TextView switchRegister = createButton("✨ Criar Nova Conta (Cadastre-se)", this.cPrimaryLight, this.cPrimary);
             switchRegister.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public final void onClick(View view) {
@@ -697,13 +708,15 @@ public class MainActivity extends Activity {
             });
             cardLayout.addView(registerButton);
 
-            TextView switchLogin = new TextView(this);
-            switchLogin.setText("Já tem uma conta? Fazer Login");
-            switchLogin.setTextColor(this.cTextMuted);
-            switchLogin.setTextSize(sp(13.0f));
-            switchLogin.setTypeface(null, 1);
-            switchLogin.setGravity(17);
-            switchLogin.setPadding(0, dp(18), 0, dp(6));
+            View div2 = new View(this);
+            div2.setBackgroundColor(this.cBorder);
+            LinearLayout.LayoutParams divParams2 = new LinearLayout.LayoutParams(-1, dp(1));
+            divParams2.topMargin = dp(16);
+            divParams2.bottomMargin = dp(14);
+            div2.setLayoutParams(divParams2);
+            cardLayout.addView(div2);
+
+            TextView switchLogin = createButton("← Já tenho conta (Fazer Login)", this.cSurfaceHover, this.cTextMain);
             switchLogin.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public final void onClick(View view) {
