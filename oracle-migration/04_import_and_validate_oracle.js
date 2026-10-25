@@ -278,7 +278,22 @@ async function runValidation() {
 
 if (require.main === module) {
   runValidation().catch((err) => {
-    console.error('Erro na migração/validação:', err);
+    if (err.code === 'ENETUNREACH' || (err.message && err.message.includes('ENETUNREACH'))) {
+      console.error('\n======================================================================');
+      console.error('❌ ERRO DE ROTA IPV6 (ENETUNREACH):');
+      console.error('O host direto do Supabase (db.xxx.supabase.co) opera exclusivamente em IPv6.');
+      console.error('O seu servidor Oracle Cloud opera em rede IPv4.');
+      console.error('');
+      console.error('SOLUÇÃO OBRIGATÓRIA (Compatível com IPv4):');
+      console.error('1. Acesse o Supabase Dashboard -> Project Settings -> Database');
+      console.error('2. Na seção "Connection string", selecione a opção "Connection Pooling" (ou "Pooler")');
+      console.error('3. Escolha o modo "Session" (porta 5432) ou "Transaction" (porta 6543)');
+      console.error('4. Copie a URI gerada (terá o formato:');
+      console.error('   postgresql://postgres.[REF]:[SENHA]@aws-0-[REGIAO].pooler.supabase.com:5432/postgres');
+      console.error('======================================================================\n');
+    } else {
+      console.error('Erro na migração/validação:', err);
+    }
     process.exit(1);
   });
 }

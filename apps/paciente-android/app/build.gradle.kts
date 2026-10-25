@@ -34,15 +34,16 @@ android {
         }
 
         // Configuração embutida diretamente no APK (zero configuração manual pelo paciente)
+        val defaultOracleUrl = "http://144.22.160.191:3009"
         val backendUrl = localProps.getProperty("MEDICARE_BACKEND_URL")
-            ?: System.getenv("NEXT_PUBLIC_APP_URL")
-            ?: "https://ais-pre-j2zyqosj5ltjvb7up7hiws-238922234262.us-east5.run.app"
+            ?: System.getenv("MEDICARE_BACKEND_URL")
+            ?: defaultOracleUrl
         val backendAnonKey = localProps.getProperty("MEDICARE_ANON_KEY")
             ?: System.getenv("BACKEND_API_KEY")
-            ?: ""
+            ?: "medicare_mobile_client"
         val aiProxyUrl = localProps.getProperty("MEDICARE_AI_PROXY_URL")
-            ?: System.getenv("NEXT_PUBLIC_APP_URL")
-            ?: "https://ais-pre-j2zyqosj5ltjvb7up7hiws-238922234262.us-east5.run.app"
+            ?: System.getenv("MEDICARE_AI_PROXY_URL")
+            ?: defaultOracleUrl
 
         buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
         buildConfigField("String", "BACKEND_ANON_KEY", "\"$backendAnonKey\"")

@@ -57,15 +57,6 @@ fun PatientCalendarScreen(
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
-    BackHandler(enabled = showSearch || selectedDateIso != null) {
-        if (selectedDateIso != null) {
-            selectedDateIso = null
-        } else if (showSearch) {
-            showSearch = false
-            searchQuery = ""
-        }
-    }
-
     var showNoteModalForDate by remember { mutableStateOf<String?>(null) }
     var editingNote by remember { mutableStateOf<CalendarNote?>(null) }
 
@@ -74,6 +65,31 @@ fun PatientCalendarScreen(
 
     var retroactiveTarget by remember { mutableStateOf<Triple<Medication, String, String>?>(null) }
     var obsTarget by remember { mutableStateOf<Triple<String, String, String>?>(null) } // doseKey, medLabel, currentObs
+
+    val hasCalendarModal = showNoteModalForDate != null || editingNote != null ||
+            showEventModalForDate != null || editingEvent != null ||
+            retroactiveTarget != null || obsTarget != null ||
+            selectedDateIso != null || showSearch
+
+    BackHandler(enabled = hasCalendarModal) {
+        when {
+            showNoteModalForDate != null || editingNote != null -> {
+                showNoteModalForDate = null
+                editingNote = null
+            }
+            showEventModalForDate != null || editingEvent != null -> {
+                showEventModalForDate = null
+                editingEvent = null
+            }
+            retroactiveTarget != null -> retroactiveTarget = null
+            obsTarget != null -> obsTarget = null
+            selectedDateIso != null -> selectedDateIso = null
+            showSearch -> {
+                showSearch = false
+                searchQuery = ""
+            }
+        }
+    }
 
     val activeMeds = remember(state.medications) {
         state.medications.filter { it.ativo && it.treatmentType != "sos" }

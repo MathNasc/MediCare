@@ -55,17 +55,18 @@ class MainActivity : ComponentActivity() {
 
             fun navigateToTab(target: PatientTab) {
                 if (target != currentTab) {
+                    tabHistory.removeAll { it == target }
                     tabHistory.add(currentTab)
                     currentTab = target
                 }
             }
 
             // Interceptação global do botão Voltar do Android:
-            // 1. Fecha modal aberto
-            // 2. Desempilha o histórico de abas/telas visitadas
+            // 1. Fecha modal rápido de dose se aberto
+            // 2. Desempilha o histórico de telas visitadas (volta para a tela anterior com precisão)
             // 3. Volta para o Início (HOME) se estiver em outra aba
             // 4. Na tela inicial, exige confirmação de duplo toque para não fechar o app acidentalmente
-            BackHandler(enabled = true) {
+            BackHandler(enabled = state.user != null) {
                 when {
                     state.selectedDoseForModal != null -> {
                         viewModel.closeDoseModal()
@@ -78,8 +79,8 @@ class MainActivity : ComponentActivity() {
                     }
                     else -> {
                         val now = System.currentTimeMillis()
-                        if (now - lastBackPressMs < 2000L) {
-                            moveTaskToBack(true)
+                        if (now - lastBackPressMs < 2500L) {
+                            finish()
                         } else {
                             lastBackPressMs = now
                             viewModel.showToast("Pressione voltar novamente para sair do aplicativo")

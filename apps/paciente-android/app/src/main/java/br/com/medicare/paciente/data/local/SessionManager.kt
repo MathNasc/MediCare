@@ -54,7 +54,9 @@ class SessionManager @Inject constructor(
     val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
 
     private val _oracleBackendUrl = MutableStateFlow(
-        prefs.getString("oracle_backend_url", BuildConfig.BACKEND_URL) ?: ""
+        prefs.getString("oracle_backend_url", null)
+            ?.takeIf { !it.contains("run.app") && !it.contains("ais-pre") && it.isNotBlank() }
+            ?: BuildConfig.BACKEND_URL
     )
     val oracleBackendUrl: StateFlow<String> = _oracleBackendUrl.asStateFlow()
 

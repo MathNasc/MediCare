@@ -1,5 +1,6 @@
 package br.com.medicare.paciente.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +41,10 @@ fun PatientAuthScreen(
     var nome by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("maria.helena@medicare.br") }
     var password by remember { mutableStateOf("123456") }
+
+    BackHandler(enabled = isRegisterMode) {
+        isRegisterMode = false
+    }
 
     Box(
         modifier = Modifier
@@ -326,6 +331,21 @@ fun PatientMedsScreen(
     var stockModalState by remember { mutableStateOf<Triple<Medication, Int?, ((Int) -> Unit)?>?>(null) }
     var repeatTarget by remember { mutableStateOf<Medication?>(null) }
     var deleteTarget by remember { mutableStateOf<Medication?>(null) }
+
+    val hasOpenSubModal = showWizardModal || editingMed != null || detailMed != null ||
+            sosModalMed != null || stockModalState != null || repeatTarget != null || deleteTarget != null
+
+    BackHandler(enabled = hasOpenSubModal) {
+        when {
+            showWizardModal -> showWizardModal = false
+            editingMed != null -> editingMed = null
+            detailMed != null -> detailMed = null
+            sosModalMed != null -> sosModalMed = null
+            stockModalState != null -> stockModalState = null
+            repeatTarget != null -> repeatTarget = null
+            deleteTarget != null -> deleteTarget = null
+        }
+    }
 
     val continuousMeds = remember(state.medications) {
         state.medications.filter { it.ativo && (it.treatmentType == "continuous" || it.treatmentType.isBlank()) }

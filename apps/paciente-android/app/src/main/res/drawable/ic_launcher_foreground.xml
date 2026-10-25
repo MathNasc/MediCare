@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="54"
+        android:translateY="54">
+        <!-- Cápsula / Pílula estilizada rotacionada em 45 graus -->
+        <group android:rotation="-45">
+            <!-- Metade Superior Azul (Remédio) -->
+            <path
+                android:fillColor="#3B82F6"
+                android:pathData="M-10,-24 C-10,-29.5 0,-34 10,-34 C20,-34 30,-29.5 30,-24 L30,0 L-10,0 Z" />
+            <!-- Metade Inferior Violeta/Rosa (Remédio) -->
+            <path
+                android:fillColor="#8B5CF6"
+                android:pathData="M-10,0 L30,0 L30,24 C30,29.5 20,34 10,34 C0,34 -10,29.5 -10,24 Z" />
+            <!-- Brilho / Reflexo na pílula -->
+            <path
+                android:fillColor="#FFFFFF"
+                android:fillAlpha="0.35"
+                android:pathData="M-4,-24 C-4,-27 2,-30 10,-30 C13,-30 16,-28 17,-25 L17,-6 L-4,-6 Z" />
+            <!-- Linha de junção -->
+            <path
+                android:strokeColor="#FFFFFF"
+                android:strokeWidth="1.5"
+                android:pathData="M-10,0 L30,0" />
+        </group>
+
+        <!-- Cruz médica branca com sombra no canto inferior direito -->
+        <group
+            android:translateX="14"
+            android:translateY="14">
+            <path
+                android:fillColor="#10B981"
+                android:pathData="M-4,-12 L4,-12 L4,-4 L12,-4 L12,4 L4,4 L4,12 L-4,12 L-4,4 L-12,4 L-12,-4 L-4,-4 Z" />
+            <!-- Centro da cruz com destaque branco -->
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M-2.5,-8 L2.5,-8 L2.5,-2.5 L8,-2.5 L8,2.5 L2.5,2.5 L2.5,8 L-2.5,8 L-2.5,2.5 L-8,2.5 L-8,-2.5 L-2.5,-2.5 Z" />
+        </group>
+    </group>
+</vector>

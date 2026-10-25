@@ -33,7 +33,12 @@ fi
 # 3. Solicita a URL do Supabase caso não esteja definida
 if [ -z "${SUPABASE_DB_URL:-}" ]; then
   echo ""
-  echo "Por favor, informe a URL do Supabase (ex: postgresql://postgres:senha@db.ref.supabase.co:5432/postgres):"
+  echo "ATENÇÃO: Não use a conexão direta 'db.*.supabase.co' (ela opera em IPv6 e é inacessível da Oracle)."
+  echo "Use a URL do Connection Pooler (IPv4) do Supabase:"
+  echo " -> Supabase Dashboard > Settings > Database > Connection string > Pooler (modo Session ou Transaction)"
+  echo " -> Exemplo: postgresql://postgres.nmtgmulqvacdgniqfrjw:SENHA@aws-0-sa-east-1.pooler.supabase.com:5432/postgres"
+  echo ""
+  echo "Cole a URL do Connection Pooler do Supabase:"
   read -r RAW_SUPABASE_URL
   # Remove espaços no início e no final, e aspas se houver
   SUPABASE_DB_URL="$(echo "$RAW_SUPABASE_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
@@ -42,6 +47,14 @@ fi
 if [ -z "$SUPABASE_DB_URL" ]; then
   echo "ERRO: A URL do Supabase não pode ser vazia."
   exit 1
+fi
+
+if [[ "$SUPABASE_DB_URL" =~ db\.[a-z0-9]+\.supabase\.co ]]; then
+  echo ""
+  echo "⚠️ AVISO: Você informou a URL direta 'db.xxx.supabase.co'."
+  echo "Essa URL utiliza IPv6 e causará erro de 'connect ENETUNREACH' no servidor Oracle."
+  echo "Por favor, copie a URL da aba 'Connection Pooling' (ou 'Pooler') no painel do Supabase."
+  echo ""
 fi
 
 # 4. Solicita a senha do Oracle medicare_app caso ORACLE_DB_URL não esteja definida
