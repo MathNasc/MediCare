@@ -117,27 +117,48 @@ if [ "$MODE" = "--prepare-isolated-db" ]; then
     docker start "${CONTAINER_NAME}" >/dev/null || true
   fi
 
-  echo "Aguardando ${CONTAINER_NAME} ficar saudável..."
+  echo "Aguardando ${CONTAINER_NAME} inicializar e aceitar comandos SQL..."
+  READY=0
   for i in {1..30}; do
     if docker exec "${CONTAINER_NAME}" pg_isready -U "${DB_USER}" -d "${DB_NAME}" >/dev/null 2>&1; then
-      break
+      if docker exec "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}" -c "SELECT 1;" >/dev/null 2>&1; then
+        READY=1
+        break
+      fi
     fi
-    sleep 1
+    sleep 2
   done
 
+  if [ "$READY" -ne 1 ]; then
+    echo "Aviso: Container demorando a responder. Aguardando mais 5 segundos..."
+    sleep 5
+  fi
+
   echo "Aplicando isolamento de permissões e extensões (uuid-ossp, pgcrypto)..."
-  docker exec -i "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 <<EOSQL
+  MAX_TRIES=5
+  for ((t=1; t<=MAX_TRIES; t++)); do
+    if docker exec -i "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 <<EOSQL
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 REVOKE ALL ON DATABASE ${DB_NAME} FROM PUBLIC;
 GRANT CONNECT, TEMPORARY ON DATABASE ${DB_NAME} TO ${DB_USER};
 EOSQL
+    then
+      break
+    fi
+    echo "Tentativa $t de $MAX_TRIES falhou (possível reinicialização pós-initdb). Aguardando 3s..."
+    sleep 3
+  done
 
   if [ -f "oracle-migration/02_schema_oracle_standalone.sql" ]; then
     echo "Aplicando schema standalone completo do MediCare (02_schema_oracle_standalone.sql)..."
     docker exec -i "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 < oracle-migration/02_schema_oracle_standalone.sql
   fi
 
-  echo "✓ Container '${CONTAINER_NAME}' (porta 127.0.0.1:${DB_PORT}), banco '${DB_NAME}' e usuário '${DB_USER}' prontos e 100% isolados!"
+  echo ""
+  echo "======================================================================"
+  echo "✓ SUCESSO: Container '${CONTAINER_NAME}' está ativo em 127.0.0.1:${DB_PORT}"
+  echo "✓ Banco '${DB_NAME}' e Usuário '${DB_USER}' prontos e 100% isolados!"
+  echo "======================================================================"
 fi
 
