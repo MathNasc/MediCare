@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useBackButton } from '@/hooks/useBackButton';
 import { AuthDB } from '@/lib/db';
-import { isSupabaseEnabled } from '@/lib/supabase';
+import { isDatabaseConfigured } from '@/lib/databaseClient';
 
 export function AuthScreen({ onLogin, T }) {
   const [mode, setMode]   = useState('login');
@@ -74,11 +74,8 @@ export function AuthScreen({ onLogin, T }) {
   return (
     <div style={{ minHeight: '100vh', background: T.bg0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div className="anim-scaleIn" style={{ width: '100%', maxWidth: 380 }}>
-        {/* Aviso: Supabase não configurado neste build.
-
-            e ninguém percebe até um usuário perder acesso após logout/troca
-            de dispositivo. Ver src/lib/supabase.js para o log detalhado. */}
-        {!isSupabaseEnabled && (
+        {/* Aviso: Banco de dados remoto não configurado neste build. */}
+        {!isDatabaseConfigured && (
           <div
             role="status"
             style={{
@@ -93,7 +90,7 @@ export function AuthScreen({ onLogin, T }) {
                 Modo Offline / Local ativo
               </p>
               <p style={{ color: '#93c5fd', fontSize: 12, marginTop: 2, lineHeight: 1.5 }}>
-                Seus dados e medicamentos são salvos no navegador. Para sincronização na nuvem entre aparelhos, configure o Supabase.
+                Seus dados e medicamentos são salvos no navegador. Para sincronização na nuvem entre aparelhos, configure o banco de dados remoto.
               </p>
             </div>
           </div>

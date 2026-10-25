@@ -2,10 +2,10 @@
 import { createContext, useContext, useEffect, useReducer, useCallback, useMemo } from 'react';
 import { AuthDB, MedDB, HistDB } from '@/lib/db';
 import { buildDoses } from '@/lib/doseUtils';
-import { AuditDB } from '@/lib/supabaseAudit';
-import { StockDB } from '@/lib/supabaseStock';
+import { AuditDB } from '@/lib/auditService';
+import { StockDB } from '@/lib/stockService';
 import { computeEndDate, isTemporaryExpired } from '@/lib/treatmentTypes';
-import { supabase } from '@/lib/supabase';
+import { databaseClient } from '@/lib/databaseClient';
 import { getLocalDateISO, getLocalTime } from '@/lib/dateUtils';
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -51,14 +51,15 @@ export function AppProvider({ children }) {
 
   // ── Encerramento automático de tratamentos temporários vencidos ────────────
   const checkExpiredTreatments = useCallback(async (userId, medsList) => {
-    if (supabase) {
-      try { await supabase.rpc('finish_expired_treatments'); } catch {}
-      return;
+    if (databaseClient) {
+      try { await databaseClient.rpc('finish_expired_treatments'); } catch {}
+      return true;
     }
     const expired = medsList.filter((m) => m.treatment_type === 'temporary' && m.status === 'ativo' && isTemporaryExpired(m));
     for (const m of expired) {
       await MedDB.update(m.id, { status: 'concluido', finished_at: new Date().toISOString(), ativo: false });
     }
+    return expired.length > 0;
   }, []);
 
   // ── Load data ───────────────────────────────────────────────────────────────
@@ -67,8 +68,10 @@ export function AppProvider({ children }) {
     try {
       let ms = await MedDB.list(userId);
 
-      await checkExpiredTreatments(userId, ms);
-      ms = await MedDB.list(userId);
+      const changed = await checkExpiredTreatments(userId, ms);
+      if (changed) {
+        ms = await MedDB.list(userId);
+      }
 
       const [histRaw, auditLogs] = await Promise.all([
         HistDB.list(userId),
@@ -286,8 +289,8 @@ export function AppProvider({ children }) {
     if (typeof navigator !== "undefined" && !navigator.onLine) { alert("Sem conexão. Ação cancelada."); return { success: false, error: 'Offline' }; }
     if (!state.user) return { success: false, error: 'Sem sessão ativa' };
     try {
-      if (supabase) {
-        const { data, error } = await supabase.rpc('repeat_treatment', {
+      if (databaseClient) {
+        const { data, error } = await databaseClient.rpc('repeat_treatment', {
           p_med_id: med.id,
           p_new_start_date: newStartDate,
         });
@@ -361,7 +364,7 @@ export function AppProvider({ children }) {
       
       if (med) {
         try {
-          const { EventsDB } = await import('@/lib/supabaseCalendar');
+          const { EventsDB } = await import('@/lib/calendarService');
           const isIncrease = quantityAfter > quantityBefore;
           const toISO = (d) => getLocalDateISO(d);
           
@@ -385,12 +388,12 @@ export function AppProvider({ children }) {
   const alertCaregiver = useCallback(async (dose) => {
     if (!state.user) return;
     try {
-      const { SupaCaregivers } = await import('@/lib/supabase');
-      const caregivers = await SupaCaregivers.list(state.user.id);
+      const { caregiverRelationshipService } = await import('@/lib/databaseClient');
+      const caregivers = await caregiverRelationshipService.list(state.user.id);
       if (!caregivers.length) return;
 
-      if (supabase) {
-        await supabase.functions.invoke('alert-caregiver', {
+      if (databaseClient) {
+        await databaseClient.functions.invoke('alert-caregiver', {
           body: {
             patientName: state.user.nome,
             medName:     dose.nome,
@@ -405,9 +408,9 @@ export function AppProvider({ children }) {
   // ── Dashboard de tratamentos (indicadores) ──────────────────────────────────
   const getTreatmentDashboard = useCallback(async () => {
     if (!state.user) return null;
-    if (supabase) {
+    if (databaseClient) {
       try {
-        const { data, error } = await supabase.rpc('get_treatment_dashboard');
+        const { data, error } = await databaseClient.rpc('get_treatment_dashboard');
         if (error) throw error;
         return data;
       } catch { /* fallback abaixo */ }

@@ -11,14 +11,17 @@ export function QuickConfirm({ dose, onConfirm, onSnooze, onClose, T }) {
     setTimeout(() => { onConfirm(dose); onClose(); }, 750);
   };
 
-  const [mounted, setMounted] = require('react').useState(false); require('react').useEffect(() => setMounted(true), []); if (!mounted) return null; return require('react-dom').createPortal(
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  const content = (
     <div
       onClick={onClose}
       role="dialog" aria-modal="true" aria-label="Confirmar dose"
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)',
         backdropFilter: 'blur(14px)', zIndex: 9999, display: 'flex', alignItems: 'center',
-        /* flex-end */
         justifyContent: 'center', padding: 16,
       }}
     >
@@ -104,6 +107,8 @@ export function QuickConfirm({ dose, onConfirm, onSnooze, onClose, T }) {
           </>
         )}
       </div>
-    </div>, document.getElementById('root') || document.body
+    </div>
   );
+
+  return content;
 }

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">MediCare</string>
+    <string name="channel_medication_name">Lembretes de Medicamentos</string>
+    <string name="channel_medication_desc">Alertas sonoros e visuais nos horários programados das doses</string>
+</resources>

@@ -12,14 +12,14 @@ function translateAuthError(err) {
 }
 
 // ─── Unified DB Layer ─────────────────────────────────────────────────────────
-import { isSupabaseEnabled, SupabaseAuth, SupaMeds, SupaHist } from './supabase';
+import { isDatabaseConfigured, authService, medicationService, historyService, databaseClient } from './databaseClient';
 
 export function uid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// ─── In-Memory / Local Storage Fallbacks (When Supabase is not configured) ────
+// ─── In-Memory / Local Storage Fallbacks (When database is not configured) ────
 const DEFAULT_MEDS = [
   {
     id: 'med-1',
@@ -103,7 +103,7 @@ function setLocalHist(hist) {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const AuthDB = {
   async register(nome, email, pass, role = 'independente') {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       const localUser = {
         id: 'user-local-' + uid().slice(0, 8),
         nome: nome || 'Usuário MediCare',
@@ -116,7 +116,7 @@ export const AuthDB = {
       }
       return { user: localUser };
     }
-    const { data, error } = await SupabaseAuth.signUp(email, pass, nome, role);
+    const { data, error } = await authService.signUp(email, pass, nome, role);
     if (error) return { error: translateAuthError(error) };
     
     if (!data?.session) {
@@ -130,7 +130,7 @@ export const AuthDB = {
   },
 
   async login(email, pass) {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       let localUser = null;
       if (typeof window !== 'undefined') {
         const stored = localStorage.getItem('mc_local_user');
@@ -152,16 +152,16 @@ export const AuthDB = {
       }
       return { user: localUser };
     }
-    const { data, error } = await SupabaseAuth.signIn(email, pass);
+    const { data, error } = await authService.signIn(email, pass);
     if (error) return { error: translateAuthError(error) };
     if (!data?.session) return { error: 'Falha ao autenticar: sessão não estabelecida.' };
     const u = data.user;
-    const role = await SupabaseAuth.getProfileRole(u.id);
+    const role = await authService.getProfileRole(u.id);
     return { user: { id: u.id, nome: u.user_metadata?.nome || email, email: u.email, role, created_at: u.created_at } };
   },
 
   async logout() {
-    if (isSupabaseEnabled) await SupabaseAuth.signOut();
+    if (isDatabaseConfigured) await authService.signOut();
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem('mc_local_user');
@@ -177,7 +177,7 @@ export const AuthDB = {
 
   async current() {
     if (typeof window === 'undefined') return null;
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       const stored = localStorage.getItem('mc_local_user');
       if (stored) {
         try { return JSON.parse(stored); } catch (e) {}
@@ -194,23 +194,23 @@ export const AuthDB = {
       return defaultUser;
     }
     try {
-      const session = await SupabaseAuth.getSession();
+      const session = await authService.getSession();
       if (!session) return null;
       const u = session.user;
-      const { supabase } = await import('./supabase');
-      const { data } = await supabase.from('profiles').select('*').eq('id', u.id).single();
+      const { databaseClient } = await import('./databaseClient');
+      const { data } = await databaseClient.from('profiles').select('*').eq('id', u.id).single();
       return { id: u.id, nome: u.user_metadata?.nome || u.email, email: u.email, role: data?.role || 'independente', created_at: u.created_at, role_change_pin: data?.role_change_pin };
     } catch { return null; }
   },
 
   async resetPassword(email) {
-    if (!isSupabaseEnabled) return { error: null, message: 'Link de redefinição enviado (modo local).' };
-    const { error } = await SupabaseAuth.resetPassword(email);
+    if (!isDatabaseConfigured) return { error: null, message: 'Link de redefinição enviado (modo local).' };
+    const { error } = await authService.resetPassword(email);
     return { error: error?.message || null };
   },
 
   async updateRole(userId, role) {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       if (typeof window !== 'undefined') {
         const stored = localStorage.getItem('mc_local_user');
         if (stored) {
@@ -223,9 +223,9 @@ export const AuthDB = {
       }
       return true;
     }
-    const { supabase } = await import('./supabase');
-    if (!supabase) return false;
-    const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
+    const { databaseClient } = await import('./databaseClient');
+    if (!databaseClient) return false;
+    const { error } = await databaseClient.from('profiles').update({ role }).eq('id', userId);
     return !error;
   },
 };
@@ -233,12 +233,12 @@ export const AuthDB = {
 // ─── Medications ──────────────────────────────────────────────────────────────
 export const MedDB = {
   async list(userId) {
-    if (!isSupabaseEnabled) return getLocalMeds();
-    return SupaMeds.list(userId);
+    if (!isDatabaseConfigured) return getLocalMeds();
+    return medicationService.list(userId);
   },
 
   async add(med) {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       const meds = getLocalMeds();
       const newMed = {
         ...med,
@@ -252,11 +252,11 @@ export const MedDB = {
       setLocalMeds(meds);
       return newMed;
     }
-    return SupaMeds.add(med);
+    return medicationService.add(med);
   },
 
   async update(id, data) {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       const meds = getLocalMeds();
       const idx = meds.findIndex(m => m.id === id);
       if (idx !== -1) {
@@ -265,16 +265,16 @@ export const MedDB = {
       }
       return;
     }
-    return SupaMeds.update(id, data);
+    return medicationService.update(id, data);
   },
 
   async delete(id) {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       const meds = getLocalMeds().filter(m => m.id !== id);
       setLocalMeds(meds);
       return;
     }
-    return SupaMeds.delete(id);
+    return medicationService.delete(id);
   },
 };
 
@@ -285,12 +285,12 @@ function userId(id) {
 // ─── History ──────────────────────────────────────────────────────────────────
 export const HistDB = {
   async list(userId) {
-    if (!isSupabaseEnabled) return getLocalHist();
-    return SupaHist.list(userId);
+    if (!isDatabaseConfigured) return getLocalHist();
+    return historyService.list(userId);
   },
 
   async add(row) {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       const hist = getLocalHist();
       const newRow = {
         ...row,
@@ -302,11 +302,11 @@ export const HistDB = {
       setLocalHist(hist);
       return newRow;
     }
-    return SupaHist.add(row);
+    return historyService.add(row);
   },
 
   async delete(id) {
-    if (!isSupabaseEnabled) {
+    if (!isDatabaseConfigured) {
       const hist = getLocalHist();
       const target = hist.find(h => h.id === id);
       if (target) {
@@ -315,6 +315,6 @@ export const HistDB = {
       }
       return true;
     }
-    return SupaHist.delete(id);
+    return historyService.delete(id);
   }
 };
