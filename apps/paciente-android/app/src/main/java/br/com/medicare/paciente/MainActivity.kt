@@ -14,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import br.com.medicare.paciente.domain.model.DoseStatus
 import br.com.medicare.paciente.notifications.DoseAlarmScheduler
 import br.com.medicare.paciente.ui.components.MediCareBottomNav
 import br.com.medicare.paciente.ui.components.PatientTab
@@ -66,14 +65,14 @@ class MainActivity : ComponentActivity() {
                         onRegister = viewModel::register
                     )
                 } else {
-                    val pendingCount = state.dailyDoses.count { it.status != DoseStatus.CONFIRMED }
+                    val criticalStockCount = state.medications.count { it.ativo && it.quantidade <= 5 }
 
                     Scaffold(
                         snackbarHost = { SnackbarHost(snackbarHostState) },
                         bottomBar = {
                             MediCareBottomNav(
                                 currentTab = currentTab,
-                                pendingDosesCount = pendingCount,
+                                criticalStockCount = criticalStockCount,
                                 onSelectTab = { currentTab = it }
                             )
                         }
@@ -82,20 +81,29 @@ class MainActivity : ComponentActivity() {
                             when (currentTab) {
                                 PatientTab.HOME -> PatientHomeScreen(
                                     state = state,
-                                    onDoseClick = { viewModel.openDoseByDeepLink(it.id) },
-                                    onRegisterSos = viewModel::registerSosUse
+                                    onSelectDose = { viewModel.openDoseByDeepLink(it.id) },
+                                    onConfirmDoseDirect = viewModel::confirmDose,
+                                    onSnoozeDose = viewModel::snoozeDose,
+                                    onUndoDose = viewModel::undoDose,
+                                    onOpenStats = { currentTab = PatientTab.STATS }
                                 )
                                 PatientTab.MEDS -> PatientMedsScreen(
                                     state = state,
-                                    onSaveMedication = viewModel::saveMedication,
+                                    onSaveMedication = viewModel::saveMedicationFull,
+                                    onRepeatTreatment = viewModel::repeatTreatment,
                                     onDeleteMedication = viewModel::deleteMedication,
-                                    onAdjustStock = viewModel::adjustStock
+                                    onRegisterSosUse = viewModel::registerSosUse,
+                                    onRecordStockMovement = viewModel::recordStockMovement
                                 )
                                 PatientTab.CALENDAR -> PatientCalendarScreen(
                                     state = state,
-                                    onAddEvent = viewModel::addHealthEvent
+                                    onSaveEvent = viewModel::saveHealthEvent,
+                                    onDeleteEvent = viewModel::deleteHealthEvent,
+                                    onSaveNote = viewModel::saveCalendarNote,
+                                    onDeleteNote = viewModel::deleteCalendarNote,
+                                    onSaveDoseObs = viewModel::saveDoseObservation,
+                                    onConfirmRetroactive = viewModel::confirmDoseRetroactive
                                 )
-                                PatientTab.STATS -> PatientStatsScreen(state = state)
                                 PatientTab.AI -> PatientAiScreen(
                                     state = state,
                                     onSendQuestion = viewModel::askAi
@@ -108,13 +116,34 @@ class MainActivity : ComponentActivity() {
                                     onToggleDark = viewModel.sessionManager::setDarkTheme,
                                     onToggleHighContrast = viewModel.sessionManager::setHighContrast,
                                     onChangeFontScale = viewModel.sessionManager::setFontScale,
+                                    onUpdateProfile = viewModel::updateProfile,
+                                    onChangeRoleWithPin = viewModel::changeRoleWithPin,
+                                    onSaveMedication = viewModel::saveMedicationFull,
+                                    onSaveAllergy = viewModel::saveAllergy,
+                                    onDeleteAllergy = viewModel::deleteAllergy,
+                                    onSaveCondition = viewModel::saveHealthCondition,
+                                    onDeleteCondition = viewModel::deleteHealthCondition,
+                                    onSaveContact = viewModel::saveEmergencyContact,
+                                    onDeleteContact = viewModel::deleteEmergencyContact,
+                                    onSaveProfessional = viewModel::saveHealthcareProfessional,
+                                    onDeleteProfessional = viewModel::deleteHealthcareProfessional,
+                                    onCreateCaregiverInvite = viewModel::createCaregiverInvite,
+                                    onUpdateCaregiver = viewModel::updateCaregiverRelationship,
                                     onLogout = viewModel::logout
+                                )
+                                PatientTab.STATS -> PatientStatsScreen(
+                                    state = state,
+                                    onBackToHome = { currentTab = PatientTab.HOME }
+                                )
+                                PatientTab.STOCK_HISTORY -> PatientStatsScreen(
+                                    state = state,
+                                    onBackToHome = { currentTab = PatientTab.PROFILE }
                                 )
                             }
                         }
                     }
 
-                    // Modal de confirmação rápida (acionado por clique no card ou por Deep Link da notificação)
+                    // Modal de confirmação rápida (acionado por clique na Timeline ou por Deep Link da notificação)
                     state.selectedDoseForModal?.let { selectedDose ->
                         QuickConfirmDialog(
                             dose = selectedDose,

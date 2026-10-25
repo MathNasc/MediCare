@@ -78,18 +78,39 @@ enum class DoseStatus(
 }
 
 @Serializable
+data class EmergencyCardSettings(
+    @SerialName("show_allergies") val showAllergies: Boolean = true,
+    @SerialName("show_conditions") val showConditions: Boolean = true,
+    @SerialName("show_medications") val showMedications: Boolean = true,
+    @SerialName("show_contacts") val showContacts: Boolean = true,
+    @SerialName("show_notes") val showNotes: Boolean = true,
+    @SerialName("emergency_notes") val emergencyNotes: String = ""
+)
+
+@Serializable
 data class UserProfile(
     val id: String,
     val nome: String,
     val email: String,
     val role: String = "independente",
+    @SerialName("social_name") val socialName: String? = null,
+    @SerialName("blood_type") val bloodType: String? = "O+",
     @SerialName("tipo_sanguineo") val tipoSanguineo: String? = "O+",
-    @SerialName("data_nascimento") val dataNascimento: String? = null,
-    val telefone: String? = null,
+    val dob: String? = "1958-05-14",
+    @SerialName("data_nascimento") val dataNascimento: String? = "1958-05-14",
+    val sex: String? = "Feminino",
+    val cpf: String? = null,
+    val phone: String? = "(11) 98765-4321",
+    val telefone: String? = "(11) 98765-4321",
+    val address: String? = null,
+    val weight: String? = "68",
+    val height: String? = "165",
     @SerialName("cartao_sus") val cartaoSus: String? = null,
     @SerialName("plano_saude") val planoSaude: String? = null,
-    @SerialName("role_change_pin") val roleChangePin: String? = null,
-    @SerialName("avatar_url") val avatarUrl: String? = null
+    @SerialName("role_change_pin") val roleChangePin: String? = "123456",
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+    @SerialName("notifications_enabled") val notificationsEnabled: Boolean = true,
+    @SerialName("emergency_settings") val emergencySettings: EmergencyCardSettings = EmergencyCardSettings()
 )
 
 @Serializable
@@ -103,7 +124,7 @@ data class Medication(
     val quantidade: Int = 30,
     @SerialName("aviso_estoque") val avisoEstoque: Int = 5,
     val horarios: List<String> = listOf("08:00"),
-    @SerialName("dias_semana") val diasSemana: List<Int> = listOf(1, 2, 3, 4, 5, 6, 7),
+    @SerialName("dias_semana") val diasSemana: List<Int> = listOf(0, 1, 2, 3, 4, 5, 6),
     val observacoes: String? = null,
     val ativo: Boolean = true,
     val status: String = "ativo",
@@ -111,8 +132,10 @@ data class Medication(
     @SerialName("start_date") val startDate: String? = null,
     @SerialName("end_date") val endDate: String? = null,
     @SerialName("treatment_days") val treatmentDays: Int? = null,
+    @SerialName("finished_at") val finishedAt: String? = null,
     @SerialName("active_ingredient") val activeIngredient: String? = null,
     val manufacturer: String? = null,
+    @SerialName("important_for_emergency") val importantForEmergency: Boolean = true,
     @SerialName("created_at") val createdAt: String? = null
 )
 
@@ -127,6 +150,8 @@ data class DoseHistoryRecord(
     @SerialName("quantidade_usada") val quantidadeUsada: Int = 1,
     @SerialName("is_retroactive") val isRetroactive: Boolean = false,
     @SerialName("correction_reason") val correctionReason: String? = null,
+    @SerialName("confirmed_by_name") val confirmedByName: String? = null,
+    @SerialName("confirmed_by_role") val confirmedByRole: String? = null,
     @SerialName("created_at") val createdAt: String
 )
 
@@ -157,12 +182,14 @@ data class TreatmentProgress(
 data class StockMovement(
     val id: String,
     @SerialName("medication_id") val medicationId: String,
-    @SerialName("movement_type") val movementType: String,
+    @SerialName("movement_type") val movementType: String, // purchase, adjustment, correction, initial, consumption
     @SerialName("quantity_before") val quantityBefore: Int,
     @SerialName("quantity_after") val quantityAfter: Int,
     @SerialName("quantity_delta") val quantityDelta: Int,
     @SerialName("purchase_price") val purchasePrice: Double? = null,
     @SerialName("purchase_location") val purchaseLocation: String? = null,
+    val batch: String? = null,
+    @SerialName("expiration_date") val expirationDate: String? = null,
     val notes: String? = null,
     @SerialName("created_at") val createdAt: String
 )
@@ -182,11 +209,13 @@ data class StockForecast(
 data class HealthEvent(
     val id: String,
     @SerialName("user_id") val userId: String,
-    val type: String, // consulta, exame, estoque, lembrete
+    val type: String, // consulta, exame, procedimento, estoque, lembrete, outro
     val title: String,
     val description: String? = null,
     val date: String, // YYYY-MM-DD
     val time: String? = null,
+    val doctor: String? = null,
+    val location: String? = null,
     @SerialName("created_at") val createdAt: String
 )
 
@@ -201,6 +230,15 @@ data class CalendarNote(
 )
 
 @Serializable
+data class DoseObservation(
+    val id: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("dose_key") val doseKey: String, // YYYY-MM-DD_medId_hora
+    val content: String,
+    @SerialName("created_at") val createdAt: String
+)
+
+@Serializable
 data class CaregiverRelationship(
     val id: String,
     @SerialName("patient_id") val patientId: String,
@@ -209,7 +247,9 @@ data class CaregiverRelationship(
     @SerialName("relationship_label") val relationshipLabel: String? = null,
     @SerialName("invite_email") val inviteEmail: String? = null,
     @SerialName("invite_token") val inviteToken: String? = null,
-    val status: String = "pending"
+    val status: String = "pending", // active, pending, revoked
+    @SerialName("caregiver_name") val caregiverName: String? = null,
+    @SerialName("created_at") val createdAt: String = "2026-03-01T10:00:00Z"
 )
 
 @Serializable
@@ -219,6 +259,7 @@ data class EmergencyContact(
     val name: String,
     val relation: String,
     val phone: String,
+    val observation: String? = null,
     val priority: Int = 1
 )
 
@@ -226,7 +267,9 @@ data class EmergencyContact(
 data class AllergyItem(
     val id: String,
     @SerialName("user_id") val userId: String,
-    val name: String
+    val name: String,
+    val reaction: String? = null,
+    val severity: String = "Moderada" // Leve, Moderada, Grave
 )
 
 @Serializable
@@ -244,5 +287,7 @@ data class HealthcareProfessional(
     val name: String,
     val specialty: String,
     val phone: String? = null,
-    val crm: String? = null
+    val crm: String? = null,
+    val location: String? = null,
+    val observation: String? = null
 )

@@ -2,6 +2,7 @@ package br.com.medicare.paciente
 
 import br.com.medicare.paciente.domain.model.*
 import br.com.medicare.paciente.domain.util.DoseCalculator
+import br.com.medicare.paciente.domain.util.MedicationCatalog
 import org.junit.Assert.*
 import org.junit.Test
 import java.time.LocalDate
@@ -91,5 +92,34 @@ class DoseCalculatorTest {
         assertEquals("m2", forecasts[0].medId)
         assertEquals(3, forecasts[0].daysRemaining)
         assertEquals("2026-10-28", forecasts[0].depletionDate)
+    }
+
+    @Test
+    fun `getTreatmentProgress calculates dayNumber, totalDays and percent accurately`() {
+        val med = Medication(
+            id = "m-temp",
+            userId = "u1",
+            nome = "Amoxicilina",
+            dosagem = "500mg",
+            treatmentType = "temporary",
+            startDate = "2026-10-20",
+            endDate = "2026-10-26",
+            treatmentDays = 7
+        )
+        val progress = DoseCalculator.getTreatmentProgress(med, LocalDate.of(2026, 10, 23))
+        assertNotNull(progress)
+        assertEquals(4, progress!!.dayNumber)
+        assertEquals(7, progress.totalDays)
+        assertEquals(57, progress.percent)
+        assertFalse(progress.isExpired)
+    }
+
+    @Test
+    fun `MedicationCatalog searchLocal finds brand and active ingredient matches`() {
+        val byBrand = MedicationCatalog.searchLocal("Cozaar")
+        assertTrue(byBrand.any { it.name == "Cozaar" && it.activeIngredient.contains("Losartana") })
+
+        val byActive = MedicationCatalog.searchLocal("dipirona")
+        assertTrue(byActive.size >= 2)
     }
 }

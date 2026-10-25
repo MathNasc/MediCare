@@ -58,7 +58,7 @@ interface MediCareDao {
     @Query("UPDATE dose_history SET status = 'pending', pendingSync = :pendingSync WHERE id = :histId")
     suspend fun markDoseAsPending(histId: String, pendingSync: Boolean)
 
-    // ─── Health Events & Calendar Notes ───────────────────────────────────────
+    // ─── Health Events & Calendar Notes & Dose Observations ───────────────────
     @Query("SELECT * FROM health_events WHERE userId = :userId ORDER BY date ASC")
     fun observeHealthEvents(userId: String): Flow<List<HealthEventEntity>>
 
@@ -77,12 +77,64 @@ interface MediCareDao {
     @Query("DELETE FROM calendar_notes WHERE id = :id")
     suspend fun deleteCalendarNote(id: String)
 
+    @Query("SELECT * FROM dose_observations WHERE userId = :userId ORDER BY createdAt DESC")
+    fun observeDoseObservations(userId: String): Flow<List<DoseObservationEntity>>
+
+    @Upsert
+    suspend fun upsertDoseObservation(observation: DoseObservationEntity)
+
     // ─── Stock Movements ──────────────────────────────────────────────────────
-    @Query("SELECT * FROM stock_movements ORDER BY createdAt DESC LIMIT 100")
+    @Query("SELECT * FROM stock_movements ORDER BY createdAt DESC LIMIT 200")
     fun observeStockMovements(): Flow<List<StockMovementEntity>>
 
     @Upsert
     suspend fun upsertStockMovement(movement: StockMovementEntity)
+
+    // ─── Profile Sub-entities (Health, Contacts, Professionals, Caregivers) ───
+    @Query("SELECT * FROM allergies WHERE userId = :userId")
+    fun observeAllergies(userId: String): Flow<List<AllergyEntity>>
+
+    @Upsert
+    suspend fun upsertAllergy(item: AllergyEntity)
+
+    @Query("DELETE FROM allergies WHERE id = :id")
+    suspend fun deleteAllergy(id: String)
+
+    @Query("SELECT * FROM health_conditions WHERE userId = :userId")
+    fun observeHealthConditions(userId: String): Flow<List<HealthConditionEntity>>
+
+    @Upsert
+    suspend fun upsertHealthCondition(item: HealthConditionEntity)
+
+    @Query("DELETE FROM health_conditions WHERE id = :id")
+    suspend fun deleteHealthCondition(id: String)
+
+    @Query("SELECT * FROM emergency_contacts WHERE userId = :userId ORDER BY priority ASC")
+    fun observeEmergencyContacts(userId: String): Flow<List<EmergencyContactEntity>>
+
+    @Upsert
+    suspend fun upsertEmergencyContact(item: EmergencyContactEntity)
+
+    @Query("DELETE FROM emergency_contacts WHERE id = :id")
+    suspend fun deleteEmergencyContact(id: String)
+
+    @Query("SELECT * FROM healthcare_professionals WHERE userId = :userId")
+    fun observeHealthcareProfessionals(userId: String): Flow<List<HealthcareProfessionalEntity>>
+
+    @Upsert
+    suspend fun upsertHealthcareProfessional(item: HealthcareProfessionalEntity)
+
+    @Query("DELETE FROM healthcare_professionals WHERE id = :id")
+    suspend fun deleteHealthcareProfessional(id: String)
+
+    @Query("SELECT * FROM caregiver_relationships WHERE patientId = :userId ORDER BY createdAt DESC")
+    fun observeCaregivers(userId: String): Flow<List<CaregiverRelationshipEntity>>
+
+    @Upsert
+    suspend fun upsertCaregiver(item: CaregiverRelationshipEntity)
+
+    @Query("DELETE FROM caregiver_relationships WHERE id = :id")
+    suspend fun deleteCaregiver(id: String)
 
     // ─── Offline Pending Sync Queue ───────────────────────────────────────────
     @Query("SELECT * FROM pending_sync_queue ORDER BY createdAtEpochMs ASC")

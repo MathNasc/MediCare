@@ -9,10 +9,16 @@ import androidx.room.RoomDatabase
         DoseHistoryEntity::class,
         HealthEventEntity::class,
         CalendarNoteEntity::class,
+        DoseObservationEntity::class,
         StockMovementEntity::class,
+        AllergyEntity::class,
+        HealthConditionEntity::class,
+        EmergencyContactEntity::class,
+        HealthcareProfessionalEntity::class,
+        CaregiverRelationshipEntity::class,
         PendingSyncActionEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class MediCareDatabase : RoomDatabase() {

@@ -26,8 +26,10 @@ data class MedicationEntity(
     val startDate: String?,
     val endDate: String?,
     val treatmentDays: Int?,
+    val finishedAt: String?,
     val activeIngredient: String?,
     val manufacturer: String?,
+    val importantForEmergency: Boolean,
     val createdAt: String,
     val pendingSync: Boolean = false
 ) {
@@ -41,7 +43,7 @@ data class MedicationEntity(
         quantidade = quantidade,
         avisoEstoque = avisoEstoque,
         horarios = runCatching { json.decodeFromString<List<String>>(horariosJson) }.getOrDefault(listOf("08:00")),
-        diasSemana = runCatching { json.decodeFromString<List<Int>>(diasSemanaJson) }.getOrDefault(listOf(1, 2, 3, 4, 5, 6, 7)),
+        diasSemana = runCatching { json.decodeFromString<List<Int>>(diasSemanaJson) }.getOrDefault(listOf(0, 1, 2, 3, 4, 5, 6)),
         observacoes = observacoes,
         ativo = ativo,
         status = status,
@@ -49,8 +51,10 @@ data class MedicationEntity(
         startDate = startDate,
         endDate = endDate,
         treatmentDays = treatmentDays,
+        finishedAt = finishedAt,
         activeIngredient = activeIngredient,
         manufacturer = manufacturer,
+        importantForEmergency = importantForEmergency,
         createdAt = createdAt
     )
 
@@ -74,18 +78,16 @@ data class MedicationEntity(
                 startDate = med.startDate,
                 endDate = med.endDate,
                 treatmentDays = med.treatmentDays,
+                finishedAt = med.finishedAt,
                 activeIngredient = med.activeIngredient,
                 manufacturer = med.manufacturer,
+                importantForEmergency = med.importantForEmergency,
                 createdAt = med.createdAt ?: java.time.Instant.now().toString(),
                 pendingSync = pendingSync
             )
     }
 }
 
-/**
- * Índice único lógico por (userId, medId, hora, doseDateIso) garante idempotência offline
- * e impede duplicação de confirmação da mesma dose programada no mesmo dia.
- */
 @Entity(
     tableName = "dose_history",
     indices = [Index(value = ["userId", "medId", "hora", "doseDateIso"], unique = true)]
@@ -95,12 +97,14 @@ data class DoseHistoryEntity(
     val medId: String,
     val userId: String,
     val hora: String,
-    val doseDateIso: String, // YYYY-MM-DD para guarda de idempotência
+    val doseDateIso: String,
     val status: String,
     val atrasoMinutos: Int,
     val quantidadeUsada: Int,
     val isRetroactive: Boolean,
     val correctionReason: String?,
+    val confirmedByName: String?,
+    val confirmedByRole: String?,
     val createdAt: String,
     val pendingSync: Boolean = false
 ) {
@@ -114,6 +118,8 @@ data class DoseHistoryEntity(
         quantidadeUsada = quantidadeUsada,
         isRetroactive = isRetroactive,
         correctionReason = correctionReason,
+        confirmedByName = confirmedByName,
+        confirmedByRole = confirmedByRole,
         createdAt = createdAt
     )
 }
@@ -127,6 +133,8 @@ data class HealthEventEntity(
     val description: String?,
     val date: String,
     val time: String?,
+    val doctor: String?,
+    val location: String?,
     val createdAt: String,
     val pendingSync: Boolean = false
 ) {
@@ -138,6 +146,8 @@ data class HealthEventEntity(
         description = description,
         date = date,
         time = time,
+        doctor = doctor,
+        location = location,
         createdAt = createdAt
     )
 }
@@ -162,6 +172,23 @@ data class CalendarNoteEntity(
     )
 }
 
+@Entity(tableName = "dose_observations")
+data class DoseObservationEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val doseKey: String,
+    val content: String,
+    val createdAt: String
+) {
+    fun toDomain(): DoseObservation = DoseObservation(
+        id = id,
+        userId = userId,
+        doseKey = doseKey,
+        content = content,
+        createdAt = createdAt
+    )
+}
+
 @Entity(tableName = "stock_movements")
 data class StockMovementEntity(
     @PrimaryKey val id: String,
@@ -172,6 +199,8 @@ data class StockMovementEntity(
     val quantityDelta: Int,
     val purchasePrice: Double?,
     val purchaseLocation: String?,
+    val batch: String?,
+    val expirationDate: String?,
     val notes: String?,
     val createdAt: String,
     val pendingSync: Boolean = false
@@ -185,7 +214,84 @@ data class StockMovementEntity(
         quantityDelta = quantityDelta,
         purchasePrice = purchasePrice,
         purchaseLocation = purchaseLocation,
+        batch = batch,
+        expirationDate = expirationDate,
         notes = notes,
+        createdAt = createdAt
+    )
+}
+
+@Entity(tableName = "allergies")
+data class AllergyEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val name: String,
+    val reaction: String?,
+    val severity: String
+) {
+    fun toDomain(): AllergyItem = AllergyItem(id, userId, name, reaction, severity)
+}
+
+@Entity(tableName = "health_conditions")
+data class HealthConditionEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val name: String,
+    val notes: String?
+) {
+    fun toDomain(): HealthConditionItem = HealthConditionItem(id, userId, name, notes)
+}
+
+@Entity(tableName = "emergency_contacts")
+data class EmergencyContactEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val name: String,
+    val relation: String,
+    val phone: String,
+    val observation: String?,
+    val priority: Int
+) {
+    fun toDomain(): EmergencyContact = EmergencyContact(id, userId, name, relation, phone, observation, priority)
+}
+
+@Entity(tableName = "healthcare_professionals")
+data class HealthcareProfessionalEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val name: String,
+    val specialty: String,
+    val phone: String?,
+    val crm: String?,
+    val location: String?,
+    val observation: String?
+) {
+    fun toDomain(): HealthcareProfessional = HealthcareProfessional(id, userId, name, specialty, phone, crm, location, observation)
+}
+
+@Entity(tableName = "caregiver_relationships")
+data class CaregiverRelationshipEntity(
+    @PrimaryKey val id: String,
+    val patientId: String,
+    val caregiverId: String?,
+    val permissionLevel: String,
+    val relationshipLabel: String?,
+    val inviteEmail: String?,
+    val inviteToken: String?,
+    val status: String,
+    val caregiverName: String?,
+    val createdAt: String
+) {
+    fun toDomain(): CaregiverRelationship = CaregiverRelationship(
+        id = id,
+        patientId = patientId,
+        caregiverId = caregiverId,
+        permissionLevel = permissionLevel,
+        relationshipLabel = relationshipLabel,
+        inviteEmail = inviteEmail,
+        inviteToken = inviteToken,
+        status = status,
+        caregiverName = caregiverName,
         createdAt = createdAt
     )
 }
@@ -193,7 +299,7 @@ data class StockMovementEntity(
 @Entity(tableName = "pending_sync_queue")
 data class PendingSyncActionEntity(
     @PrimaryKey(autoGenerate = true) val queueId: Long = 0,
-    val actionType: String, // CONFIRM_DOSE, UNDO_DOSE, UPSERT_MED, DELETE_MED, STOCK_MOVEMENT, RETROACTIVE_DOSE
+    val actionType: String,
     val entityId: String,
     val payloadJson: String,
     val createdAtEpochMs: Long = System.currentTimeMillis(),

@@ -5,10 +5,12 @@ import br.com.medicare.paciente.BuildConfig
 import br.com.medicare.paciente.data.local.*
 import br.com.medicare.paciente.data.remote.*
 import br.com.medicare.paciente.domain.model.*
+import br.com.medicare.paciente.domain.util.DoseCalculator
 import br.com.medicare.paciente.notifications.DoseAlarmScheduler
 import br.com.medicare.paciente.notifications.SyncWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -48,8 +50,26 @@ class MediCareRepository @Inject constructor(
     fun observeCalendarNotes(userId: String): Flow<List<CalendarNote>> =
         dao.observeCalendarNotes(userId).map { list -> list.map { it.toDomain() } }
 
+    fun observeDoseObservations(userId: String): Flow<List<DoseObservation>> =
+        dao.observeDoseObservations(userId).map { list -> list.map { it.toDomain() } }
+
     fun observeStockMovements(): Flow<List<StockMovement>> =
         dao.observeStockMovements().map { list -> list.map { it.toDomain() } }
+
+    fun observeAllergies(userId: String): Flow<List<AllergyItem>> =
+        dao.observeAllergies(userId).map { list -> list.map { it.toDomain() } }
+
+    fun observeHealthConditions(userId: String): Flow<List<HealthConditionItem>> =
+        dao.observeHealthConditions(userId).map { list -> list.map { it.toDomain() } }
+
+    fun observeEmergencyContacts(userId: String): Flow<List<EmergencyContact>> =
+        dao.observeEmergencyContacts(userId).map { list -> list.map { it.toDomain() } }
+
+    fun observeHealthcareProfessionals(userId: String): Flow<List<HealthcareProfessional>> =
+        dao.observeHealthcareProfessionals(userId).map { list -> list.map { it.toDomain() } }
+
+    fun observeCaregivers(userId: String): Flow<List<CaregiverRelationship>> =
+        dao.observeCaregivers(userId).map { list -> list.map { it.toDomain() } }
 
     fun observePendingSyncCount(): Flow<Int> =
         dao.observePendingSyncCount()
@@ -70,13 +90,23 @@ class MediCareRepository @Inject constructor(
     suspend fun login(email: String, pass: String): Result<UserProfile> {
         if (!isRemoteConfigured) {
             val localUser = UserProfile(
-                id = "user-local-${UUID.randomUUID().toString().take(8)}",
-                nome = email.substringBefore("@").replaceFirstChar { it.uppercase() }.ifBlank { "Paciente MediCare" },
-                email = email.ifBlank { "paciente@medicare.local" },
-                role = "independente"
+                id = "user-local-paciente",
+                nome = email.substringBefore("@").replaceFirstChar { it.uppercase() }.ifBlank { "Maria Helena Silva" },
+                email = email.ifBlank { "maria.helena@medicare.br" },
+                role = "independente",
+                bloodType = "O+",
+                tipoSanguineo = "O+",
+                dob = "1958-05-14",
+                dataNascimento = "1958-05-14",
+                sex = "Feminino",
+                phone = "(11) 98765-4321",
+                telefone = "(11) 98765-4321",
+                weight = "68",
+                height = "165",
+                roleChangePin = "123456"
             )
             sessionManager.saveSession(localUser, accessToken = null)
-            seedDefaultMedicationsIfEmpty(localUser.id)
+            seedDefaultDataIfEmpty(localUser.id)
             return Result.success(localUser)
         }
 
@@ -105,13 +135,13 @@ class MediCareRepository @Inject constructor(
     suspend fun register(nome: String, email: String, pass: String, role: String = "independente"): Result<UserProfile> {
         if (!isRemoteConfigured) {
             val localUser = UserProfile(
-                id = "user-local-${UUID.randomUUID().toString().take(8)}",
-                nome = nome.ifBlank { "Paciente MediCare" },
-                email = email.ifBlank { "paciente@medicare.local" },
+                id = "user-local-paciente",
+                nome = nome.ifBlank { "Maria Helena Silva" },
+                email = email.ifBlank { "maria.helena@medicare.br" },
                 role = role
             )
             sessionManager.saveSession(localUser, accessToken = null)
-            seedDefaultMedicationsIfEmpty(localUser.id)
+            seedDefaultDataIfEmpty(localUser.id)
             return Result.success(localUser)
         }
 
@@ -129,6 +159,31 @@ class MediCareRepository @Inject constructor(
         }
     }
 
+    suspend fun updateProfile(updated: UserProfile) {
+        sessionManager.saveSession(updated, sessionManager.getAccessToken())
+        if (isRemoteConfigured) {
+            runCatching { remoteApi.upsertProfile(updated) }
+        }
+    }
+
+    suspend fun changeRoleWithPin(newRole: String, pin: String): Result<UserProfile> {
+        val current = sessionManager.currentUser.value ?: return Result.failure(Exception("Sessão inativa"))
+        if (current.role == "paciente" && newRole != "paciente") {
+            val expectedPin = current.roleChangePin ?: "123456"
+            if (pin.trim() != expectedPin) {
+                return Result.failure(Exception("PIN de cuidador incorreto. Verifique o código de 6 dígitos."))
+            }
+        }
+        if (isRemoteConfigured && pin.isNotBlank()) {
+            runCatching {
+                remoteApi.changeRoleWithPin(ChangeRolePinRpcRequest(pin = pin, newRole = newRole))
+            }
+        }
+        val updated = current.copy(role = newRole)
+        updateProfile(updated)
+        return Result.success(updated)
+    }
+
     suspend fun logout() {
         val current = sessionManager.currentUser.value
         if (current != null) {
@@ -141,13 +196,11 @@ class MediCareRepository @Inject constructor(
     // ─── Sincronização Bidirecional ───────────────────────────────────────────
     suspend fun syncFromServer(userId: String) {
         if (!isRemoteConfigured) {
-            seedDefaultMedicationsIfEmpty(userId)
+            seedDefaultDataIfEmpty(userId)
             return
         }
         flushPendingSyncQueue()
-        runCatching {
-            remoteApi.finishExpiredTreatments()
-        }
+        runCatching { remoteApi.finishExpiredTreatments() }
         runCatching {
             val remoteMeds = remoteApi.getMedications("eq.$userId")
             dao.upsertMedications(remoteMeds.map { MedicationEntity.fromDomain(it, pendingSync = false, json = json) })
@@ -167,6 +220,8 @@ class MediCareRepository @Inject constructor(
                     quantidadeUsada = h.quantidadeUsada,
                     isRetroactive = h.isRetroactive,
                     correctionReason = h.correctionReason,
+                    confirmedByName = h.confirmedByName,
+                    confirmedByRole = h.confirmedByRole,
                     createdAt = h.createdAt,
                     pendingSync = false
                 )
@@ -188,14 +243,12 @@ class MediCareRepository @Inject constructor(
         val user = sessionManager.currentUser.value ?: return null
         val todayIso = today.toString()
 
-        // 1. Guarda de Idempotência Local: evita duplicação da mesma dose no mesmo dia
         val existing = dao.findExistingDoseForDay(user.id, medId, hora, todayIso)
         if (existing != null && existing.status == "confirmed") {
             alarmScheduler.onDoseConfirmed(medId, hora)
             return existing.toDomain()
         }
 
-        // Calcula atraso em minutos em relação ao horário programado
         val parts = hora.split(":")
         val plannedTime = LocalTime.of(
             parts.getOrNull(0)?.toIntOrNull() ?: 8,
@@ -217,22 +270,21 @@ class MediCareRepository @Inject constructor(
             quantidadeUsada = 1,
             isRetroactive = false,
             correctionReason = null,
+            confirmedByName = user.nome,
+            confirmedByRole = user.role,
             createdAt = nowIso,
             pendingSync = true
         )
         dao.upsertDoseHistory(entity)
 
-        // 2. Decrementa 1 unidade do estoque local
         val medEntity = dao.getMedicationById(medId)
         if (medEntity != null) {
             val newQty = max(0, medEntity.quantidade - 1)
             dao.upsertMedication(medEntity.copy(quantidade = newQty, pendingSync = true))
         }
 
-        // 3. Cancela lembrete de repetição e remove notificação ativa
         alarmScheduler.onDoseConfirmed(medId, hora)
 
-        // 4. Tenta sincronizar imediatamente ou enfileira no WorkManager
         val domainRecord = entity.toDomain()
         if (isRemoteConfigured) {
             val synced = runCatching {
@@ -253,7 +305,6 @@ class MediCareRepository @Inject constructor(
 
     suspend fun undoDoseConfirmation(dose: ScheduledDose) {
         val histId = dose.histId ?: return
-        // Conforme regra de auditoria clínica do banco, atualiza status para 'pending'
         dao.markDoseAsPending(histId, pendingSync = true)
 
         val medEntity = dao.getMedicationById(dose.medId)
@@ -279,11 +330,16 @@ class MediCareRepository @Inject constructor(
         }
     }
 
-    // ─── Uso de Medicamento SOS ───────────────────────────────────────────────
-    suspend fun registerSosUse(med: Medication, quantityUsed: Int = 1, observation: String? = null) {
+    // ─── Uso de Medicamento SOS (com Horário, Motivo e Quantidade) ────────────
+    suspend fun registerSosUse(
+        med: Medication,
+        hora: String? = null,
+        quantityUsed: Int = 1,
+        observation: String? = null
+    ) {
         val user = sessionManager.currentUser.value ?: return
         val nowTime = LocalTime.now()
-        val hora = "%02d:%02d".format(nowTime.hour, nowTime.minute)
+        val effectiveHora = hora?.takeIf { it.isNotBlank() } ?: "%02d:%02d".format(nowTime.hour, nowTime.minute)
         val todayIso = LocalDate.now().toString()
         val recordId = UUID.randomUUID().toString()
 
@@ -291,13 +347,15 @@ class MediCareRepository @Inject constructor(
             id = recordId,
             medId = med.id,
             userId = user.id,
-            hora = hora,
+            hora = effectiveHora,
             doseDateIso = "$todayIso-sos-$recordId",
             status = "confirmed",
             atrasoMinutos = 0,
             quantidadeUsada = quantityUsed,
             isRetroactive = false,
             correctionReason = observation,
+            confirmedByName = user.nome,
+            confirmedByRole = user.role,
             createdAt = Instant.now().toString(),
             pendingSync = true
         )
@@ -319,7 +377,7 @@ class MediCareRepository @Inject constructor(
         }
     }
 
-    // ─── Confirmação Retroativa com Auditoria ─────────────────────────────────
+    // ─── Confirmação Retroativa com Auditoria e Trava de 24h ──────────────────
     suspend fun confirmDoseRetroactive(
         medId: String,
         hora: String,
@@ -327,12 +385,11 @@ class MediCareRepository @Inject constructor(
         reason: String?
     ): Result<Unit> {
         val user = sessionManager.currentUser.value ?: return Result.failure(Exception("Sessão inativa"))
-        // Trava de segurança: perfil 'paciente' só pode alterar doses nas últimas 24h
         if (user.role == "paciente") {
             val doseDate = LocalDate.parse(doseDateIso)
             val daysDiff = ChronoUnit.DAYS.between(doseDate, LocalDate.now())
             if (daysDiff > 1) {
-                return Result.failure(Exception("Pacientes supervisionados só podem registrar doses retroativas dentro de 24 horas."))
+                return Result.failure(Exception("Pacientes supervisionados só podem registrar doses retroativas nas últimas 24 horas."))
             }
         }
 
@@ -349,6 +406,8 @@ class MediCareRepository @Inject constructor(
             quantidadeUsada = 1,
             isRetroactive = true,
             correctionReason = reason,
+            confirmedByName = user.nome,
+            confirmedByRole = user.role,
             createdAt = createdAtIso,
             pendingSync = true
         )
@@ -394,6 +453,20 @@ class MediCareRepository @Inject constructor(
         }
     }
 
+    suspend fun repeatTreatment(med: Medication, durationDays: Int) {
+        val startIso = LocalDate.now().toString()
+        val endIso = DoseCalculator.computeEndDate(startIso, durationDays)
+        val reopened = med.copy(
+            ativo = true,
+            status = "ativo",
+            startDate = startIso,
+            endDate = endIso,
+            treatmentDays = durationDays,
+            finishedAt = null
+        )
+        saveMedication(reopened)
+    }
+
     suspend fun deleteMedication(med: Medication) {
         alarmScheduler.cancelAllAlarmsForMedication(med)
         dao.deleteMedication(med.id)
@@ -408,12 +481,16 @@ class MediCareRepository @Inject constructor(
         }
     }
 
-    // ─── Movimentação de Estoque ──────────────────────────────────────────────
+    // ─── Movimentação Completa de Estoque (Compra / Ajuste / Correção) ────────
     suspend fun recordStockMovement(
         med: Medication,
         movementType: String,
         newQuantity: Int,
-        notes: String?
+        purchasePrice: Double? = null,
+        purchaseLocation: String? = null,
+        batch: String? = null,
+        expirationDate: String? = null,
+        notes: String? = null
     ) {
         val movement = StockMovementEntity(
             id = UUID.randomUUID().toString(),
@@ -422,8 +499,10 @@ class MediCareRepository @Inject constructor(
             quantityBefore = med.quantidade,
             quantityAfter = newQuantity,
             quantityDelta = newQuantity - med.quantidade,
-            purchasePrice = null,
-            purchaseLocation = null,
+            purchasePrice = purchasePrice,
+            purchaseLocation = purchaseLocation,
+            batch = batch,
+            expirationDate = expirationDate,
             notes = notes,
             createdAt = Instant.now().toString(),
             pendingSync = true
@@ -438,7 +517,10 @@ class MediCareRepository @Inject constructor(
                     userId = med.userId,
                     type = "estoque",
                     title = "Reposição de estoque: ${med.nome}",
-                    description = "${med.quantidade} ➔ $newQuantity ${med.unidade}s",
+                    description = buildString {
+                        append("${med.quantidade} ➔ $newQuantity ${med.unidade}s")
+                        if (!purchaseLocation.isNullOrBlank()) append(" · $purchaseLocation")
+                    },
                     date = LocalDate.now().toString(),
                     time = "%02d:%02d".format(LocalTime.now().hour, LocalTime.now().minute),
                     createdAt = Instant.now().toString()
@@ -454,6 +536,8 @@ class MediCareRepository @Inject constructor(
                         movementType = movementType,
                         quantityBefore = med.quantidade,
                         quantityAfter = newQuantity,
+                        purchasePrice = purchasePrice,
+                        purchaseLocation = purchaseLocation,
                         notes = notes
                     )
                 )
@@ -461,7 +545,7 @@ class MediCareRepository @Inject constructor(
         }
     }
 
-    // ─── Calendário (Eventos e Notas) ─────────────────────────────────────────
+    // ─── Calendário (Eventos, Notas e Observações de Doses) ───────────────────
     suspend fun saveHealthEvent(event: HealthEvent) {
         dao.upsertHealthEvent(
             HealthEventEntity(
@@ -472,9 +556,15 @@ class MediCareRepository @Inject constructor(
                 description = event.description,
                 date = event.date,
                 time = event.time,
+                doctor = event.doctor,
+                location = event.location,
                 createdAt = event.createdAt
             )
         )
+    }
+
+    suspend fun deleteHealthEvent(id: String) {
+        dao.deleteHealthEvent(id)
     }
 
     suspend fun saveCalendarNote(note: CalendarNote) {
@@ -486,6 +576,114 @@ class MediCareRepository @Inject constructor(
                 content = note.content,
                 mood = note.mood,
                 createdAt = note.createdAt
+            )
+        )
+    }
+
+    suspend fun deleteCalendarNote(id: String) {
+        dao.deleteCalendarNote(id)
+    }
+
+    suspend fun saveDoseObservation(doseKey: String, content: String) {
+        val user = sessionManager.currentUser.value ?: return
+        dao.upsertDoseObservation(
+            DoseObservationEntity(
+                id = "obs-$doseKey",
+                userId = user.id,
+                doseKey = doseKey,
+                content = content,
+                createdAt = Instant.now().toString()
+            )
+        )
+    }
+
+    // ─── Perfil: Saúde, Contatos, Profissionais e Cuidadores ──────────────────
+    suspend fun saveAllergy(item: AllergyItem) {
+        dao.upsertAllergy(AllergyEntity(item.id, item.userId, item.name, item.reaction, item.severity))
+    }
+
+    suspend fun deleteAllergy(id: String) {
+        dao.deleteAllergy(id)
+    }
+
+    suspend fun saveHealthCondition(item: HealthConditionItem) {
+        dao.upsertHealthCondition(HealthConditionEntity(item.id, item.userId, item.name, item.notes))
+    }
+
+    suspend fun deleteHealthCondition(id: String) {
+        dao.deleteHealthCondition(id)
+    }
+
+    suspend fun saveEmergencyContact(item: EmergencyContact) {
+        dao.upsertEmergencyContact(
+            EmergencyContactEntity(item.id, item.userId, item.name, item.relation, item.phone, item.observation, item.priority)
+        )
+    }
+
+    suspend fun deleteEmergencyContact(id: String) {
+        dao.deleteEmergencyContact(id)
+    }
+
+    suspend fun saveHealthcareProfessional(item: HealthcareProfessional) {
+        dao.upsertHealthcareProfessional(
+            HealthcareProfessionalEntity(
+                item.id, item.userId, item.name, item.specialty, item.phone, item.crm, item.location, item.observation
+            )
+        )
+    }
+
+    suspend fun deleteHealthcareProfessional(id: String) {
+        dao.deleteHealthcareProfessional(id)
+    }
+
+    suspend fun createCaregiverInvite(email: String?, label: String, permissionLevel: String): CaregiverRelationship? {
+        val user = sessionManager.currentUser.value ?: return null
+        val token = UUID.randomUUID().toString().replace("-", "").take(16)
+        val rel = CaregiverRelationship(
+            id = "cg-${UUID.randomUUID().toString().take(8)}",
+            patientId = user.id,
+            caregiverId = null,
+            permissionLevel = permissionLevel,
+            relationshipLabel = label.ifBlank { "Familiar / Cuidador" },
+            inviteEmail = email?.takeIf { it.isNotBlank() },
+            inviteToken = token,
+            status = "pending",
+            caregiverName = email?.substringBefore("@")?.replaceFirstChar { it.uppercase() } ?: label,
+            createdAt = Instant.now().toString()
+        )
+        dao.upsertCaregiver(
+            CaregiverRelationshipEntity(
+                id = rel.id,
+                patientId = rel.patientId,
+                caregiverId = rel.caregiverId,
+                permissionLevel = rel.permissionLevel,
+                relationshipLabel = rel.relationshipLabel,
+                inviteEmail = rel.inviteEmail,
+                inviteToken = rel.inviteToken,
+                status = rel.status,
+                caregiverName = rel.caregiverName,
+                createdAt = rel.createdAt
+            )
+        )
+        if (isRemoteConfigured) {
+            runCatching { remoteApi.createCaregiverInvite(rel) }
+        }
+        return rel
+    }
+
+    suspend fun updateCaregiverRelationship(rel: CaregiverRelationship) {
+        dao.upsertCaregiver(
+            CaregiverRelationshipEntity(
+                id = rel.id,
+                patientId = rel.patientId,
+                caregiverId = rel.caregiverId,
+                permissionLevel = rel.permissionLevel,
+                relationshipLabel = rel.relationshipLabel,
+                inviteEmail = rel.inviteEmail,
+                inviteToken = rel.inviteToken,
+                status = rel.status,
+                caregiverName = rel.caregiverName,
+                createdAt = rel.createdAt
             )
         )
     }
@@ -508,7 +706,31 @@ class MediCareRepository @Inject constructor(
             val response = aiApi.askAssistant(AiPromptRequest(prompt = prompt))
             response.text ?: response.error ?: "Não foi possível obter resposta no momento."
         }.getOrElse {
-            "Sem conexão com o servidor de IA no momento. Lembre-se: em caso de dúvidas urgentes sobre seus medicamentos (${activeMeds.size} ativos), consulte seu médico ou farmacêutico."
+            buildOfflineAssistantAnswer(userQuestion, activeMeds)
+        }
+    }
+
+    private fun buildOfflineAssistantAnswer(question: String, activeMeds: List<Medication>): String {
+        val q = question.lowercase()
+        val medMatch = activeMeds.firstOrNull { q.contains(it.nome.lowercase().split(" ").first()) }
+        return buildString {
+            if (medMatch != null) {
+                appendLine("💊 **${medMatch.nome} (${medMatch.dosagem})**")
+                if (!medMatch.activeIngredient.isNullOrBlank()) {
+                    appendLine("• Princípio ativo: ${medMatch.activeIngredient}")
+                }
+                appendLine("• Horários programados: ${medMatch.horarios.ifEmpty { listOf("Uso SOS") }.joinToString(", ")}")
+                if (!medMatch.observacoes.isNullOrBlank()) {
+                    appendLine("• Orientação registrada: ${medMatch.observacoes}")
+                }
+                appendLine("• Estoque atual: ${medMatch.quantidade} ${medMatch.unidade}(s)")
+            } else {
+                appendLine("🩺 **Orientação do Assistente de Saúde**")
+                appendLine("Você possui atualmente **${activeMeds.size} medicamento(s)** cadastrado(s): ${activeMeds.joinToString(", ") { "${it.nome} ${it.dosagem}" }.")
+                appendLine("Para melhor eficácia do tratamento, mantenha os horários regulares com água e nunca interrompa medicamentos de uso contínuo sem falar com seu médico.")
+            }
+            appendLine()
+            append("ℹ️ *Esta explicação é apenas informativa e não substitui a orientação do seu médico ou farmacêutico.*")
         }
     }
 
@@ -559,9 +781,10 @@ class MediCareRepository @Inject constructor(
         SyncWorker.enqueueImmediateSync(context)
     }
 
-    suspend fun seedDefaultMedicationsIfEmpty(userId: String) {
+    suspend fun seedDefaultDataIfEmpty(userId: String) {
         val current = dao.getMedications(userId)
         if (current.isNotEmpty()) return
+
         val defaults = listOf(
             Medication(
                 id = "med-1",
@@ -574,7 +797,10 @@ class MediCareRepository @Inject constructor(
                 avisoEstoque = 5,
                 horarios = listOf("08:00", "20:00"),
                 observacoes = "Tomar com água pela manhã e à noite",
-                treatmentType = "continuous"
+                treatmentType = "continuous",
+                activeIngredient = "Losartana potássica",
+                manufacturer = "Medley",
+                importantForEmergency = true
             ),
             Medication(
                 id = "med-2",
@@ -585,12 +811,15 @@ class MediCareRepository @Inject constructor(
                 cor = "#f59e0b",
                 quantidade = 14,
                 avisoEstoque = 4,
-                horarios = listOf("08:00", "16:00", "23:59"),
-                observacoes = "Antibiótico de 7 dias",
+                horarios = listOf("08:00", "16:00", "22:00"),
+                observacoes = "Antibiótico de 7 dias — não interromper antes do fim",
                 treatmentType = "temporary",
                 startDate = LocalDate.now().minusDays(2).toString(),
                 endDate = LocalDate.now().plusDays(4).toString(),
-                treatmentDays = 7
+                treatmentDays = 7,
+                activeIngredient = "Amoxicilina tri-hidratada",
+                manufacturer = "EMS",
+                importantForEmergency = true
             ),
             Medication(
                 id = "med-3",
@@ -599,14 +828,72 @@ class MediCareRepository @Inject constructor(
                 dosagem = "1g",
                 unidade = "comprimido",
                 cor = "#8b5cf6",
-                quantidade = 10,
-                avisoEstoque = 3,
+                quantidade = 4,
+                avisoEstoque = 5,
                 horarios = emptyList(),
-                observacoes = "Apenas se houver dor ou febre",
-                treatmentType = "sos"
+                observacoes = "Apenas se houver dor ou febre acima de 37,8°C",
+                treatmentType = "sos",
+                activeIngredient = "Dipirona monoidratada",
+                manufacturer = "Sanofi",
+                importantForEmergency = false
             )
         )
         dao.upsertMedications(defaults.map { MedicationEntity.fromDomain(it, pendingSync = false, json = json) })
         alarmScheduler.scheduleAllActiveMedications(defaults)
+
+        // Sementes iniciais de Saúde, Contatos, Profissionais, Cuidadores e Estoque
+        dao.upsertAllergy(AllergyEntity("alg-1", userId, "Penicilina", "Urticária e vermelhidão", "Moderada"))
+        dao.upsertHealthCondition(HealthConditionEntity("cond-1", userId, "Hipertensão Arterial Sistêmica", "Controlada com Losartana 50mg"))
+        dao.upsertEmergencyContact(EmergencyContactEntity("ec-1", userId, "Carlos Eduardo Silva", "Filho", "(11) 99876-5432", "Mora a 10 minutos", 1))
+        dao.upsertEmergencyContact(EmergencyContactEntity("ec-2", userId, "Ana Paula Silva", "Filha", "(11) 99123-4567", "Plantão noturno", 2))
+        dao.upsertHealthcareProfessional(
+            HealthcareProfessionalEntity(
+                "prof-1", userId, "Dr. Roberto Almeida", "Cardiologista", "(11) 3210-9876", "CRM-SP 112233", "Hospital Sírio-Libanês", "Retorno semestral"
+            )
+        )
+        dao.upsertCaregiver(
+            CaregiverRelationshipEntity(
+                id = "cg-1",
+                patientId = userId,
+                caregiverId = "caregiver-carlos",
+                permissionLevel = "caregiver",
+                relationshipLabel = "Filho",
+                inviteEmail = "carlos.silva@email.com",
+                inviteToken = "tok8912medicare",
+                status = "active",
+                caregiverName = "Carlos Eduardo Silva",
+                createdAt = LocalDate.now().minusDays(20).toString()
+            )
+        )
+        dao.upsertStockMovement(
+            StockMovementEntity(
+                id = "sm-1",
+                medicationId = "med-1",
+                movementType = "purchase",
+                quantityBefore = 4,
+                quantityAfter = 34,
+                quantityDelta = 30,
+                purchasePrice = 18.90,
+                purchaseLocation = "Drogasil Paulista",
+                batch = "L2409A",
+                expirationDate = "2027-08-30",
+                notes = "Caixa com 30 comprimidos",
+                createdAt = LocalDate.now().minusDays(3).toString() + "T14:20:00Z"
+            )
+        )
+        dao.upsertHealthEvent(
+            HealthEventEntity(
+                id = "ev-1",
+                userId = userId,
+                type = "consulta",
+                title = "Retorno Cardiologia",
+                description = "Levar exames de sangue e mapa de pressão",
+                date = LocalDate.now().plusDays(4).toString(),
+                time = "14:30",
+                doctor = "Dr. Roberto Almeida",
+                location = "Clínica CardioVida — Sala 402",
+                createdAt = Instant.now().toString()
+            )
+        )
     }
 }
