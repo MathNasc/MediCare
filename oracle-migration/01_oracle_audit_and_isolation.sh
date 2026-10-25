@@ -75,8 +75,13 @@ if [ "$MODE" = "--prepare-isolated-db" ]; then
   echo " PREPARAÇÃO ISOLADA DO CONTAINER medicare_db (PORTA 5436)"
   echo "======================================================================"
   if [ -z "${MEDICARE_DB_PASSWORD:-}" ]; then
-    echo "ERRO: Defina a variável MEDICARE_DB_PASSWORD antes de executar --prepare-isolated-db"
-    exit 1
+    echo ""
+    read -rsp "Digite a senha que deseja para o banco medicare_app (sem caracteres vazios): " MEDICARE_DB_PASSWORD
+    echo ""
+    if [ -z "${MEDICARE_DB_PASSWORD}" ]; then
+      echo "ERRO: Nenhuma senha foi informada."
+      exit 1
+    fi
   fi
 
   DB_NAME="${MEDICARE_DB_NAME:-medicare_db}"
