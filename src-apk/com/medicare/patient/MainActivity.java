@@ -74,7 +74,8 @@ public class MainActivity extends Activity {
     private int cInfoBg = Color.parseColor("#DBEAFE");
     private int cPurple = Color.parseColor("#9333EA");
     private int cPurpleBg = Color.parseColor("#F3E8FF");
-    private boolean isLoggedIn = true;
+    private boolean isLoggedIn = false;
+    private int onboardingStep = 0;
     private boolean isRegisterMode = false;
     private boolean isDarkMode = false;
     private boolean isAccessibilityMode = false;
@@ -113,6 +114,14 @@ public class MainActivity extends Activity {
             }
             super.onBackPressed();
             return;
+        }
+        boolean onboardingCompleted = this.prefs.getBoolean("onboarding_completed", false);
+        if (!onboardingCompleted) {
+            if (this.onboardingStep > 0) {
+                this.onboardingStep--;
+                render();
+                return;
+            }
         }
         if ("profile".equals(this.activeTab) && !"main".equals(this.profileSubView)) {
             this.profileSubView = "main";
@@ -242,7 +251,7 @@ public class MainActivity extends Activity {
 
     private void loadOrInitData() {
         try {
-            this.isLoggedIn = this.prefs.getBoolean("is_logged_in", true);
+            this.isLoggedIn = this.prefs.getBoolean("is_logged_in", false);
             this.isDarkMode = this.prefs.getBoolean("dark_mode", false);
             this.isAccessibilityMode = this.prefs.getBoolean("accessibility_mode", false);
             this.lastSyncTimestamp = this.prefs.getString("last_sync_timestamp", "Sincronização automática ativa");
@@ -259,150 +268,48 @@ public class MainActivity extends Activity {
                 this.contacts = new JSONArray(this.prefs.getString("contacts", "[]"));
                 this.professionals = new JSONArray(this.prefs.getString("professionals", "[]"));
                 this.caregivers = new JSONArray(this.prefs.getString("caregivers", "[]"));
+
+                // Se houver resquício do perfil mockado antigo "maria.silva@email.com", limpar completamente
+                if ("maria.silva@email.com".equalsIgnoreCase(this.profile.optString("email", ""))) {
+                    this.isLoggedIn = false;
+                    this.profile = new JSONObject();
+                    this.meds = new JSONArray();
+                    this.doseLogs = new JSONArray();
+                    this.events = new JSONArray();
+                    this.calNotes = new JSONObject();
+                    this.stockMovements = new JSONArray();
+                    this.allergies = new JSONArray();
+                    this.conditions = new JSONArray();
+                    this.contacts = new JSONArray();
+                    this.professionals = new JSONArray();
+                    this.caregivers = new JSONArray();
+                    this.prefs.edit().putBoolean("is_logged_in", false).putBoolean("onboarding_completed", false).apply();
+                    saveAll();
+                }
             } else {
-                JSONObject jSONObject = new JSONObject();
-                this.profile = jSONObject;
-                jSONObject.put("id", "pac-001");
-                this.profile.put("nome", "Maria Silva");
-                this.profile.put("email", "maria.silva@email.com");
-                this.profile.put("data_nascimento", "1955-08-14");
-                this.profile.put("telefone", "(11) 98765-4321");
-                this.profile.put("cpf", "123.456.789-00");
-                this.profile.put("tipo_sanguineo", "O+");
-                this.profile.put("peso", "68");
-                this.profile.put("altura", "162");
-                this.profile.put("endereco", "Rua das Flores, 123 - São Paulo, SP");
-                this.profile.put("observacoes_medicas", "Hipertensão controlada e Diabetes Tipo 2.");
+                this.profile = new JSONObject();
+                this.profile.put("id", "");
+                this.profile.put("nome", "");
+                this.profile.put("email", "");
+                this.profile.put("data_nascimento", "");
+                this.profile.put("telefone", "");
+                this.profile.put("cpf", "");
+                this.profile.put("tipo_sanguineo", "");
+                this.profile.put("peso", "");
+                this.profile.put("altura", "");
+                this.profile.put("endereco", "");
+                this.profile.put("observacoes_medicas", "");
                 this.profile.put("alerta_sonoro", true);
                 this.meds = new JSONArray();
-                JSONObject jSONObject2 = new JSONObject();
-                jSONObject2.put("id", "med-1");
-                jSONObject2.put("nome", "Losartana Potássica");
-                jSONObject2.put("dosagem", "50mg");
-                jSONObject2.put("forma", "Comprimido");
-                jSONObject2.put("tipo_uso", "continuo");
-                jSONObject2.put("frequencia", "2x ao dia");
-                jSONObject2.put("horarios", new JSONArray().put("08:00").put("20:00"));
-                jSONObject2.put("estoque_atual", 28);
-                jSONObject2.put("estoque_minimo", 10);
-                jSONObject2.put("instrucoes", "Tomar com água, preferencialmente no mesmo horário.");
-                jSONObject2.put("data_inicio", "2025-01-10");
-                jSONObject2.put("data_fim", EMBEDDED_API_KEY);
-                this.meds.put(jSONObject2);
-                JSONObject jSONObject3 = new JSONObject();
-                jSONObject3.put("id", "med-2");
-                jSONObject3.put("nome", "Metformina");
-                jSONObject3.put("dosagem", "850mg");
-                jSONObject3.put("forma", "Comprimido");
-                jSONObject3.put("tipo_uso", "continuo");
-                jSONObject3.put("frequencia", "2x ao dia");
-                jSONObject3.put("horarios", new JSONArray().put("12:30").put("21:00"));
-                jSONObject3.put("estoque_atual", 45);
-                jSONObject3.put("estoque_minimo", 15);
-                jSONObject3.put("instrucoes", "Tomar logo após o almoço e jantar.");
-                jSONObject3.put("data_inicio", "2025-01-15");
-                jSONObject3.put("data_fim", EMBEDDED_API_KEY);
-                this.meds.put(jSONObject3);
-                JSONObject jSONObject4 = new JSONObject();
-                jSONObject4.put("id", "med-3");
-                jSONObject4.put("nome", "Amoxicilina");
-                jSONObject4.put("dosagem", "500mg");
-                jSONObject4.put("forma", "Cápsula");
-                jSONObject4.put("tipo_uso", "temporario");
-                jSONObject4.put("frequencia", "3x ao dia (8/8h)");
-                jSONObject4.put("horarios", new JSONArray().put("07:00").put("15:00").put("23:00"));
-                jSONObject4.put("estoque_atual", 6);
-                jSONObject4.put("estoque_minimo", 8);
-                jSONObject4.put("instrucoes", "Completar os 7 dias de antibiótico.");
-                jSONObject4.put("data_inicio", "2025-05-01");
-                jSONObject4.put("data_fim", "2026-12-31");
-                this.meds.put(jSONObject4);
-                JSONObject jSONObject5 = new JSONObject();
-                jSONObject5.put("id", "med-4");
-                jSONObject5.put("nome", "Dipirona Monoidratada");
-                jSONObject5.put("dosagem", "500mg");
-                jSONObject5.put("forma", "Gotas");
-                jSONObject5.put("tipo_uso", "sos");
-                jSONObject5.put("frequencia", "Se necessário");
-                jSONObject5.put("horarios", new JSONArray());
-                jSONObject5.put("estoque_atual", 2);
-                jSONObject5.put("estoque_minimo", 1);
-                jSONObject5.put("instrucoes", "30 gotas em caso de dor de cabeça ou febre (>37.8°C).");
-                jSONObject5.put("data_inicio", "2025-01-01");
-                jSONObject5.put("data_fim", EMBEDDED_API_KEY);
-                this.meds.put(jSONObject5);
                 this.doseLogs = new JSONArray();
-                String str = todayIso();
-                JSONObject jSONObject6 = new JSONObject();
-                jSONObject6.put("id", "log-1");
-                jSONObject6.put("med_id", "med-1");
-                jSONObject6.put("med_nome", "Losartana Potássica 50mg");
-                jSONObject6.put("data", str);
-                jSONObject6.put("horario", "08:00");
-                jSONObject6.put("status", "tomado");
-                jSONObject6.put("hora_real", "08:04");
-                this.doseLogs.put(jSONObject6);
-                JSONObject jSONObject7 = new JSONObject();
-                jSONObject7.put("id", "log-2");
-                jSONObject7.put("med_id", "med-3");
-                jSONObject7.put("med_nome", "Amoxicilina 500mg");
-                jSONObject7.put("data", str);
-                jSONObject7.put("horario", "07:00");
-                jSONObject7.put("status", "tomado");
-                jSONObject7.put("hora_real", "07:02");
-                this.doseLogs.put(jSONObject7);
                 this.events = new JSONArray();
-                JSONObject jSONObject8 = new JSONObject();
-                jSONObject8.put("id", "ev-1");
-                jSONObject8.put("titulo", "Consulta Cardiologista - Dr. Roberto");
-                jSONObject8.put("tipo", "consulta");
-                jSONObject8.put("data", str);
-                jSONObject8.put("hora", "14:30");
-                jSONObject8.put("local", "Clínica VidaCor - Sala 304");
-                jSONObject8.put("notas", "Levar exames de sangue e aferições da semana.");
-                jSONObject8.put("concluido", false);
-                this.events.put(jSONObject8);
-                JSONObject jSONObject9 = new JSONObject();
-                jSONObject9.put("id", "ev-2");
-                jSONObject9.put("titulo", "Exame Hemograma e Glicemia");
-                jSONObject9.put("tipo", "exame");
-                jSONObject9.put("data", str);
-                jSONObject9.put("hora", "09:00");
-                jSONObject9.put("local", "Laboratório Central");
-                jSONObject9.put("notas", "Jejum de 8 horas concluído.");
-                jSONObject9.put("concluido", true);
-                this.events.put(jSONObject9);
-                JSONObject jSONObject10 = new JSONObject();
-                this.calNotes = jSONObject10;
-                jSONObject10.put(str, "Pressão pela manhã: 12/8 mmHg. Sem tonturas hoje.");
+                this.calNotes = new JSONObject();
                 this.stockMovements = new JSONArray();
-                JSONObject jSONObject11 = new JSONObject();
-                jSONObject11.put("id", "sm-1");
-                jSONObject11.put("med_nome", "Losartana Potássica");
-                jSONObject11.put("tipo", "entrada");
-                jSONObject11.put("qtd", 30);
-                jSONObject11.put("data", str + " 08:00");
-                jSONObject11.put("motivo", "Compra na farmácia");
-                this.stockMovements.put(jSONObject11);
-                JSONArray jSONArray = new JSONArray();
-                this.allergies = jSONArray;
-                jSONArray.put(new JSONObject().put("id", "al-1").put("substancia", "Penicilina").put("reacao", "Urticária e falta de ar").put("severidade", "Alta"));
-                this.allergies.put(new JSONObject().put("id", "al-2").put("substancia", "Sulfa").put("reacao", "Vermelhidão na pele").put("severidade", "Média"));
-                JSONArray jSONArray2 = new JSONArray();
-                this.conditions = jSONArray2;
-                jSONArray2.put(new JSONObject().put("id", "co-1").put("nome", "Hipertensão Arterial Sistêmica").put("desde", "2018").put("status", "Em tratamento"));
-                this.conditions.put(new JSONObject().put("id", "co-2").put("nome", "Diabetes Mellitus Tipo 2").put("desde", "2020").put("status", "Controlada"));
-                JSONArray jSONArray3 = new JSONArray();
-                this.contacts = jSONArray3;
-                jSONArray3.put(new JSONObject().put("id", "ct-1").put("nome", "Ana Silva").put("relacao", "Filha (Cuidadora Principal)").put("telefone", "11999887766").put("principal", true));
-                this.contacts.put(new JSONObject().put("id", "ct-2").put("nome", "Carlos Silva").put("relacao", "Filho").put("telefone", "11988776655").put("principal", false));
-                JSONArray jSONArray4 = new JSONArray();
-                this.professionals = jSONArray4;
-                jSONArray4.put(new JSONObject().put("id", "pr-1").put("nome", "Dr. Roberto Almeida").put("especialidade", "Cardiologista").put("crm", "CRM-SP 94821").put("telefone", "1132224455").put("clinica", "Clínica VidaCor"));
-                this.professionals.put(new JSONObject().put("id", "pr-2").put("nome", "Dra. Helena Costa").put("especialidade", "Endocrinologista").put("crm", "CRM-SP 112093").put("telefone", "1133445566").put("clinica", "Instituto Saúde Plena"));
-                JSONArray jSONArray5 = new JSONArray();
-                this.caregivers = jSONArray5;
-                jSONArray5.put(new JSONObject().put("id", "cg-1").put("nome", "Ana Silva").put("email", "ana.silva@email.com").put("nivel", "Acesso Total (Admin)").put("status", "Ativo"));
+                this.allergies = new JSONArray();
+                this.conditions = new JSONArray();
+                this.contacts = new JSONArray();
+                this.professionals = new JSONArray();
+                this.caregivers = new JSONArray();
                 saveAll();
             }
         } catch (Exception e) {
@@ -421,6 +328,11 @@ public class MainActivity extends Activity {
         this.rootContainer.setBackgroundColor(this.cBgMain);
         if (!this.isLoggedIn) {
             this.rootContainer.addView(buildLoginView());
+            return;
+        }
+        boolean onboardingCompleted = this.prefs.getBoolean("onboarding_completed", false);
+        if (!onboardingCompleted) {
+            this.rootContainer.addView(buildOnboardingView());
             return;
         }
         LinearLayout linearLayout = new LinearLayout(this);
@@ -578,6 +490,295 @@ public class MainActivity extends Activity {
         switchTab(strArr[0]);
     }
 
+    private View buildOnboardingView() {
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(true);
+        scrollView.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(1);
+        container.setPadding(dp(24), dp(36), dp(24), dp(36));
+        container.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+
+        TextView stepBadge = new TextView(this);
+        stepBadge.setText("PASSO " + (this.onboardingStep + 1) + " DE 5");
+        stepBadge.setTextColor(this.cPrimary);
+        stepBadge.setTextSize(sp(13.0f));
+        stepBadge.setTypeface(null, 1);
+        stepBadge.setPadding(0, 0, 0, dp(8));
+        container.addView(stepBadge);
+
+        TextView titleView = new TextView(this);
+        titleView.setTextColor(this.cTextMain);
+        titleView.setTextSize(sp(22.0f));
+        titleView.setTypeface(null, 1);
+        titleView.setPadding(0, 0, 0, dp(6));
+        container.addView(titleView);
+
+        TextView subtitleView = new TextView(this);
+        subtitleView.setTextColor(this.cTextMuted);
+        subtitleView.setTextSize(sp(14.0f));
+        subtitleView.setPadding(0, 0, 0, dp(24));
+        container.addView(subtitleView);
+
+        if (this.onboardingStep == 0) {
+            titleView.setText("Como você vai usar o app?");
+            subtitleView.setText("Escolha o seu perfil para personalizarmos a sua experiência.");
+
+            container.addView(buildRoleCard("⚙️ Independente", "Vou gerenciar meus próprios medicamentos e horários.", "independente"));
+            container.addView(buildRoleCard("🧑 Paciente", "Alguém cuida de mim, mas quero acompanhar no meu celular.", "paciente"));
+            container.addView(buildRoleCard("🤝 Cuidador", "Vou gerenciar a medicação de outra pessoa.", "cuidador"));
+        } else if (this.onboardingStep == 1) {
+            titleView.setText("Seus Dados Básicos");
+            subtitleView.setText("Configure seu perfil para o Cartão de Emergência. Pule o que não quiser preencher agora.");
+
+            final EditText nomeInput = createInput("Nome Completo", this.profile.optString("nome", ""));
+            container.addView(nomeInput);
+
+            final EditText dobInput = createInput("Data de Nascimento (Ex: 15/08/1965)", this.profile.optString("data_nascimento", ""));
+            container.addView(dobInput);
+
+            final EditText sangueInput = createInput("Tipo Sanguíneo (Ex: O+, A+, B+)", this.profile.optString("tipo_sanguineo", ""));
+            container.addView(sangueInput);
+
+            LinearLayout btnRow = new LinearLayout(this);
+            btnRow.setOrientation(0);
+            btnRow.setPadding(0, dp(20), 0, 0);
+
+            TextView skipBtn = createButton("Pular", this.cSurface, this.cTextMuted);
+            skipBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            skipBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    onboardingStep = 2;
+                    render();
+                }
+            });
+            btnRow.addView(skipBtn);
+
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(dp(12), 1));
+            btnRow.addView(spacer);
+
+            TextView nextBtn = createButton("Continuar", this.cPrimary, -1);
+            nextBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 2.0f));
+            nextBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String n = nomeInput.getText().toString().trim();
+                    String d = dobInput.getText().toString().trim();
+                    String s = sangueInput.getText().toString().trim();
+                    if (!n.isEmpty()) try { MainActivity.this.profile.put("nome", n); } catch (Exception ignored) {}
+                    if (!d.isEmpty()) try { MainActivity.this.profile.put("data_nascimento", d); } catch (Exception ignored) {}
+                    if (!s.isEmpty()) try { MainActivity.this.profile.put("tipo_sanguineo", s); } catch (Exception ignored) {}
+                    MainActivity.this.saveAll();
+                    onboardingStep = 2;
+                    render();
+                }
+            });
+            btnRow.addView(nextBtn);
+            container.addView(btnRow);
+        } else if (this.onboardingStep == 2) {
+            titleView.setText("Contato de Emergência");
+            subtitleView.setText("Quem deve ser avisado em caso de emergência?");
+
+            final EditText contactName = createInput("Nome do Contato (Ex: Carlos da Silva)", "");
+            container.addView(contactName);
+
+            final EditText contactRel = createInput("Parentesco (Ex: Filho, Cônjuge)", "");
+            container.addView(contactRel);
+
+            final EditText contactPhone = createInput("Telefone (Ex: 11988887777)", "");
+            contactPhone.setInputType(3);
+            container.addView(contactPhone);
+
+            LinearLayout btnRow = new LinearLayout(this);
+            btnRow.setOrientation(0);
+            btnRow.setPadding(0, dp(20), 0, 0);
+
+            TextView skipBtn = createButton("Pular", this.cSurface, this.cTextMuted);
+            skipBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            skipBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    onboardingStep = 3;
+                    render();
+                }
+            });
+            btnRow.addView(skipBtn);
+
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(dp(12), 1));
+            btnRow.addView(spacer);
+
+            TextView nextBtn = createButton("Continuar", this.cPrimary, -1);
+            nextBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 2.0f));
+            nextBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String cn = contactName.getText().toString().trim();
+                    String cr = contactRel.getText().toString().trim();
+                    String cp = contactPhone.getText().toString().trim();
+                    if (!cn.isEmpty() && !cp.isEmpty()) {
+                        try {
+                            JSONObject contactObj = new JSONObject();
+                            contactObj.put("id", "ct-" + System.currentTimeMillis());
+                            contactObj.put("nome", cn);
+                            contactObj.put("relacao", cr.isEmpty() ? "Contato" : cr);
+                            contactObj.put("telefone", cp);
+                            contactObj.put("principal", true);
+                            MainActivity.this.contacts.put(contactObj);
+                            MainActivity.this.saveAll();
+                        } catch (Exception ignored) {}
+                    }
+                    onboardingStep = 3;
+                    render();
+                }
+            });
+            btnRow.addView(nextBtn);
+            container.addView(btnRow);
+        } else if (this.onboardingStep == 3) {
+            titleView.setText("Profissionais de Saúde");
+            subtitleView.setText("Algum médico principal que acompanha você?");
+
+            final EditText docName = createInput("Nome do Médico (Ex: Dr. Carlos)", "");
+            container.addView(docName);
+
+            final EditText docSpec = createInput("Especialidade (Ex: Cardiologista)", "");
+            container.addView(docSpec);
+
+            final EditText docPhone = createInput("Telefone do Consultório", "");
+            docPhone.setInputType(3);
+            container.addView(docPhone);
+
+            LinearLayout btnRow = new LinearLayout(this);
+            btnRow.setOrientation(0);
+            btnRow.setPadding(0, dp(20), 0, 0);
+
+            TextView skipBtn = createButton("Pular", this.cSurface, this.cTextMuted);
+            skipBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            skipBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    onboardingStep = 4;
+                    render();
+                }
+            });
+            btnRow.addView(skipBtn);
+
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(dp(12), 1));
+            btnRow.addView(spacer);
+
+            TextView nextBtn = createButton("Continuar", this.cPrimary, -1);
+            nextBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 2.0f));
+            nextBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String dn = docName.getText().toString().trim();
+                    String ds = docSpec.getText().toString().trim();
+                    String dp = docPhone.getText().toString().trim();
+                    if (!dn.isEmpty()) {
+                        try {
+                            JSONObject proObj = new JSONObject();
+                            proObj.put("id", "pr-" + System.currentTimeMillis());
+                            proObj.put("nome", dn);
+                            proObj.put("especialidade", ds.isEmpty() ? "Clínico Geral" : ds);
+                            proObj.put("telefone", dp);
+                            proObj.put("clinica", "");
+                            MainActivity.this.professionals.put(proObj);
+                            MainActivity.this.saveAll();
+                        } catch (Exception ignored) {}
+                    }
+                    onboardingStep = 4;
+                    render();
+                }
+            });
+            btnRow.addView(nextBtn);
+            container.addView(btnRow);
+        } else if (this.onboardingStep == 4) {
+            titleView.setText("Seus Medicamentos");
+            subtitleView.setText("Para finalizar, você pode cadastrar seu primeiro medicamento agora ou ir direto para o aplicativo.");
+
+            TextView addMedBtn = createButton("💊 Adicionar Primeiro Medicamento", this.cPrimary, -1);
+            addMedBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
+                    MainActivity.this.saveAll();
+                    MainActivity.this.activeTab = "meds";
+                    MainActivity.this.render();
+                    MainActivity.this.showMedModal(null, -1);
+                }
+            });
+            container.addView(addMedBtn);
+
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(14)));
+            container.addView(spacer);
+
+            TextView finishBtn = createButton("Ir para o aplicativo (Pular)", this.cSurface, this.cTextMain);
+            finishBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
+                    MainActivity.this.saveAll();
+                    MainActivity.this.render();
+                }
+            });
+            container.addView(finishBtn);
+        }
+
+        scrollView.addView(container);
+        return scrollView;
+    }
+
+    private View buildRoleCard(final String title, final String desc, final String role) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(14);
+        card.setLayoutParams(lp);
+        card.setClickable(true);
+        card.setFocusable(true);
+
+        TextView tView = new TextView(this);
+        tView.setText(title);
+        tView.setTextColor(this.cTextMain);
+        tView.setTextSize(sp(16.0f));
+        tView.setTypeface(null, 1);
+        card.addView(tView);
+
+        TextView dView = new TextView(this);
+        dView.setText(desc);
+        dView.setTextColor(this.cTextMuted);
+        dView.setTextSize(sp(13.0f));
+        dView.setPadding(0, dp(4), 0, 0);
+        card.addView(dView);
+
+        card.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    MainActivity.this.profile.put("role", role);
+                    MainActivity.this.saveAll();
+                } catch (Exception ignored) {}
+                if ("cuidador".equals(role)) {
+                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
+                    MainActivity.this.saveAll();
+                    MainActivity.this.render();
+                } else {
+                    onboardingStep = 1;
+                    render();
+                }
+            }
+        });
+
+        return card;
+    }
+
     private View buildLoginView() {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
@@ -602,7 +803,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.4.0 • Atualizado");
+        versionBadge.setText("Versão 2.5.0 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);

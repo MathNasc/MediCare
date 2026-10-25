@@ -28,16 +28,26 @@ export const ProfileDB = {
     if (!isDatabaseConfigured || !databaseClient) {
       const stored = getLocal('mc_local_profile_' + userId, null);
       if (stored) return stored;
-      return {
+      let userObj = null;
+      if (typeof window !== 'undefined') {
+        try { userObj = JSON.parse(localStorage.getItem('mc_local_user') || 'null'); } catch (e) {}
+      }
+      const initialProfile = {
         id: userId,
-        nome: 'Usuário MediCare',
-        email: 'usuario@medicare.local',
-        tipo_sanguineo: 'O+',
-        role: 'independente',
-        emergency_settings: { onboarding_completed: true },
+        nome: userObj?.nome || '',
+        email: userObj?.email || '',
+        tipo_sanguineo: '',
+        role: userObj?.role || 'independente',
+        emergency_settings: { onboarding_completed: false },
       };
+      setLocal('mc_local_profile_' + userId, initialProfile);
+      return initialProfile;
     }
     const { data } = await databaseClient.from('profiles').select('*').eq('id', userId).single();
+    if (data && (!data.emergency_settings || data.emergency_settings.onboarding_completed === undefined)) {
+      // Garantir flag de onboarding no objeto retornado
+      data.emergency_settings = { ...(data.emergency_settings || {}), onboarding_completed: false };
+    }
     return data;
   },
   async updateProfile(userId, payload) {

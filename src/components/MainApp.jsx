@@ -218,7 +218,8 @@ function InnerApp() {
   const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
-    if (user?.id && user.role !== 'caregiver') {
+    if (user?.id) {
+      setProfileLoading(true);
       import('@/lib/profileDb').then(m => m.ProfileDB.getProfile(user.id)).then(p => {
         setProfile(p);
         setProfileLoading(false);
@@ -227,6 +228,7 @@ function InnerApp() {
         setProfileLoading(false);
       });
     } else {
+      setProfile(null);
       setProfileLoading(false);
     }
   }, [user]);
@@ -396,9 +398,19 @@ function InnerApp() {
 
 
     const screenProps = { T, scale };
+ 
+  if (profileLoading) {
+    return (
+      <div style={{ minHeight: '100vh', background: T.bg0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 44, marginBottom: 12 }}>💊</div>
+          <p style={{ color: T.sub, fontSize: 15 }}>Carregando perfil...</p>
+        </div>
+      </div>
+    );
+  }
 
-  // Note: user.role === 'caregiver' used to skip onboarding, but now we'll allow it so they can pick their role.
-  // Wait, if they pick caregiver, handleFinish is called, onboarding_completed is true.
+  // Se o perfil ainda não concluiu o onboarding, exibe o fluxo guiado inicial
   if (profile && !profile?.emergency_settings?.onboarding_completed) {
     return (
       <OnboardingWizard 

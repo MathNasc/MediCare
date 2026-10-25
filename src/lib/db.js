@@ -20,65 +20,15 @@ export function uid() {
 }
 
 // ─── In-Memory / Local Storage Fallbacks (When database is not configured) ────
-const DEFAULT_MEDS = [
-  {
-    id: 'med-1',
-    user_id: 'default',
-    nome: 'Paracetamol',
-    dosagem: '750mg',
-    tipo: 'comprimido',
-    instrucoes: 'Tomar com água após o café',
-    quantidade: 20,
-    aviso_estoque: 5,
-    horarios: ['08:00', '20:00'],
-    dias_semana: [0, 1, 2, 3, 4, 5, 6],
-    status: 'ativo',
-    ativo: true,
-    treatment_type: 'continuous',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'med-2',
-    user_id: 'default',
-    nome: 'Losartana Potássica',
-    dosagem: '50mg',
-    tipo: 'comprimido',
-    instrucoes: 'Em jejum pela manhã',
-    quantidade: 14,
-    aviso_estoque: 5,
-    horarios: ['09:00'],
-    dias_semana: [0, 1, 2, 3, 4, 5, 6],
-    status: 'ativo',
-    ativo: true,
-    treatment_type: 'continuous',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'med-3',
-    user_id: 'default',
-    nome: 'Vitamina D',
-    dosagem: '2.000 UI',
-    tipo: 'gotas',
-    instrucoes: '1 cápsula ao almoço',
-    quantidade: 30,
-    aviso_estoque: 7,
-    horarios: ['12:30'],
-    dias_semana: [0, 1, 2, 3, 4, 5, 6],
-    status: 'ativo',
-    ativo: true,
-    treatment_type: 'continuous',
-    created_at: new Date().toISOString(),
-  },
-];
+const DEFAULT_MEDS = [];
 
 function getLocalMeds() {
-  if (typeof window === 'undefined') return DEFAULT_MEDS;
+  if (typeof window === 'undefined') return [];
   const raw = localStorage.getItem('mc_local_meds');
   if (!raw) {
-    localStorage.setItem('mc_local_meds', JSON.stringify(DEFAULT_MEDS));
-    return DEFAULT_MEDS;
+    return [];
   }
-  try { return JSON.parse(raw) || DEFAULT_MEDS; } catch { return DEFAULT_MEDS; }
+  try { return JSON.parse(raw) || []; } catch { return []; }
 }
 
 function setLocalMeds(meds) {
@@ -182,16 +132,7 @@ export const AuthDB = {
       if (stored) {
         try { return JSON.parse(stored); } catch (e) {}
       }
-      // Demo auto-user for instant preview in AI Studio
-      const defaultUser = {
-        id: 'user-local-preview',
-        nome: 'Usuário MediCare',
-        email: 'usuario@medicare.local',
-        role: 'independente',
-        created_at: new Date().toISOString()
-      };
-      localStorage.setItem('mc_local_user', JSON.stringify(defaultUser));
-      return defaultUser;
+      return null;
     }
     try {
       const session = await authService.getSession();
