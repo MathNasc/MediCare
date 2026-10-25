@@ -26,21 +26,32 @@ fi
 # 2. Configura .env.production se não existir
 ENV_PROD="${PROJECT_ROOT}/.env.production"
 if [ ! -f "$ENV_PROD" ]; then
-  echo "Criando .env.production configurado para o banco isolado (porta 5436)..."
+  echo "Arquivo .env.production não encontrado. Configurando ambiente de produção..."
+
+  if [ -z "${MEDICARE_DB_PASSWORD:-}" ]; then
+    read -rsp "Informe a senha do usuário 'medicare_app' no banco da Oracle: " MEDICARE_DB_PASSWORD
+    echo ""
+    if [ -z "$MEDICARE_DB_PASSWORD" ]; then
+      echo "ERRO: A senha não pode ser vazia."
+      exit 1
+    fi
+  fi
+
   cat > "$ENV_PROD" <<EOF
 PORT=3009
 NODE_ENV=production
-DATABASE_URL=postgresql://medicare_app:NewTime!123ZaZd8982@127.0.0.1:5436/medicare_db
+DATABASE_URL=postgresql://medicare_app:${MEDICARE_DB_PASSWORD}@127.0.0.1:5436/medicare_db
 ORACLE_PG_HOST=127.0.0.1
 ORACLE_PG_PORT=5436
 ORACLE_PG_DATABASE=medicare_db
 ORACLE_PG_USER=medicare_app
-ORACLE_PG_PASSWORD=NewTime!123ZaZd8982
+ORACLE_PG_PASSWORD=${MEDICARE_DB_PASSWORD}
 ORACLE_PG_SSL=false
 NEXT_PUBLIC_APP_URL=http://144.22.160.191:3009
 BACKEND_API_KEY=medicare_mobile_client
 EOF
-  echo "✓ Arquivo .env.production gerado."
+  chmod 600 "$ENV_PROD"
+  echo "✓ Arquivo .env.production gerado com permissões restritas (chmod 600)."
 fi
 
 # 3. Compila a aplicação Next.js para produção
