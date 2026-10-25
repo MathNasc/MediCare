@@ -12,10 +12,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT_DIR"
 
-echo "=== [1/5] Preparando arquivos e ícones para o APK ==="
+echo "=== [1/6] Verificando dependências do Android SDK / JAR ==="
+if [ ! -f "/tmp/android-33.jar" ]; then
+  echo "Baixando android-33.jar para compilação..."
+  curl -sSL -o /tmp/android-33.jar https://raw.githubusercontent.com/Sable/android-platforms/master/android-33/android.jar
+fi
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+echo "=== [2/6] Compilando código-fonte Java atualizado (src-apk) ==="
+mkdir -p "$TMP_DIR/classes"
+javac -source 8 -target 8 -cp /tmp/android-33.jar src-apk/com/medicare/patient/*.java -d "$TMP_DIR/classes"
+
+echo "=== [3/6] Gerando bytecode Dalvik (classes.dex) com dalvik-exchange ==="
+dalvik-exchange --dex --output="$TMP_DIR/classes.dex" "$TMP_DIR/classes"
+
+echo "=== [4/6] Empacotando classes.dex e ícones oficiais no APK ==="
 python3 -c "
 import zipfile
 
@@ -26,8 +39,11 @@ with zipfile.ZipFile('medicare-patient.apk', 'r') as zin:
             if item.filename.startswith('META-INF/'):
                 continue
             
+            # Injeta o novo classes.dex compilado
+            if item.filename == 'classes.dex':
+                zout.write('$TMP_DIR/classes.dex', 'classes.dex')
             # Injeta os ícones oficiais MediCare em alta definição
-            if item.filename in ['res/mipmap-mdpi-v4/ic_launcher.png', 'res/mipmap-mdpi-v4/ic_launcher_round.png']:
+            elif item.filename in ['res/mipmap-mdpi-v4/ic_launcher.png', 'res/mipmap-mdpi-v4/ic_launcher_round.png']:
                 zout.write('public/icon-72.png', item.filename)
             elif item.filename in ['res/mipmap-hdpi-v4/ic_launcher.png', 'res/mipmap-hdpi-v4/ic_launcher_round.png']:
                 zout.write('public/icon-72.png', item.filename)
@@ -60,6 +76,7 @@ apksigner sign \
   --ks-pass pass:medicare123 \
   --ks-key-alias medicare \
   --key-pass pass:medicare123 \
+  --min-sdk-version 21 \
   --v1-signing-enabled true \
   --v2-signing-enabled true \
   --v3-signing-enabled true \

@@ -11,8 +11,12 @@ out/
 !.env.example
 *.keystore
 *.jks
+*.idsig
+*.pem
+*.key
 backups/
 public/assets/aistudio/Paste_*
+secrets/
 
 # OS
 .DS_Store
