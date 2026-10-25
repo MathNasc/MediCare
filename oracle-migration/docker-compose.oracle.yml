@@ -1,0 +1,61 @@
+# ==============================================================================
+# MediCare — Stack Docker 100% Isolada para o Servidor Oracle (mathnasc-dev-srv)
+# ==============================================================================
+# Segue exatamente o padrão dos projetos irmãos no servidor:
+# - securityroute_db   (porta 5435)
+# - language_reader_db (porta 5434)
+# - vizinhanca_app     (porta 3008)
+#
+# Portas exclusivas do MediCare (ZERO conflito):
+# - medicare_db  -> 127.0.0.1:5436 -> 5432/tcp (postgres:16-alpine já em cache local)
+# - medicare_app -> 0.0.0.0:3009   -> 3000/tcp (Backend compartilhado Node/Next.js)
+#
+# IMPORTANTE: Nunca execute comandos fora deste arquivo (-p medicare -f ...).
+# ==============================================================================
+
+name: medicare
+
+services:
+  medicare_db:
+    image: postgres:16-alpine
+    container_name: medicare_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ORACLE_PG_DATABASE:-medicare_db}
+      POSTGRES_USER: ${ORACLE_PG_USER:-medicare_app}
+      POSTGRES_PASSWORD: ${ORACLE_PG_PASSWORD:?Defina ORACLE_PG_PASSWORD no arquivo .env.oracle}
+      TZ: America/Sao_Paulo
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=64MB"
+      - "-c"
+      - "max_connections=50"
+      - "-c"
+      - "work_mem=4MB"
+    ports:
+      - "127.0.0.1:5436:5432"
+    volumes:
+      - medicare_pgdata:/var/lib/postgresql/data
+      - ./02_schema_oracle_standalone.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.50"
+    networks:
+      - medicare_net
+
+volumes:
+  medicare_pgdata:
+    name: medicare_pgdata
+
+networks:
+  medicare_net:
+    name: medicare_net
+    driver: bridge

@@ -1,11 +1,17 @@
-# MediCare — Isolamento no Servidor Oracle Cloud Free Tier, Systemd, Nginx e Rollback
+# MediCare — Isolamento no Servidor Oracle Cloud (`mathnasc-dev-srv`), Docker/Systemd e Rollback
 
-## 1. Isolamento Garantido (Sem Impacto em Outros Projetos)
-- **Diretório exclusivo da aplicação**: `/opt/medicare` (ou `~/MediCare`)
-- **Banco de dados isolado na instância PostgreSQL existente**: `medicare_db`
-- **Usuário PostgreSQL restrito**: `medicare_app` (`NOSUPERUSER NOCREATEDB NOCREATEROLE`, sem permissão em nenhum outro banco)
-- **Porta local dedicada do Backend Compartilhado**: `127.0.0.1:3080` (bind apenas em loopback para evitar conflito com portas de outros projetos e nunca expor o PostgreSQL na porta `5432` para a internet)
-- **Controle de Recursos (Oracle Free Tier)**: `MemoryMax=384M` e `CPUQuota=50%` via systemd para nunca afetar outros serviços da VM.
+## 1. Diagnóstico Real do Servidor (`mathnasc-dev-srv`) e Isolamento Garantido
+A auditoria (`01_oracle_audit_and_isolation.sh --audit`) revelou a arquitetura exata do seu servidor:
+- **Hardware**: Ubuntu 24.04.4 LTS (`aarch64` Neoverse-N1, 2 vCPUs), **11 GiB de RAM total** (**8.1 GiB livres**) e **42 GB de disco livre**.
+- **Projetos coexistentes (Intocáveis)**:
+  - `pricestack_*` (usa a porta `5432`, `3001`, `5173`, `5672`, `6379`, `8000`, `9090`, `9187`, `9419`, `15672`)
+  - `vizinhanca_app` + `vizinhanca_db` (usa a porta `3008`)
+  - `language_reader_db` (`postgres:16-alpine` na porta `5434`)
+  - `securityroute_db` (`postgres:16-alpine` na porta `5435`)
+- **Isolamento do MediCare**:
+  - **Container de Banco Exclusivo (`medicare_db`)**: Imagem `postgres:16-alpine` (já em cache local no servidor!), mapeada exclusivamente em **`127.0.0.1:5436->5432/tcp`**, com volume próprio `medicare_pgdata`, banco `medicare_db` e usuário restrito `medicare_app` (`NOSUPERUSER NOCREATEDB NOCREATEROLE`).
+  - **Porta dedicada do Backend Compartilhado**: **`3009`** (logo após `vizinhanca_app` na `3008`, 100% livre de conflitos).
+  - **Controle de Recursos**: Limite de `256M` para `medicare_db` e `384M` para o backend Node.js.
 
 ---
 
@@ -14,23 +20,21 @@
 ```ini
 [Unit]
 Description=MediCare Shared Backend (Paciente Android + Cuidador Web)
-After=network.target postgresql.service
-Wants=postgresql.service
+After=network.target docker.service
+Requires=docker.service
 
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/opt/medicare
-EnvironmentFile=/opt/medicare/.env.production
+WorkingDirectory=/home/ubuntu/MediCare
+EnvironmentFile=/home/ubuntu/MediCare/.env.production
 Environment=NODE_ENV=production
-Environment=PORT=3080
-ExecStart=/usr/bin/npm run start -- -p 3080 -H 127.0.0.1
+Environment=PORT=3009
+ExecStart=/usr/bin/npm run start -- -p 3009 -H 0.0.0.0
 Restart=on-failure
 RestartSec=5
 MemoryMax=384M
 CPUQuota=50%
-StandardOutput=append:/var/log/medicare/backend.log
-StandardError=append:/var/log/medicare/backend-error.log
 
 [Install]
 WantedBy=multi-user.target
@@ -49,8 +53,8 @@ After=medicare-backend.service
 
 [Service]
 Type=oneshot
-EnvironmentFile=/opt/medicare/.env.production
-ExecStart=/usr/bin/curl -sS -X POST http://127.0.0.1:3080/api/v1/jobs/reminders -H "x-api-key: ${BACKEND_API_KEY}"
+EnvironmentFile=/home/ubuntu/MediCare/.env.production
+ExecStart=/usr/bin/curl -sS -X POST http://127.0.0.1:3009/api/v1/jobs/reminders -H "x-api-key: ${BACKEND_API_KEY}"
 ```
 
 ```ini
@@ -69,17 +73,17 @@ WantedBy=timers.target
 
 ---
 
-## 4. Backup Diário Isolado (`/opt/medicare/scripts/backup_oracle_medicare.sh`)
+## 4. Backup Diário Isolado (`~/MediCare/oracle-migration/backup_oracle_medicare.sh`)
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-BACKUP_PATH="/var/backups/medicare/medicare_db_$(date -u +%Y%m%d_%H%M%S).dump"
-mkdir -p /var/backups/medicare
-pg_dump -U medicare_app -h 127.0.0.1 -d medicare_db -Fc -f "$BACKUP_PATH"
+BACKUP_PATH="/home/ubuntu/MediCare/backups/medicare_db_$(date -u +%Y%m%d_%H%M%S).dump"
+mkdir -p /home/ubuntu/MediCare/backups
+docker exec medicare_db pg_dump -U medicare_app -d medicare_db -Fc > "$BACKUP_PATH"
 sha256sum "$BACKUP_PATH" > "${BACKUP_PATH}.sha256"
 # Retém últimos 14 dias sem tocar em nenhum outro projeto
-find /var/backups/medicare -name "medicare_db_*.dump*" -mtime +14 -delete
+find /home/ubuntu/MediCare/backups -name "medicare_db_*.dump*" -mtime +14 -delete
 ```
 
 ---

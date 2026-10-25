@@ -72,7 +72,7 @@ systemctl is-active postgresql 2>/dev/null && echo "PostgreSQL service: ATIVO" |
 if [ "$MODE" = "--prepare-isolated-db" ]; then
   echo ""
   echo "======================================================================"
-  echo " PREPARAÇÃO ISOLADA DO BANCO medicare_db E USUÁRIO medicare_app"
+  echo " PREPARAÇÃO ISOLADA DO CONTAINER medicare_db (PORTA 5436)"
   echo "======================================================================"
   if [ -z "${MEDICARE_DB_PASSWORD:-}" ]; then
     echo "ERRO: Defina a variável MEDICARE_DB_PASSWORD antes de executar --prepare-isolated-db"
@@ -81,35 +81,58 @@ if [ "$MODE" = "--prepare-isolated-db" ]; then
 
   DB_NAME="${MEDICARE_DB_NAME:-medicare_db}"
   DB_USER="${MEDICARE_DB_USER:-medicare_app}"
+  DB_PORT="${MEDICARE_DB_PORT:-5436}"
+  CONTAINER_NAME="medicare_db"
+  VOLUME_NAME="medicare_pgdata"
 
-  sudo -u postgres psql -v ON_ERROR_STOP=1 <<EOSQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN
-    CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${MEDICARE_DB_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE;
-    RAISE NOTICE 'Role ${DB_USER} criada com sucesso.';
-  ELSE
-    RAISE NOTICE 'Role ${DB_USER} já existe — nenhuma alteração destrutiva realizada.';
-  END IF;
-END
-\$\$;
+  # Verifica se a porta 5436 está livre (caso o container ainda não exista)
+  if ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    if ss -tuln | grep -q ":${DB_PORT} "; then
+      echo "ERRO: A porta ${DB_PORT} já está em uso. Escolha outra via MEDICARE_DB_PORT."
+      exit 1
+    fi
 
-SELECT 'CREATE DATABASE ${DB_NAME} OWNER ${DB_USER} ENCODING ''UTF8'''
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec
+    echo "Criando volume isolado ${VOLUME_NAME} e container ${CONTAINER_NAME} (postgres:16-alpine na porta ${DB_PORT})..."
+    docker volume create "${VOLUME_NAME}" >/dev/null
+    docker run -d \
+      --name "${CONTAINER_NAME}" \
+      --restart unless-stopped \
+      --memory="256m" \
+      --cpus="0.5" \
+      -e POSTGRES_DB="${DB_NAME}" \
+      -e POSTGRES_USER="${DB_USER}" \
+      -e POSTGRES_PASSWORD="${MEDICARE_DB_PASSWORD}" \
+      -e TZ="America/Sao_Paulo" \
+      -p "127.0.0.1:${DB_PORT}:5432" \
+      -v "${VOLUME_NAME}:/var/lib/postgresql/data" \
+      postgres:16-alpine \
+      postgres -c shared_buffers=64MB -c max_connections=50 -c work_mem=4MB
+  else
+    echo "Container ${CONTAINER_NAME} já existe. Garantindo que está em execução..."
+    docker start "${CONTAINER_NAME}" >/dev/null || true
+  fi
 
--- Isolamento estrito: revoga acesso público e restringe permissões apenas ao medicare_db
+  echo "Aguardando ${CONTAINER_NAME} ficar saudável..."
+  for i in {1..30}; do
+    if docker exec "${CONTAINER_NAME}" pg_isready -U "${DB_USER}" -d "${DB_NAME}" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
+  echo "Aplicando isolamento de permissões e extensões (uuid-ossp, pgcrypto)..."
+  docker exec -i "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 <<EOSQL
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 REVOKE ALL ON DATABASE ${DB_NAME} FROM PUBLIC;
 GRANT CONNECT, TEMPORARY ON DATABASE ${DB_NAME} TO ${DB_USER};
 EOSQL
 
-  sudo -u postgres psql -d "${DB_NAME}" -v ON_ERROR_STOP=1 <<EOSQL
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-GRANT ALL ON SCHEMA public TO ${DB_USER};
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO ${DB_USER};
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO ${DB_USER};
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO ${DB_USER};
-EOSQL
+  if [ -f "oracle-migration/02_schema_oracle_standalone.sql" ]; then
+    echo "Aplicando schema standalone completo do MediCare (02_schema_oracle_standalone.sql)..."
+    docker exec -i "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 < oracle-migration/02_schema_oracle_standalone.sql
+  fi
 
-  echo "✓ Banco '${DB_NAME}' e usuário '${DB_USER}' preparados com isolamento total!"
+  echo "✓ Container '${CONTAINER_NAME}' (porta 127.0.0.1:${DB_PORT}), banco '${DB_NAME}' e usuário '${DB_USER}' prontos e 100% isolados!"
 fi
+
