@@ -62,12 +62,21 @@ export function getPgPool() {
  */
 export async function ensureOraclePostgresSchema(client) {
   if (schemaInitialized) return;
+
+  // Se o schema já foi criado pelo script standalone (app_users existe), não reexecuta DDL
+  const check = await client.query("SELECT to_regclass('public.app_users') AS exists");
+  if (check.rows[0]?.exists) {
+    schemaInitialized = true;
+    return;
+  }
+
   await client.query(`
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
     CREATE OR REPLACE FUNCTION app_current_user_id()
-    RETURNS text LANGUAGE sql STABLE AS $$
-      SELECT NULLIF(current_setting('app.current_user_id', true), '');
+    RETURNS uuid LANGUAGE sql STABLE AS $$
+      SELECT NULLIF(current_setting('app.current_user_id', true), '')::uuid;
     $$;
 
     CREATE TABLE IF NOT EXISTS app_users (
