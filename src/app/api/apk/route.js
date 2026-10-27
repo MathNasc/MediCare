@@ -7,13 +7,13 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    const rootApkPath = path.join(process.cwd(), 'medicare-patient.apk');
-    const publicApkPath = path.join(process.cwd(), 'public', 'medicare-patient.apk');
+    const rootApkPath = path.join(process.cwd(), 'MediCare-Paciente.apk');
+    const publicApkPath = path.join(process.cwd(), 'public', 'MediCare-Paciente.apk');
     const targetPath = fs.existsSync(rootApkPath) ? rootApkPath : publicApkPath;
 
     if (!fs.existsSync(targetPath)) {
       return NextResponse.json(
-        { error: 'Arquivo medicare-patient.apk não encontrado.' },
+        { error: 'Arquivo MediCare-Paciente.apk não encontrado.' },
         { status: 404 }
       );
     }
@@ -24,7 +24,7 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Disposition': 'attachment; filename="medicare-patient-v2.5.apk"',
+        'Content-Disposition': 'attachment; filename="MediCare-Paciente.apk"',
         'Content-Length': String(fileBuffer.length),
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
         'Pragma': 'no-cache',
@@ -33,7 +33,7 @@ export async function GET() {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: 'Erro ao baixar medicare-patient.apk', details: error.message },
+      { error: 'Erro ao baixar MediCare-Paciente.apk', details: error.message },
       { status: 500 }
     );
   }
