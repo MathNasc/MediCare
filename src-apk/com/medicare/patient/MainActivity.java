@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     private JSONArray contacts;
     private JSONArray doseLogs;
     private JSONArray events;
+    private JSONArray aiMessages = new JSONArray();
     private JSONArray meds;
     private SharedPreferences prefs;
     private JSONArray professionals;
@@ -268,6 +269,7 @@ public class MainActivity extends Activity {
                 this.contacts = new JSONArray(this.prefs.getString("contacts", "[]"));
                 this.professionals = new JSONArray(this.prefs.getString("professionals", "[]"));
                 this.caregivers = new JSONArray(this.prefs.getString("caregivers", "[]"));
+                this.aiMessages = new JSONArray(this.prefs.getString("ai_messages", "[]"));
 
                 // Se houver resquício do perfil mockado antigo "maria.silva@email.com", limpar completamente
                 if ("maria.silva@email.com".equalsIgnoreCase(this.profile.optString("email", ""))) {
@@ -283,6 +285,7 @@ public class MainActivity extends Activity {
                     this.contacts = new JSONArray();
                     this.professionals = new JSONArray();
                     this.caregivers = new JSONArray();
+                    this.aiMessages = new JSONArray();
                     this.prefs.edit().putBoolean("is_logged_in", false).putBoolean("onboarding_completed", false).apply();
                     saveAll();
                 }
@@ -310,6 +313,7 @@ public class MainActivity extends Activity {
                 this.contacts = new JSONArray();
                 this.professionals = new JSONArray();
                 this.caregivers = new JSONArray();
+                this.aiMessages = new JSONArray();
                 saveAll();
             }
         } catch (Exception e) {
@@ -318,7 +322,7 @@ public class MainActivity extends Activity {
     }
 
     private void saveAll() {
-        this.prefs.edit().putBoolean("is_logged_in", this.isLoggedIn).putBoolean("dark_mode", this.isDarkMode).putBoolean("accessibility_mode", this.isAccessibilityMode).putString("last_sync_timestamp", this.lastSyncTimestamp).putString("profile", this.profile.toString()).putString("meds", this.meds.toString()).putString("dose_logs", this.doseLogs.toString()).putString("events", this.events.toString()).putString("cal_notes", this.calNotes.toString()).putString("stock_movements", this.stockMovements.toString()).putString("allergies", this.allergies.toString()).putString("conditions", this.conditions.toString()).putString("contacts", this.contacts.toString()).putString("professionals", this.professionals.toString()).putString("caregivers", this.caregivers.toString()).apply();
+        this.prefs.edit().putBoolean("is_logged_in", this.isLoggedIn).putBoolean("dark_mode", this.isDarkMode).putBoolean("accessibility_mode", this.isAccessibilityMode).putString("last_sync_timestamp", this.lastSyncTimestamp).putString("profile", this.profile.toString()).putString("meds", this.meds.toString()).putString("dose_logs", this.doseLogs.toString()).putString("events", this.events.toString()).putString("cal_notes", this.calNotes.toString()).putString("stock_movements", this.stockMovements.toString()).putString("allergies", this.allergies.toString()).putString("conditions", this.conditions.toString()).putString("contacts", this.contacts.toString()).putString("professionals", this.professionals.toString()).putString("caregivers", this.caregivers.toString()).putString("ai_messages", this.aiMessages.toString()).apply();
         syncWithBackendSilently(false);
     }
 
@@ -2003,101 +2007,1318 @@ public class MainActivity extends Activity {
     }
 
     private void buildAiTab(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("Assistente Farmacêutico MediCare", "Verificador de interações e orientações da sua receita"));
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        linearLayout2.setOrientation(1);
-        linearLayout2.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
-        linearLayout2.setPadding(dp(16), dp(16), dp(16), dp(16));
-        TextView textView = new TextView(this);
-        textView.setText("🔍 Análise Automática da Sua Prescrição Ativa");
-        textView.setTextColor(this.cTextMain);
-        textView.setTextSize(sp(15.0f));
-        textView.setTypeface(null, 1);
-        linearLayout2.addView(textView);
-        TextView textView2 = new TextView(this);
-        textView2.setText("• Losartana 50mg + Metformina 850mg: Sem interação adversa grave. Manter hidratação adequada.\n• Alergia Registrada (Penicilina): Atenção! Amoxicilina pertence ao grupo das penicilinas — confirme imediatamente com seu médico.\n• Horários otimizados: 08:00, 12:30, 20:00 e 21:00 sem conflito gástrico.");
-        textView2.setTextColor(this.cTextMuted);
-        textView2.setTextSize(sp(13.0f));
-        textView2.setPadding(0, dp(8), 0, 0);
-        linearLayout2.addView(textView2);
-        linearLayout.addView(linearLayout2);
+        if (!"main".equals(this.aiSubView)) {
+            this.aiSubView = "main";
+        }
+        linearLayout.addView(sectionHeader("🤖 Assistente Farmacêutico MediCare", "Inteligência Artificial para dúvidas sobre seus remédios e interações"));
+
+        HorizontalScrollView hsv = new HorizontalScrollView(this);
+        hsv.setHorizontalScrollBarEnabled(false);
+        LinearLayout chipContainer = new LinearLayout(this);
+        chipContainer.setOrientation(0);
+        chipContainer.setPadding(0, 0, 0, dp(12));
+
+        String[] quickPrompts = {
+            "💊 Explicar meus remédios",
+            "📊 Resumo de adesão",
+            "📦 Análise de estoque",
+            "🩺 Preparação para consulta"
+        };
+
+        for (final String qp : quickPrompts) {
+            TextView chip = new TextView(this);
+            chip.setText(qp);
+            chip.setTextSize(sp(12.0f));
+            chip.setTextColor(this.cPrimary);
+            chip.setBackground(shape(this.cPrimaryLight, 16, this.cPrimary, 1));
+            chip.setPadding(dp(12), dp(6), dp(12), dp(6));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = dp(8);
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    sendAiMessage(qp);
+                }
+            });
+            chipContainer.addView(chip);
+        }
+        hsv.addView(chipContainer);
+        linearLayout.addView(hsv);
+
+        LinearLayout chatCard = new LinearLayout(this);
+        chatCard.setOrientation(1);
+        chatCard.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
+        chatCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+
+        ScrollView msgsScroll = new ScrollView(this);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, dp(320));
+        msgsScroll.setLayoutParams(scrollLp);
+
+        LinearLayout msgsLayout = new LinearLayout(this);
+        msgsLayout.setOrientation(1);
+
+        if (this.aiMessages.length() == 0) {
+            try {
+                JSONObject welcomeMsg = new JSONObject();
+                welcomeMsg.put("role", "assistant");
+                welcomeMsg.put("text", "Olá, " + this.profile.optString("nome", "paciente") + "! Sou seu Assistente Farmacêutico MediCare. Posso analisar interações entre seus medicamentos cadastrados, sugerir dicas de adesão e preparar resumos para suas consultas médicas. Como posso ajudar você hoje?");
+                this.aiMessages.put(welcomeMsg);
+            } catch (Exception e) {}
+        }
+
+        for (int i = 0; i < this.aiMessages.length(); i++) {
+            JSONObject msg = this.aiMessages.optJSONObject(i);
+            if (msg == null) continue;
+            String role = msg.optString("role", "assistant");
+            String text = msg.optString("text", "");
+
+            LinearLayout msgRow = new LinearLayout(this);
+            msgRow.setOrientation(0);
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
+            rowLp.bottomMargin = dp(8);
+            msgRow.setLayoutParams(rowLp);
+
+            TextView bubble = new TextView(this);
+            bubble.setText(text);
+            bubble.setTextSize(sp(13.0f));
+            bubble.setPadding(dp(12), dp(10), dp(12), dp(10));
+
+            if ("user".equals(role)) {
+                msgRow.setGravity(5);
+                bubble.setTextColor(Color.WHITE);
+                bubble.setBackground(shape(this.cPrimary, 16, 0, 0));
+                LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
+                bLp.leftMargin = dp(40);
+                bubble.setLayoutParams(bLp);
+            } else {
+                msgRow.setGravity(3);
+                bubble.setTextColor(this.cTextMain);
+                bubble.setBackground(shape(this.cBgMain, 16, this.cBorder, 1));
+                LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
+                bLp.rightMargin = dp(40);
+                bubble.setLayoutParams(bLp);
+            }
+            msgRow.addView(bubble);
+            msgsLayout.addView(msgRow);
+        }
+
+        msgsScroll.addView(msgsLayout);
+        chatCard.addView(msgsScroll);
+
+        LinearLayout inputRow = new LinearLayout(this);
+        inputRow.setOrientation(0);
+        inputRow.setGravity(16);
+        inputRow.setPadding(0, dp(10), 0, 0);
+
+        final EditText etInput = new EditText(this);
+        etInput.setHint("Pergunte algo sobre seus remédios...");
+        etInput.setHintTextColor(this.cTextLight);
+        etInput.setTextColor(this.cTextMain);
+        etInput.setTextSize(sp(14.0f));
+        etInput.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        etInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        etLp.rightMargin = dp(8);
+        etInput.setLayoutParams(etLp);
+        inputRow.addView(etInput);
+
+        TextView btnSend = createButton("Enviar", this.cPrimary, Color.WHITE);
+        btnSend.setPadding(dp(14), dp(10), dp(14), dp(10));
+        btnSend.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String prompt = etInput.getText().toString().trim();
+                if (!prompt.isEmpty()) {
+                    sendAiMessage(prompt);
+                }
+            }
+        });
+        inputRow.addView(btnSend);
+
+        chatCard.addView(inputRow);
+
+        TextView btnClear = new TextView(this);
+        btnClear.setText("🗑️ Limpar Conversa");
+        btnClear.setTextColor(this.cTextMuted);
+        btnClear.setTextSize(sp(11.0f));
+        btnClear.setGravity(17);
+        btnClear.setPadding(0, dp(8), 0, 0);
+        btnClear.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.aiMessages = new JSONArray();
+                saveAll();
+                render();
+            }
+        });
+        chatCard.addView(btnClear);
+
+        linearLayout.addView(chatCard);
+    }
+
+    private void sendAiMessage(String prompt) {
+        try {
+            JSONObject userMsg = new JSONObject();
+            userMsg.put("role", "user");
+            userMsg.put("text", prompt);
+            this.aiMessages.put(userMsg);
+            saveAll();
+            render();
+
+            queryAi(prompt);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void queryAi(final String prompt) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String responseText = "";
+                try {
+                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/ai");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(12000);
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                    JSONObject payload = new JSONObject();
+                    payload.put("prompt", prompt);
+                    payload.put("patientName", MainActivity.this.profile.optString("nome", "Paciente"));
+                    payload.put("medicamentos", MainActivity.this.meds);
+                    payload.put("allergies", MainActivity.this.allergies);
+                    payload.put("conditions", MainActivity.this.conditions);
+                    payload.put("doseLogs", MainActivity.this.doseLogs);
+
+                    OutputStream os = conn.getOutputStream();
+                    os.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+                    os.close();
+
+                    int code = conn.getResponseCode();
+                    if (code == 200) {
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) sb.append(line);
+                        reader.close();
+
+                        JSONObject respObj = new JSONObject(sb.toString());
+                        responseText = respObj.optString("text", respObj.optString("resposta", ""));
+                    }
+                } catch (Exception e) {}
+
+                if (responseText.isEmpty()) {
+                    responseText = generateLocalAiFallbackResponse(prompt);
+                }
+
+                final String reply = responseText;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            JSONObject aiMsg = new JSONObject();
+                            aiMsg.put("role", "assistant");
+                            aiMsg.put("text", reply);
+                            MainActivity.this.aiMessages.put(aiMsg);
+                            saveAll();
+                            render();
+                        } catch (Exception e) {}
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private String generateLocalAiFallbackResponse(String prompt) {
+        String pLower = prompt.toLowerCase();
+        int medCount = this.meds.length();
+        int algCount = this.allergies.length();
+
+        if (pLower.contains("explicar") || pLower.contains("remédio") || pLower.contains("medica")) {
+            if (medCount == 0) {
+                return "Você ainda não possui nenhum medicamento cadastrado em seu perfil. Acesse a aba 'Medicamentos' para cadastrar suas prescrições e receber análises detalhadas sobre cada uma.";
+            }
+            StringBuilder sb = new StringBuilder("Análise das suas prescrições ativas (" + medCount + " medicamento(s)):\n\n");
+            for (int i = 0; i < medCount; i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m != null) {
+                    sb.append("• ").append(m.optString("nome")).append(" ").append(m.optString("dosagem"))
+                      .append(": Tomar ").append(m.optString("frequencia")).append(". Estoque atual: ")
+                      .append(m.optInt("estoque_atual", 0)).append(" comprimido(s).\n");
+                }
+            }
+            if (algCount > 0) {
+                sb.append("\n⚠️ Alergias registradas: ");
+                for (int j = 0; j < algCount; j++) {
+                    JSONObject a = this.allergies.optJSONObject(j);
+                    if (a != null) sb.append(a.optString("nome")).append(" ");
+                }
+                sb.append("— fique atento ao princípio ativo de novas prescrições!");
+            }
+            return sb.toString();
+        } else if (pLower.contains("adesão") || pLower.contains("adesao") || pLower.contains("resumo")) {
+            int taken = 0;
+            int total = this.doseLogs.length();
+            for (int i = 0; i < total; i++) {
+                JSONObject d = this.doseLogs.optJSONObject(i);
+                if (d != null && "tomado".equals(d.optString("status"))) taken++;
+            }
+            int pct = total > 0 ? (taken * 100 / total) : 100;
+            return "📊 Resumo de Adesão ao Tratamento:\n- Total de doses registradas: " + total + "\n- Doses tomadas no horário: " + taken + "\n- Índice de adesão: " + pct + "%\n\nContinue assim! A pontualidade garante a eficácia do seu tratamento.";
+        } else if (pLower.contains("estoque")) {
+            StringBuilder sb = new StringBuilder("📦 Diagnóstico de Estoque:\n");
+            int lowStock = 0;
+            for (int i = 0; i < medCount; i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m != null) {
+                    int current = m.optInt("estoque_atual", 0);
+                    int min = m.optInt("estoque_minimo", 5);
+                    sb.append("• ").append(m.optString("nome")).append(": ").append(current).append(" unid.");
+                    if (current <= min) {
+                        sb.append(" ⚠️ Reposição recomendada!");
+                        lowStock++;
+                    }
+                    sb.append("\n");
+                }
+            }
+            if (medCount == 0) sb.append("Nenhum medicamento cadastrado.");
+            else if (lowStock == 0) sb.append("\n✅ Todos os seus estoques estão em níveis seguros.");
+            return sb.toString();
+        } else if (pLower.contains("consulta") || pLower.contains("médico") || pLower.contains("medico")) {
+            return "🩺 Preparação para Consulta Médica:\n1. Leve a lista de remédios que você toma atualmente (" + medCount + " cadastrados).\n2. Relate qualquer sintoma atípico registrado no seu diário de saúde.\n3. Informe sobre alergias registradas (" + algCount + " cadastradas).\n4. Solicite renovação das receitas dos medicamentos com estoque baixo.";
+        } else {
+            return "Compreendi sua dúvida sobre '" + prompt + "'. Lembre-se sempre de consultar seu médico ou farmacêutico para orientações específicas de dosagem ou sintomas severos.";
+        }
     }
 
     private void buildProfileTab(LinearLayout linearLayout) {
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        linearLayout2.setOrientation(1);
-        linearLayout2.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
-        linearLayout2.setPadding(dp(18), dp(18), dp(18), dp(18));
-        LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
-        layoutParams.bottomMargin = dp(16);
-        linearLayout2.setLayoutParams(layoutParams);
-        TextView textView = new TextView(this);
-        textView.setText(this.profile.optString("nome", "Maria Silva"));
-        textView.setTextColor(this.cTextMain);
-        textView.setTextSize(sp(20.0f));
-        textView.setTypeface(null, 1);
-        linearLayout2.addView(textView);
-        TextView textView2 = new TextView(this);
-        textView2.setText("Tipo Sanguíneo: " + this.profile.optString("tipo_sanguineo", "O+") + " • Peso: " + this.profile.optString("peso", "68") + "kg • Altura: " + this.profile.optString("altura", "162") + "cm\nCPF: " + this.profile.optString("cpf") + " • Tel: " + this.profile.optString("telefone"));
-        textView2.setTextColor(this.cTextMuted);
-        textView2.setTextSize(sp(12.0f));
-        textView2.setPadding(0, dp(6), 0, 0);
-        linearLayout2.addView(textView2);
-        linearLayout.addView(linearLayout2);
-        LinearLayout linearLayout3 = new LinearLayout(this);
-        linearLayout3.setOrientation(1);
-        linearLayout3.setBackground(shape(this.cPrimaryLight, 18, this.cPrimary, 1));
-        linearLayout3.setPadding(dp(16), dp(16), dp(16), dp(16));
-        LinearLayout.LayoutParams layoutParams2 = new LinearLayout.LayoutParams(-1, -2);
-        layoutParams2.bottomMargin = dp(14);
-        linearLayout3.setLayoutParams(layoutParams2);
-        TextView textView3 = new TextView(this);
-        textView3.setText("☁️ Sincronização Automática em Nuvem");
-        textView3.setTextColor(this.cPrimaryHover);
-        textView3.setTextSize(sp(15.0f));
-        textView3.setTypeface(null, 1);
-        linearLayout3.addView(textView3);
-        TextView textView4 = new TextView(this);
-        textView4.setText("Status: " + this.lastSyncTimestamp + "\nToque aqui caso queira forçar uma sincronização imediata.");
-        textView4.setTextColor(this.cTextMain);
-        textView4.setTextSize(sp(12.0f));
-        textView4.setPadding(0, dp(4), 0, 0);
-        linearLayout3.addView(textView4);
-        linearLayout3.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda17
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m16lambda$buildProfileTab$17$commedicarepatientMainActivity(view);
+        if ("personal".equals(this.profileSubView)) {
+            buildPersonalDataSubScreen(linearLayout);
+            return;
+        } else if ("emergency_card".equals(this.profileSubView)) {
+            buildEmergencyCardSubScreen(linearLayout);
+            return;
+        } else if ("health".equals(this.profileSubView)) {
+            buildHealthSubScreen(linearLayout);
+            return;
+        } else if ("contacts".equals(this.profileSubView)) {
+            buildContactsSubScreen(linearLayout);
+            return;
+        } else if ("professionals".equals(this.profileSubView)) {
+            buildProfessionalsSubScreen(linearLayout);
+            return;
+        } else if ("caregivers".equals(this.profileSubView)) {
+            buildCaregiversSubScreen(linearLayout);
+            return;
+        } else if ("stock_history".equals(this.profileSubView)) {
+            buildStockHistorySubScreen(linearLayout);
+            return;
+        }
+
+        linearLayout.addView(sectionHeader("Meu Perfil de Saúde", "Gerencie suas informações, segurança e contatos"));
+
+        LinearLayout headerCard = new LinearLayout(this);
+        headerCard.setOrientation(1);
+        headerCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        headerCard.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(-1, -2);
+        hLp.bottomMargin = dp(16);
+        headerCard.setLayoutParams(hLp);
+
+        TextView tvName = new TextView(this);
+        tvName.setText(this.profile.optString("nome", "Paciente"));
+        tvName.setTextColor(this.cTextMain);
+        tvName.setTextSize(sp(20.0f));
+        tvName.setTypeface(null, 1);
+        headerCard.addView(tvName);
+
+        TextView tvDetails = new TextView(this);
+        String sang = this.profile.optString("tipo_sanguineo", "-");
+        String peso = this.profile.optString("peso", "-");
+        String alt = this.profile.optString("altura", "-");
+        String cpf = this.profile.optString("cpf", "-");
+        String tel = this.profile.optString("telefone", "-");
+        tvDetails.setText("Tipo Sanguíneo: " + sang + " • Peso: " + peso + "kg • Altura: " + alt + "cm\nCPF: " + cpf + " • Tel: " + tel);
+        tvDetails.setTextColor(this.cTextMuted);
+        tvDetails.setTextSize(sp(12.0f));
+        tvDetails.setPadding(0, dp(6), 0, 0);
+        headerCard.addView(tvDetails);
+
+        TextView btnEditPersonal = createButton("✏️ Editar Dados Pessoais", this.cPrimaryLight, this.cPrimary);
+        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(-1, -2);
+        editLp.topMargin = dp(12);
+        btnEditPersonal.setLayoutParams(editLp);
+        btnEditPersonal.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.profileSubView = "personal";
+                render();
             }
         });
-        linearLayout.addView(linearLayout3);
-        LinearLayout.LayoutParams layoutParams3 = new LinearLayout.LayoutParams(-1, -2);
-        layoutParams3.bottomMargin = dp(10);
-        TextView createButton = createButton(this.isDarkMode ? "☀️ Mudar para Tema Claro" : "🌙 Mudar para Tema Escuro", this.cSurface, this.cTextMain);
-        createButton.setLayoutParams(layoutParams3);
-        createButton.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda18
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m17lambda$buildProfileTab$18$commedicarepatientMainActivity(view);
+        headerCard.addView(btnEditPersonal);
+
+        linearLayout.addView(headerCard);
+
+        TextView tvMenuTitle = new TextView(this);
+        tvMenuTitle.setText("📋 Módulos de Saúde & Segurança");
+        tvMenuTitle.setTextColor(this.cTextMain);
+        tvMenuTitle.setTextSize(sp(15.0f));
+        tvMenuTitle.setTypeface(null, 1);
+        tvMenuTitle.setPadding(0, 0, 0, dp(10));
+        linearLayout.addView(tvMenuTitle);
+
+        linearLayout.addView(createProfileMenuItem("🚨 Cartão de Emergência (ICE)", "Alerta médico urgente com contatos, tipo sanguíneo e alergias", this.cDangerBg, this.cDanger, "emergency_card"));
+        linearLayout.addView(createProfileMenuItem("🩺 Alergias e Condições de Saúde", this.allergies.length() + " alergias, " + this.conditions.length() + " condições registradas", this.cSurface, this.cTextMain, "health"));
+        linearLayout.addView(createProfileMenuItem("📞 Contatos de Emergência", this.contacts.length() + " contatos cadastrados", this.cSurface, this.cTextMain, "contacts"));
+        linearLayout.addView(createProfileMenuItem("👨‍⚕️ Profissionais de Saúde", this.professionals.length() + " médicos/farmacêuticos cadastrados", this.cSurface, this.cTextMain, "professionals"));
+        linearLayout.addView(createProfileMenuItem("🤝 Cuidadores Vinculados", this.caregivers.length() + " cuidadores com acesso ao acompanhamento", this.cSurface, this.cTextMain, "caregivers"));
+        linearLayout.addView(createProfileMenuItem("📦 Histórico do Estoque", this.stockMovements.length() + " movimentações registradas", this.cSurface, this.cTextMain, "stock_history"));
+
+        LinearLayout syncCard = new LinearLayout(this);
+        syncCard.setOrientation(1);
+        syncCard.setBackground(shape(this.cPrimaryLight, 18, this.cPrimary, 1));
+        syncCard.setPadding(dp(16), dp(16), dp(16), dp(16));
+        LinearLayout.LayoutParams syncLp = new LinearLayout.LayoutParams(-1, -2);
+        syncLp.topMargin = dp(10);
+        syncLp.bottomMargin = dp(14);
+        syncCard.setLayoutParams(syncLp);
+
+        TextView tvSyncTitle = new TextView(this);
+        tvSyncTitle.setText("☁️ Sincronização em Nuvem (PostgreSQL)");
+        tvSyncTitle.setTextColor(this.cPrimaryHover);
+        tvSyncTitle.setTextSize(sp(14.0f));
+        tvSyncTitle.setTypeface(null, 1);
+        syncCard.addView(tvSyncTitle);
+
+        TextView tvSyncStatus = new TextView(this);
+        tvSyncStatus.setText("Status: " + this.lastSyncTimestamp + "\nToque para sincronizar seus registros com a nuvem agora.");
+        tvSyncStatus.setTextColor(this.cTextMain);
+        tvSyncStatus.setTextSize(sp(12.0f));
+        tvSyncStatus.setPadding(0, dp(4), 0, 0);
+        syncCard.addView(tvSyncStatus);
+
+        syncCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                syncWithBackendSilently(true);
             }
         });
-        linearLayout.addView(createButton);
-        TextView createButton2 = createButton(this.isAccessibilityMode ? "🔤 Modo Acessibilidade: ATIVO (Fontes Grandes)" : "🔤 Ativar Modo Acessibilidade (Idosos)", this.cSurface, this.cTextMain);
-        createButton2.setLayoutParams(layoutParams3);
-        createButton2.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda19
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m18lambda$buildProfileTab$19$commedicarepatientMainActivity(view);
+        linearLayout.addView(syncCard);
+
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
+        btnLp.bottomMargin = dp(10);
+
+        TextView btnTheme = createButton(this.isDarkMode ? "☀️ Mudar para Tema Claro" : "🌙 Mudar para Tema Escuro", this.cSurface, this.cTextMain);
+        btnTheme.setLayoutParams(btnLp);
+        btnTheme.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.isDarkMode = !MainActivity.this.isDarkMode;
+                saveAll();
+                render();
             }
         });
-        linearLayout.addView(createButton2);
-        TextView createButton3 = createButton("Sair da Conta", this.cDangerBg, this.cDanger);
-        createButton3.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda20
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m19lambda$buildProfileTab$20$commedicarepatientMainActivity(view);
+        linearLayout.addView(btnTheme);
+
+        TextView btnAccess = createButton(this.isAccessibilityMode ? "🔤 Modo Acessibilidade: ATIVO (Fontes Grandes)" : "🔤 Ativar Modo Acessibilidade (Idosos)", this.cSurface, this.cTextMain);
+        btnAccess.setLayoutParams(btnLp);
+        btnAccess.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.isAccessibilityMode = !MainActivity.this.isAccessibilityMode;
+                saveAll();
+                render();
             }
         });
-        linearLayout.addView(createButton3);
+        linearLayout.addView(btnAccess);
+
+        TextView btnLogout = createButton("🚪 Sair da Conta", this.cDangerBg, this.cDanger);
+        btnLogout.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.isLoggedIn = false;
+                saveAll();
+                render();
+            }
+        });
+        linearLayout.addView(btnLogout);
+    }
+
+    private View createProfileMenuItem(String title, String subtitle, int bgColor, int textColor, final String subViewTarget) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(bgColor, 16, this.cBorder, 1));
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(10);
+        card.setLayoutParams(lp);
+
+        TextView tvT = new TextView(this);
+        tvT.setText(title);
+        tvT.setTextColor(textColor);
+        tvT.setTextSize(sp(14.0f));
+        tvT.setTypeface(null, 1);
+        card.addView(tvT);
+
+        if (subtitle != null && !subtitle.isEmpty()) {
+            TextView tvS = new TextView(this);
+            tvS.setText(subtitle);
+            tvS.setTextColor(textColor == this.cDanger ? this.cDanger : this.cTextMuted);
+            tvS.setTextSize(sp(12.0f));
+            tvS.setPadding(0, dp(2), 0, 0);
+            card.addView(tvS);
+        }
+
+        card.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.profileSubView = subViewTarget;
+                render();
+            }
+        });
+
+        return card;
+    }
+
+    private void buildPersonalDataSubScreen(LinearLayout linearLayout) {
+        linearLayout.addView(sectionHeader("✏️ Dados Pessoais", "Atualize suas informações gerais de cadastro"));
+
+        final EditText inNome = createInput("Nome Completo", this.profile.optString("nome", ""));
+        final EditText inDataNasc = createInput("Data de Nascimento (Ex: 15/04/1980)", this.profile.optString("data_nascimento", ""));
+        final EditText inCpf = createInput("CPF", this.profile.optString("cpf", ""));
+        final EditText inTel = createInput("Telefone", this.profile.optString("telefone", ""));
+        final EditText inEndereco = createInput("Endereço Completo", this.profile.optString("endereco", ""));
+        final EditText inSang = createInput("Tipo Sanguíneo (Ex: O+)", this.profile.optString("tipo_sanguineo", ""));
+        final EditText inPeso = createInput("Peso (kg)", this.profile.optString("peso", ""));
+        final EditText inAltura = createInput("Altura (cm)", this.profile.optString("altura", ""));
+        final EditText inObs = createInput("Observações Médicas Gerais", this.profile.optString("observacoes_medicas", ""));
+
+        linearLayout.addView(inNome);
+        linearLayout.addView(inDataNasc);
+        linearLayout.addView(inCpf);
+        linearLayout.addView(inTel);
+        linearLayout.addView(inEndereco);
+        linearLayout.addView(inSang);
+        linearLayout.addView(inPeso);
+        linearLayout.addView(inAltura);
+        linearLayout.addView(inObs);
+
+        TextView btnSave = createButton("💾 Salvar Alterações", this.cPrimary, Color.WHITE);
+        btnSave.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    MainActivity.this.profile.put("nome", inNome.getText().toString().trim());
+                    MainActivity.this.profile.put("data_nascimento", inDataNasc.getText().toString().trim());
+                    MainActivity.this.profile.put("cpf", inCpf.getText().toString().trim());
+                    MainActivity.this.profile.put("telefone", inTel.getText().toString().trim());
+                    MainActivity.this.profile.put("endereco", inEndereco.getText().toString().trim());
+                    MainActivity.this.profile.put("tipo_sanguineo", inSang.getText().toString().trim());
+                    MainActivity.this.profile.put("peso", inPeso.getText().toString().trim());
+                    MainActivity.this.profile.put("altura", inAltura.getText().toString().trim());
+                    MainActivity.this.profile.put("observacoes_medicas", inObs.getText().toString().trim());
+
+                    saveAll();
+                    Toast.makeText(MainActivity.this, "Dados pessoais atualizados!", 0).show();
+                    MainActivity.this.profileSubView = "main";
+                    render();
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Erro ao salvar dados", 0).show();
+                }
+            }
+        });
+        linearLayout.addView(btnSave);
+    }
+
+    private void buildEmergencyCardSubScreen(LinearLayout linearLayout) {
+        LinearLayout banner = new LinearLayout(this);
+        banner.setOrientation(1);
+        banner.setBackground(shape(this.cDanger, 18, 0, 0));
+        banner.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-1, -2);
+        bLp.bottomMargin = dp(16);
+        banner.setLayoutParams(bLp);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("🚨 CARTÃO DE EMERGÊNCIA MÉDICA (ICE)");
+        tvTitle.setTextColor(Color.WHITE);
+        tvTitle.setTextSize(sp(16.0f));
+        tvTitle.setTypeface(null, 1);
+        banner.addView(tvTitle);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Apresente esta tela a socorristas ou médicos de emergência");
+        tvSub.setTextColor(Color.parseColor("#FEE2E2"));
+        tvSub.setTextSize(sp(12.0f));
+        tvSub.setPadding(0, dp(4), 0, 0);
+        banner.addView(tvSub);
+
+        linearLayout.addView(banner);
+
+        LinearLayout statsCard = new LinearLayout(this);
+        statsCard.setOrientation(1);
+        statsCard.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
+        statsCard.setPadding(dp(16), dp(16), dp(16), dp(16));
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(-1, -2);
+        sLp.bottomMargin = dp(14);
+        statsCard.setLayoutParams(sLp);
+
+        TextView tvPName = new TextView(this);
+        tvPName.setText("👤 " + this.profile.optString("nome", "Paciente"));
+        tvPName.setTextColor(this.cTextMain);
+        tvPName.setTextSize(sp(18.0f));
+        tvPName.setTypeface(null, 1);
+        statsCard.addView(tvPName);
+
+        TextView tvPInfo = new TextView(this);
+        tvPInfo.setText("Tipo Sanguíneo: " + this.profile.optString("tipo_sanguineo", "N/I") + "\nPeso: " + this.profile.optString("peso", "-") + " kg • Altura: " + this.profile.optString("altura", "-") + " cm\nNascimento: " + this.profile.optString("data_nascimento", "-") + "\nCPF: " + this.profile.optString("cpf", "-"));
+        tvPInfo.setTextColor(this.cTextMuted);
+        tvPInfo.setTextSize(sp(13.0f));
+        tvPInfo.setPadding(0, dp(6), 0, 0);
+        statsCard.addView(tvPInfo);
+
+        linearLayout.addView(statsCard);
+
+        LinearLayout algCard = new LinearLayout(this);
+        algCard.setOrientation(1);
+        algCard.setBackground(shape(this.allergies.length() > 0 ? this.cDangerBg : this.cSurface, 16, this.cBorder, 1));
+        algCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+        LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(-1, -2);
+        aLp.bottomMargin = dp(14);
+        algCard.setLayoutParams(aLp);
+
+        TextView tvAlgT = new TextView(this);
+        tvAlgT.setText("⚠️ Alergias Medicamentosas / Alimentares (" + this.allergies.length() + ")");
+        tvAlgT.setTextColor(this.allergies.length() > 0 ? this.cDanger : this.cTextMain);
+        tvAlgT.setTextSize(sp(14.0f));
+        tvAlgT.setTypeface(null, 1);
+        algCard.addView(tvAlgT);
+
+        if (this.allergies.length() == 0) {
+            TextView tvNoAlg = new TextView(this);
+            tvNoAlg.setText("Nenhuma alergia cadastrada.");
+            tvNoAlg.setTextColor(this.cTextMuted);
+            tvNoAlg.setTextSize(sp(12.0f));
+            tvNoAlg.setPadding(0, dp(4), 0, 0);
+            algCard.addView(tvNoAlg);
+        } else {
+            for (int i = 0; i < this.allergies.length(); i++) {
+                JSONObject alg = this.allergies.optJSONObject(i);
+                if (alg != null) {
+                    TextView tvAlgItem = new TextView(this);
+                    tvAlgItem.setText("• " + alg.optString("nome") + " (" + alg.optString("gravidade", "Grave") + ") - " + alg.optString("reacao", "Sem reação descrita"));
+                    tvAlgItem.setTextColor(this.cDanger);
+                    tvAlgItem.setTextSize(sp(13.0f));
+                    tvAlgItem.setTypeface(null, 1);
+                    tvAlgItem.setPadding(0, dp(4), 0, 0);
+                    algCard.addView(tvAlgItem);
+                }
+            }
+        }
+        linearLayout.addView(algCard);
+
+        LinearLayout medCard = new LinearLayout(this);
+        medCard.setOrientation(1);
+        medCard.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
+        medCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(-1, -2);
+        mLp.bottomMargin = dp(14);
+        medCard.setLayoutParams(mLp);
+
+        TextView tvMedT = new TextView(this);
+        tvMedT.setText("💊 Medicamentos em Uso Contínuo (" + this.meds.length() + ")");
+        tvMedT.setTextColor(this.cTextMain);
+        tvMedT.setTextSize(sp(14.0f));
+        tvMedT.setTypeface(null, 1);
+        medCard.addView(tvMedT);
+
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject m = this.meds.optJSONObject(i);
+            if (m != null) {
+                TextView tvM = new TextView(this);
+                tvM.setText("• " + m.optString("nome") + " " + m.optString("dosagem") + " (" + m.optString("frequencia") + ")");
+                tvM.setTextColor(this.cTextMuted);
+                tvM.setTextSize(sp(12.0f));
+                tvM.setPadding(0, dp(4), 0, 0);
+                medCard.addView(tvM);
+            }
+        }
+        linearLayout.addView(medCard);
+
+        TextView tvCallTitle = new TextView(this);
+        tvCallTitle.setText("📞 Discar para Contatos de Emergência:");
+        tvCallTitle.setTextColor(this.cTextMain);
+        tvCallTitle.setTextSize(sp(14.0f));
+        tvCallTitle.setTypeface(null, 1);
+        tvCallTitle.setPadding(0, 0, 0, dp(8));
+        linearLayout.addView(tvCallTitle);
+
+        TextView btnSamu = createButton("📞 LIGAR PARA O SAMU 192", this.cDanger, Color.WHITE);
+        LinearLayout.LayoutParams samuLp = new LinearLayout.LayoutParams(-1, -2);
+        samuLp.bottomMargin = dp(10);
+        btnSamu.setLayoutParams(samuLp);
+        btnSamu.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:192")));
+            }
+        });
+        linearLayout.addView(btnSamu);
+
+        for (int i = 0; i < this.contacts.length(); i++) {
+            final JSONObject c = this.contacts.optJSONObject(i);
+            if (c != null) {
+                final String telNum = c.optString("telefone", "");
+                TextView btnCall = createButton("📞 Ligar para " + c.optString("nome") + " (" + c.optString("relacao") + "): " + telNum, this.cSurface, this.cPrimary);
+                LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-1, -2);
+                cLp.bottomMargin = dp(8);
+                btnCall.setLayoutParams(cLp);
+                btnCall.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + telNum.replaceAll("[^0-9+]", ""))));
+                    }
+                });
+                linearLayout.addView(btnCall);
+            }
+        }
+    }
+
+    private void buildHealthSubScreen(LinearLayout linearLayout) {
+        linearLayout.addView(sectionHeader("🩺 Alergias & Condições de Saúde", "Mantenha seu histórico médico atualizado"));
+
+        LinearLayout algHeader = new LinearLayout(this);
+        algHeader.setOrientation(0);
+        algHeader.setGravity(16);
+        algHeader.setPadding(0, 0, 0, dp(8));
+
+        TextView tvA = new TextView(this);
+        tvA.setText("⚠️ Alergias (" + this.allergies.length() + ")");
+        tvA.setTextColor(this.cTextMain);
+        tvA.setTextSize(sp(15.0f));
+        tvA.setTypeface(null, 1);
+        tvA.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        algHeader.addView(tvA);
+
+        TextView btnAddAlg = createButton("➕ Adicionar", this.cPrimaryLight, this.cPrimary);
+        btnAddAlg.setPadding(dp(10), dp(6), dp(10), dp(6));
+        btnAddAlg.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showAddAllergyDialog();
+            }
+        });
+        algHeader.addView(btnAddAlg);
+        linearLayout.addView(algHeader);
+
+        if (this.allergies.length() == 0) {
+            TextView emptyA = new TextView(this);
+            emptyA.setText("Nenhuma alergia cadastrada.");
+            emptyA.setTextColor(this.cTextMuted);
+            emptyA.setTextSize(sp(12.0f));
+            emptyA.setPadding(0, 0, 0, dp(16));
+            linearLayout.addView(emptyA);
+        } else {
+            for (int i = 0; i < this.allergies.length(); i++) {
+                final int idx = i;
+                final JSONObject a = this.allergies.optJSONObject(i);
+                if (a == null) continue;
+
+                LinearLayout item = new LinearLayout(this);
+                item.setOrientation(0);
+                item.setGravity(16);
+                item.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+                item.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.bottomMargin = dp(8);
+                item.setLayoutParams(lp);
+
+                LinearLayout textCol = new LinearLayout(this);
+                textCol.setOrientation(1);
+                textCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                TextView tvN = new TextView(this);
+                tvN.setText(a.optString("nome"));
+                tvN.setTextColor(this.cTextMain);
+                tvN.setTextSize(sp(14.0f));
+                tvN.setTypeface(null, 1);
+                textCol.addView(tvN);
+
+                TextView tvR = new TextView(this);
+                tvR.setText("Gravidade: " + a.optString("gravidade", "Moderada") + " • Reação: " + a.optString("reacao", "-"));
+                tvR.setTextColor(this.cTextMuted);
+                tvR.setTextSize(sp(12.0f));
+                textCol.addView(tvR);
+
+                item.addView(textCol);
+
+                TextView btnDel = new TextView(this);
+                btnDel.setText("🗑️");
+                btnDel.setTextSize(sp(16.0f));
+                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.allergies.remove(idx);
+                        saveAll();
+                        render();
+                    }
+                });
+                item.addView(btnDel);
+
+                linearLayout.addView(item);
+            }
+        }
+
+        LinearLayout condHeader = new LinearLayout(this);
+        condHeader.setOrientation(0);
+        condHeader.setGravity(16);
+        condHeader.setPadding(0, dp(12), 0, dp(8));
+
+        TextView tvC = new TextView(this);
+        tvC.setText("🩺 Condições / Doenças Crônicas (" + this.conditions.length() + ")");
+        tvC.setTextColor(this.cTextMain);
+        tvC.setTextSize(sp(15.0f));
+        tvC.setTypeface(null, 1);
+        tvC.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        condHeader.addView(tvC);
+
+        TextView btnAddCond = createButton("➕ Adicionar", this.cPrimaryLight, this.cPrimary);
+        btnAddCond.setPadding(dp(10), dp(6), dp(10), dp(6));
+        btnAddCond.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showAddConditionDialog();
+            }
+        });
+        condHeader.addView(btnAddCond);
+        linearLayout.addView(condHeader);
+
+        if (this.conditions.length() == 0) {
+            TextView emptyC = new TextView(this);
+            emptyC.setText("Nenhuma condição crônica cadastrada.");
+            emptyC.setTextColor(this.cTextMuted);
+            emptyC.setTextSize(sp(12.0f));
+            linearLayout.addView(emptyC);
+        } else {
+            for (int i = 0; i < this.conditions.length(); i++) {
+                final int idx = i;
+                final JSONObject c = this.conditions.optJSONObject(i);
+                if (c == null) continue;
+
+                LinearLayout item = new LinearLayout(this);
+                item.setOrientation(0);
+                item.setGravity(16);
+                item.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+                item.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.bottomMargin = dp(8);
+                item.setLayoutParams(lp);
+
+                LinearLayout textCol = new LinearLayout(this);
+                textCol.setOrientation(1);
+                textCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                TextView tvN = new TextView(this);
+                tvN.setText(c.optString("nome"));
+                tvN.setTextColor(this.cTextMain);
+                tvN.setTextSize(sp(14.0f));
+                tvN.setTypeface(null, 1);
+                textCol.addView(tvN);
+
+                TextView tvD = new TextView(this);
+                tvD.setText("Diagnóstico: " + c.optString("data_diagnostico", "Não informada") + " • Notas: " + c.optString("notas", "-"));
+                tvD.setTextColor(this.cTextMuted);
+                tvD.setTextSize(sp(12.0f));
+                textCol.addView(tvD);
+
+                item.addView(textCol);
+
+                TextView btnDel = new TextView(this);
+                btnDel.setText("🗑️");
+                btnDel.setTextSize(sp(16.0f));
+                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.conditions.remove(idx);
+                        saveAll();
+                        render();
+                    }
+                });
+                item.addView(btnDel);
+
+                linearLayout.addView(item);
+            }
+        }
+    }
+
+    private void showAddAllergyDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Adicionar Alergia");
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(1);
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
+
+        final EditText etNome = createInput("Nome da Alergia (Ex: Penicilina)", "");
+        final EditText etGrav = createInput("Gravidade (Leve, Moderada, Grave)", "Grave");
+        final EditText etReacao = createInput("Reação (Ex: Manchas vermelhas)", "");
+
+        layout.addView(etNome);
+        layout.addView(etGrav);
+        layout.addView(etReacao);
+        builder.setView(layout);
+
+        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String nome = etNome.getText().toString().trim();
+                    if (!nome.isEmpty()) {
+                        JSONObject newA = new JSONObject();
+                        newA.put("id", "alg-" + System.currentTimeMillis());
+                        newA.put("nome", nome);
+                        newA.put("gravidade", etGrav.getText().toString().trim());
+                        newA.put("reacao", etReacao.getText().toString().trim());
+                        MainActivity.this.allergies.put(newA);
+                        saveAll();
+                        render();
+                    }
+                } catch (Exception e) {}
+            }
+        });
+        builder.setNegativeButton("Cancelar", null);
+        builder.show();
+    }
+
+    private void showAddConditionDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Adicionar Condição Médica");
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(1);
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
+
+        final EditText etNome = createInput("Nome da Condição (Ex: Hipertensão)", "");
+        final EditText etDiag = createInput("Ano/Data do Diagnóstico", "");
+        final EditText etNotas = createInput("Observações Médicas", "");
+
+        layout.addView(etNome);
+        layout.addView(etDiag);
+        layout.addView(etNotas);
+        builder.setView(layout);
+
+        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String nome = etNome.getText().toString().trim();
+                    if (!nome.isEmpty()) {
+                        JSONObject newC = new JSONObject();
+                        newC.put("id", "cond-" + System.currentTimeMillis());
+                        newC.put("nome", nome);
+                        newC.put("data_diagnostico", etDiag.getText().toString().trim());
+                        newC.put("notas", etNotas.getText().toString().trim());
+                        MainActivity.this.conditions.put(newC);
+                        saveAll();
+                        render();
+                    }
+                } catch (Exception e) {}
+            }
+        });
+        builder.setNegativeButton("Cancelar", null);
+        builder.show();
+    }
+
+    private void buildContactsSubScreen(LinearLayout linearLayout) {
+        linearLayout.addView(sectionHeader("📞 Contatos de Emergência", "Pessoas de confiança para chamadas rápidas"));
+
+        TextView btnAdd = createButton("➕ Adicionar Novo Contato", this.cPrimary, Color.WHITE);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
+        btnLp.bottomMargin = dp(14);
+        btnAdd.setLayoutParams(btnLp);
+        btnAdd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showAddContactDialog();
+            }
+        });
+        linearLayout.addView(btnAdd);
+
+        if (this.contacts.length() == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("Nenhum contato de emergência cadastrado.");
+            empty.setTextColor(this.cTextMuted);
+            empty.setTextSize(sp(12.0f));
+            linearLayout.addView(empty);
+        } else {
+            for (int i = 0; i < this.contacts.length(); i++) {
+                final int idx = i;
+                final JSONObject c = this.contacts.optJSONObject(i);
+                if (c == null) continue;
+                final String telNum = c.optString("telefone", "");
+
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(0);
+                card.setGravity(16);
+                card.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
+                card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.bottomMargin = dp(10);
+                card.setLayoutParams(lp);
+
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(1);
+                col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                TextView tvN = new TextView(this);
+                tvN.setText("👤 " + c.optString("nome") + " (" + c.optString("relacao") + ")");
+                tvN.setTextColor(this.cTextMain);
+                tvN.setTextSize(sp(14.0f));
+                tvN.setTypeface(null, 1);
+                col.addView(tvN);
+
+                TextView tvT = new TextView(this);
+                tvT.setText("📞 " + telNum);
+                tvT.setTextColor(this.cTextMuted);
+                tvT.setTextSize(sp(12.0f));
+                col.addView(tvT);
+
+                card.addView(col);
+
+                TextView btnDial = createButton("📞 Ligar", this.cPrimaryLight, this.cPrimary);
+                btnDial.setPadding(dp(10), dp(6), dp(10), dp(6));
+                btnDial.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + telNum.replaceAll("[^0-9+]", ""))));
+                    }
+                });
+                card.addView(btnDial);
+
+                TextView btnDel = new TextView(this);
+                btnDel.setText("🗑️");
+                btnDel.setTextSize(sp(16.0f));
+                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.contacts.remove(idx);
+                        saveAll();
+                        render();
+                    }
+                });
+                card.addView(btnDel);
+
+                linearLayout.addView(card);
+            }
+        }
+    }
+
+    private void showAddContactDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Adicionar Contato de Emergência");
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(1);
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
+
+        final EditText etNome = createInput("Nome Completo", "");
+        final EditText etRel = createInput("Relação (Ex: Filho, Cônjuge)", "");
+        final EditText etTel = createInput("Telefone com DDD", "");
+
+        layout.addView(etNome);
+        layout.addView(etRel);
+        layout.addView(etTel);
+        builder.setView(layout);
+
+        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String nome = etNome.getText().toString().trim();
+                    if (!nome.isEmpty()) {
+                        JSONObject newC = new JSONObject();
+                        newC.put("id", "cnt-" + System.currentTimeMillis());
+                        newC.put("nome", nome);
+                        newC.put("relacao", etRel.getText().toString().trim());
+                        newC.put("telefone", etTel.getText().toString().trim());
+                        MainActivity.this.contacts.put(newC);
+                        saveAll();
+                        render();
+                    }
+                } catch (Exception e) {}
+            }
+        });
+        builder.setNegativeButton("Cancelar", null);
+        builder.show();
+    }
+
+    private void buildProfessionalsSubScreen(LinearLayout linearLayout) {
+        linearLayout.addView(sectionHeader("👨‍⚕️ Profissionais de Saúde", "Seus médicos, especialistas e farmacêuticos"));
+
+        TextView btnAdd = createButton("➕ Adicionar Profissional", this.cPrimary, Color.WHITE);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
+        btnLp.bottomMargin = dp(14);
+        btnAdd.setLayoutParams(btnLp);
+        btnAdd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showAddProfessionalDialog();
+            }
+        });
+        linearLayout.addView(btnAdd);
+
+        if (this.professionals.length() == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("Nenhum profissional de saúde cadastrado.");
+            empty.setTextColor(this.cTextMuted);
+            empty.setTextSize(sp(12.0f));
+            linearLayout.addView(empty);
+        } else {
+            for (int i = 0; i < this.professionals.length(); i++) {
+                final int idx = i;
+                final JSONObject p = this.professionals.optJSONObject(i);
+                if (p == null) continue;
+                final String telNum = p.optString("telefone", "");
+
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(0);
+                card.setGravity(16);
+                card.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
+                card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.bottomMargin = dp(10);
+                card.setLayoutParams(lp);
+
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(1);
+                col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                TextView tvN = new TextView(this);
+                tvN.setText("👨‍⚕️ " + p.optString("nome") + " (" + p.optString("especialidade") + ")");
+                tvN.setTextColor(this.cTextMain);
+                tvN.setTextSize(sp(14.0f));
+                tvN.setTypeface(null, 1);
+                col.addView(tvN);
+
+                TextView tvI = new TextView(this);
+                tvI.setText("CRM/Reg: " + p.optString("crm", "-") + " • Clínica: " + p.optString("clinica", "-") + "\nTel: " + telNum);
+                tvI.setTextColor(this.cTextMuted);
+                tvI.setTextSize(sp(12.0f));
+                col.addView(tvI);
+
+                card.addView(col);
+
+                if (!telNum.isEmpty()) {
+                    TextView btnDial = createButton("📞 Ligar", this.cPrimaryLight, this.cPrimary);
+                    btnDial.setPadding(dp(10), dp(6), dp(10), dp(6));
+                    btnDial.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + telNum.replaceAll("[^0-9+]", ""))));
+                        }
+                    });
+                    card.addView(btnDial);
+                }
+
+                TextView btnDel = new TextView(this);
+                btnDel.setText("🗑️");
+                btnDel.setTextSize(sp(16.0f));
+                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.professionals.remove(idx);
+                        saveAll();
+                        render();
+                    }
+                });
+                card.addView(btnDel);
+
+                linearLayout.addView(card);
+            }
+        }
+    }
+
+    private void showAddProfessionalDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Adicionar Profissional de Saúde");
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(1);
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
+
+        final EditText etNome = createInput("Nome do Médico/Farmacêutico", "");
+        final EditText etEsp = createInput("Especialidade (Ex: Cardiologia)", "");
+        final EditText etCrm = createInput("CRM / Registro Profissional", "");
+        final EditText etClinica = createInput("Consultório / Hospital", "");
+        final EditText etTel = createInput("Telefone de Contato", "");
+
+        layout.addView(etNome);
+        layout.addView(etEsp);
+        layout.addView(etCrm);
+        layout.addView(etClinica);
+        layout.addView(etTel);
+        builder.setView(layout);
+
+        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String nome = etNome.getText().toString().trim();
+                    if (!nome.isEmpty()) {
+                        JSONObject newP = new JSONObject();
+                        newP.put("id", "prof-" + System.currentTimeMillis());
+                        newP.put("nome", nome);
+                        newP.put("especialidade", etEsp.getText().toString().trim());
+                        newP.put("crm", etCrm.getText().toString().trim());
+                        newP.put("clinica", etClinica.getText().toString().trim());
+                        newP.put("telefone", etTel.getText().toString().trim());
+                        MainActivity.this.professionals.put(newP);
+                        saveAll();
+                        render();
+                    }
+                } catch (Exception e) {}
+            }
+        });
+        builder.setNegativeButton("Cancelar", null);
+        builder.show();
+    }
+
+    private void buildCaregiversSubScreen(LinearLayout linearLayout) {
+        linearLayout.addView(sectionHeader("🤝 Cuidadores Vinculados", "Pessoas autorizadas a acompanhar sua adesão"));
+
+        TextView btnInvite = createButton("🔑 Gerar Código de Convite para Cuidador", this.cPrimary, Color.WHITE);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
+        btnLp.bottomMargin = dp(14);
+        btnInvite.setLayoutParams(btnLp);
+        btnInvite.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                generateCaregiverInviteCode();
+            }
+        });
+        linearLayout.addView(btnInvite);
+
+        if (this.caregivers.length() == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("Nenhum cuidador vinculado a este perfil.");
+            empty.setTextColor(this.cTextMuted);
+            empty.setTextSize(sp(12.0f));
+            linearLayout.addView(empty);
+        } else {
+            for (int i = 0; i < this.caregivers.length(); i++) {
+                final int idx = i;
+                final JSONObject cg = this.caregivers.optJSONObject(i);
+                if (cg == null) continue;
+
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(0);
+                card.setGravity(16);
+                card.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
+                card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.bottomMargin = dp(10);
+                card.setLayoutParams(lp);
+
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(1);
+                col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                TextView tvN = new TextView(this);
+                tvN.setText("🤝 " + cg.optString("nome", "Cuidador") + " (" + cg.optString("relacao", "Familiar") + ")");
+                tvN.setTextColor(this.cTextMain);
+                tvN.setTextSize(sp(14.0f));
+                tvN.setTypeface(null, 1);
+                col.addView(tvN);
+
+                TextView tvS = new TextView(this);
+                tvS.setText("Status: " + cg.optString("status", "Ativo") + " • Código: " + cg.optString("codigo_convite", "MED-883921"));
+                tvS.setTextColor(this.cTextMuted);
+                tvS.setTextSize(sp(12.0f));
+                col.addView(tvS);
+
+                card.addView(col);
+
+                TextView btnRevoke = createButton("Revogar", this.cDangerBg, this.cDanger);
+                btnRevoke.setPadding(dp(10), dp(6), dp(10), dp(6));
+                btnRevoke.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.caregivers.remove(idx);
+                        saveAll();
+                        render();
+                    }
+                });
+                card.addView(btnRevoke);
+
+                linearLayout.addView(card);
+            }
+        }
+    }
+
+    private void generateCaregiverInviteCode() {
+        int code = (int) (100000 + Math.random() * 900000);
+        String token = "MED-" + code;
+        try {
+            JSONObject newCg = new JSONObject();
+            newCg.put("id", "cg-" + System.currentTimeMillis());
+            newCg.put("nome", "Novo Cuidador (Aguardando vínculo)");
+            newCg.put("relacao", "Pendente");
+            newCg.put("codigo_convite", token);
+            newCg.put("status", "Pendente");
+            this.caregivers.put(newCg);
+            saveAll();
+            render();
+
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("🔑 Código de Convite Criado!");
+            builder.setMessage("Compartilhe este código com seu cuidador para que ele acompanhe seus medicamentos:\n\nCÓDIGO: " + token + "\n\nO cuidador deverá digitar este código na plataforma Web do MediCare Cuidador.");
+            builder.setPositiveButton("OK", null);
+            builder.show();
+        } catch (Exception e) {}
+    }
+
+    private void buildStockHistorySubScreen(LinearLayout linearLayout) {
+        linearLayout.addView(sectionHeader("📦 Histórico de Movimentações de Estoque", "Registro de entradas, saídas e consumos de medicamentos"));
+
+        if (this.stockMovements.length() == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("Nenhuma movimentação de estoque registrada até o momento.");
+            empty.setTextColor(this.cTextMuted);
+            empty.setTextSize(sp(12.0f));
+            linearLayout.addView(empty);
+        } else {
+            for (int i = this.stockMovements.length() - 1; i >= 0; i--) {
+                JSONObject sm = this.stockMovements.optJSONObject(i);
+                if (sm == null) continue;
+
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(1);
+                card.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+                card.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.bottomMargin = dp(8);
+                card.setLayoutParams(lp);
+
+                TextView tvM = new TextView(this);
+                tvM.setText("📦 " + sm.optString("medicamento_nome") + " (" + sm.optString("tipo_movimento", "Ajuste") + ")");
+                tvM.setTextColor(this.cTextMain);
+                tvM.setTextSize(sp(13.0f));
+                tvM.setTypeface(null, 1);
+                card.addView(tvM);
+
+                TextView tvD = new TextView(this);
+                tvD.setText("Qtd: " + sm.optString("quantidade") + " • Data: " + sm.optString("data_hora") + " • Obs: " + sm.optString("observacao", "Sem observações"));
+                tvD.setTextColor(this.cTextMuted);
+                tvD.setTextSize(sp(11.0f));
+                card.addView(tvD);
+
+                linearLayout.addView(card);
+            }
+        }
     }
 
     /* JADX INFO: Access modifiers changed from: package-private */

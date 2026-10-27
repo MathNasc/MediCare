@@ -24,7 +24,7 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Disposition': 'attachment; filename="medicare-patient-v2.4.apk"',
+        'Content-Disposition': 'attachment; filename="medicare-patient-v2.5.apk"',
         'Content-Length': String(fileBuffer.length),
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
         'Pragma': 'no-cache',
