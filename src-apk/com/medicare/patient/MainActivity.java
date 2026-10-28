@@ -7,6 +7,7 @@ import android.app.TimePickerDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
@@ -17,6 +18,7 @@ import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -145,8 +147,8 @@ public class MainActivity extends Activity {
         if ((requestCode == REQ_PICK_PROFILE_PHOTO || requestCode == REQ_CAPTURE_PROFILE_PHOTO) && resultCode == RESULT_OK && data != null) {
             try {
                 Bitmap rawBmp = null;
-                if (data.getData() != null) {
-                    Uri imgUri = data.getData();
+                Uri imgUri = data.getData();
+                if (imgUri != null) {
                     InputStream is = getContentResolver().openInputStream(imgUri);
                     if (is != null) {
                         BitmapFactory.Options opts = new BitmapFactory.Options();
@@ -161,6 +163,9 @@ public class MainActivity extends Activity {
                             }
                         }
                     }
+                    if (rawBmp != null) {
+                        rawBmp = fixImageOrientation(imgUri, rawBmp);
+                    }
                 } else if (data.getExtras() != null && data.getExtras().get("data") instanceof Bitmap) {
                     rawBmp = (Bitmap) data.getExtras().get("data");
                 }
@@ -173,7 +178,7 @@ public class MainActivity extends Activity {
                     Bitmap squareBmp = Bitmap.createBitmap(rawBmp, xOff, yOff, side, side);
                     Bitmap scaledBmp = Bitmap.createScaledBitmap(squareBmp, 240, 240, true);
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    scaledBmp.compress(Bitmap.CompressFormat.JPEG, 82, baos);
+                    scaledBmp.compress(Bitmap.CompressFormat.JPEG, 85, baos);
                     String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
                     this.profile.put("foto_base64", b64);
                     this.profile.put("foto_url", "data:image/jpeg;base64," + b64);
@@ -186,6 +191,107 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 Toast.makeText(this, "Erro ao processar foto: " + e.getMessage(), 0).show();
             }
+        }
+    }
+
+    private Bitmap fixImageOrientation(Uri imgUri, Bitmap bitmap) {
+        if (bitmap == null || imgUri == null) return bitmap;
+        int rotateDegrees = 0;
+        boolean flipHorizontal = false;
+        boolean flipVertical = false;
+        try {
+            if (Build.VERSION.SDK_INT >= 24) {
+                InputStream exifStream = getContentResolver().openInputStream(imgUri);
+                if (exifStream != null) {
+                    ExifInterface exif = new ExifInterface(exifStream);
+                    int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+                    exifStream.close();
+                    switch (orientation) {
+                        case ExifInterface.ORIENTATION_ROTATE_90:
+                            rotateDegrees = 90;
+                            break;
+                        case ExifInterface.ORIENTATION_ROTATE_180:
+                            rotateDegrees = 180;
+                            break;
+                        case ExifInterface.ORIENTATION_ROTATE_270:
+                            rotateDegrees = 270;
+                            break;
+                        case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                            flipHorizontal = true;
+                            break;
+                        case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                            flipVertical = true;
+                            break;
+                        case ExifInterface.ORIENTATION_TRANSPOSE:
+                            rotateDegrees = 90;
+                            flipHorizontal = true;
+                            break;
+                        case ExifInterface.ORIENTATION_TRANSVERSE:
+                            rotateDegrees = 270;
+                            flipHorizontal = true;
+                            break;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (rotateDegrees == 0 && !flipHorizontal && !flipVertical) {
+            try {
+                Cursor cursor = getContentResolver().query(imgUri, new String[]{MediaStore.Images.ImageColumns.ORIENTATION}, null, null, null);
+                if (cursor != null) {
+                    if (cursor.moveToFirst()) {
+                        rotateDegrees = cursor.getInt(0);
+                    }
+                    cursor.close();
+                }
+            } catch (Exception ignored) {}
+        }
+
+        if (rotateDegrees != 0 || flipHorizontal || flipVertical) {
+            try {
+                Matrix matrix = new Matrix();
+                if (rotateDegrees != 0) {
+                    matrix.postRotate(rotateDegrees);
+                }
+                if (flipHorizontal || flipVertical) {
+                    matrix.postScale(flipHorizontal ? -1.0f : 1.0f, flipVertical ? -1.0f : 1.0f);
+                }
+                Bitmap oriented = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+                if (oriented != null) {
+                    return oriented;
+                }
+            } catch (Exception ignored) {}
+        }
+        return bitmap;
+    }
+
+    private void rotateCurrentProfilePhoto(int degrees) {
+        try {
+            String b64 = this.profile.optString("foto_base64", "").trim();
+            if (b64.isEmpty()) {
+                String fotoUrl = this.profile.optString("foto_url", "").trim();
+                if (fotoUrl.startsWith("data:image") && fotoUrl.contains(",")) {
+                    b64 = fotoUrl.substring(fotoUrl.indexOf(",") + 1).trim();
+                }
+            }
+            if (b64.isEmpty()) return;
+            byte[] decoded = Base64.decode(b64, Base64.DEFAULT);
+            if (decoded == null || decoded.length == 0) return;
+            Bitmap src = BitmapFactory.decodeByteArray(decoded, 0, decoded.length);
+            if (src == null) return;
+            Matrix matrix = new Matrix();
+            matrix.postRotate(degrees);
+            Bitmap rotated = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), matrix, true);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            rotated.compress(Bitmap.CompressFormat.JPEG, 88, baos);
+            String newB64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+            this.profile.put("foto_base64", newB64);
+            this.profile.put("foto_url", "data:image/jpeg;base64," + newB64);
+            saveAll();
+            render();
+            Toast.makeText(this, "🔄 Foto girada!", 0).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Erro ao girar foto", 0).show();
         }
     }
 
@@ -706,10 +812,56 @@ public class MainActivity extends Activity {
         }
         root.addView(colorRow);
 
-        // Option 4: Remove current photo (if present)
+        // Option 4: Rotate or Remove current photo (if present)
         boolean hasPhoto = !this.profile.optString("foto_base64", "").isEmpty()
                 || this.profile.optString("foto_url", "").startsWith("data:image");
         if (hasPhoto) {
+            LinearLayout rotRow = new LinearLayout(this);
+            rotRow.setOrientation(0);
+            LinearLayout.LayoutParams rrLp = new LinearLayout.LayoutParams(-1, -2);
+            rrLp.topMargin = dp(4);
+            rrLp.bottomMargin = dp(8);
+            rotRow.setLayoutParams(rrLp);
+
+            TextView btnRotLeft = new TextView(this);
+            btnRotLeft.setText("↺ Girar 90° esq.");
+            btnRotLeft.setTextColor(this.cPrimary);
+            btnRotLeft.setTextSize(sp(13.0f));
+            btnRotLeft.setTypeface(null, 1);
+            btnRotLeft.setGravity(17);
+            btnRotLeft.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+            btnRotLeft.setPadding(dp(10), dp(11), dp(10), dp(11));
+            LinearLayout.LayoutParams rlLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            rlLp.rightMargin = dp(8);
+            btnRotLeft.setLayoutParams(rlLp);
+            btnRotLeft.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                    rotateCurrentProfilePhoto(-90);
+                }
+            });
+            rotRow.addView(btnRotLeft);
+
+            TextView btnRotRight = new TextView(this);
+            btnRotRight.setText("↻ Girar 90° dir.");
+            btnRotRight.setTextColor(this.cPrimary);
+            btnRotRight.setTextSize(sp(13.0f));
+            btnRotRight.setTypeface(null, 1);
+            btnRotRight.setGravity(17);
+            btnRotRight.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+            btnRotRight.setPadding(dp(10), dp(11), dp(10), dp(11));
+            btnRotRight.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            btnRotRight.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                    rotateCurrentProfilePhoto(90);
+                }
+            });
+            rotRow.addView(btnRotRight);
+            root.addView(rotRow);
+
             TextView btnRemove = new TextView(this);
             btnRemove.setText("🗑️  Remover foto atual");
             btnRemove.setTextColor(this.cDanger);
@@ -718,9 +870,7 @@ public class MainActivity extends Activity {
             btnRemove.setGravity(17);
             btnRemove.setBackground(shape(Color.parseColor("#1AEF4444"), 12, Color.parseColor("#40EF4444"), 1));
             btnRemove.setPadding(dp(14), dp(12), dp(14), dp(12));
-            LinearLayout.LayoutParams rmLp = new LinearLayout.LayoutParams(-1, -2);
-            rmLp.topMargin = dp(4);
-            btnRemove.setLayoutParams(rmLp);
+            btnRemove.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
             btnRemove.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -6286,25 +6436,52 @@ public class MainActivity extends Activity {
         avatarView.setLayoutParams(avWrapLp);
         heroCenter.addView(avatarView);
 
-        TextView btnChangePhotoPill = new TextView(this);
         boolean hasCustomPhoto = !this.profile.optString("foto_base64", "").isEmpty()
                 || this.profile.optString("foto_url", "").startsWith("data:image");
+
+        LinearLayout photoPillsRow = new LinearLayout(this);
+        photoPillsRow.setOrientation(0);
+        photoPillsRow.setGravity(17);
+        LinearLayout.LayoutParams pprLp = new LinearLayout.LayoutParams(-2, -2);
+        pprLp.bottomMargin = dp(10);
+        photoPillsRow.setLayoutParams(pprLp);
+
+        TextView btnChangePhotoPill = new TextView(this);
         btnChangePhotoPill.setText(hasCustomPhoto ? "📷 Alterar foto" : "📷 Adicionar foto");
         btnChangePhotoPill.setTextColor(this.cPrimary);
         btnChangePhotoPill.setTextSize(sp(12.0f));
         btnChangePhotoPill.setTypeface(null, 1);
         btnChangePhotoPill.setBackground(shape(Color.argb(24, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 99, Color.argb(70, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 1));
-        btnChangePhotoPill.setPadding(dp(12), dp(4), dp(12), dp(4));
-        LinearLayout.LayoutParams cppLp = new LinearLayout.LayoutParams(-2, -2);
-        cppLp.bottomMargin = dp(10);
-        btnChangePhotoPill.setLayoutParams(cppLp);
+        btnChangePhotoPill.setPadding(dp(12), dp(5), dp(12), dp(5));
         btnChangePhotoPill.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 showPhotoOptionsDialog();
             }
         });
-        heroCenter.addView(btnChangePhotoPill);
+        photoPillsRow.addView(btnChangePhotoPill);
+
+        if (hasCustomPhoto) {
+            TextView btnRotatePhotoPill = new TextView(this);
+            btnRotatePhotoPill.setText("↻ Girar foto");
+            btnRotatePhotoPill.setTextColor(this.cTextMain);
+            btnRotatePhotoPill.setTextSize(sp(12.0f));
+            btnRotatePhotoPill.setTypeface(null, 1);
+            btnRotatePhotoPill.setBackground(shape(this.cSurface, 99, this.cBorder, 1));
+            btnRotatePhotoPill.setPadding(dp(12), dp(5), dp(12), dp(5));
+            LinearLayout.LayoutParams rpBtnLp = new LinearLayout.LayoutParams(-2, -2);
+            rpBtnLp.leftMargin = dp(8);
+            btnRotatePhotoPill.setLayoutParams(rpBtnLp);
+            btnRotatePhotoPill.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    rotateCurrentProfilePhoto(90);
+                }
+            });
+            photoPillsRow.addView(btnRotatePhotoPill);
+        }
+
+        heroCenter.addView(photoPillsRow);
 
         TextView tvName = new TextView(this);
         tvName.setText(displayName);
