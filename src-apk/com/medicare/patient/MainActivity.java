@@ -3,6 +3,7 @@ package com.medicare.patient;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
+import android.app.TimePickerDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -11,6 +12,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.CheckBox;
@@ -22,6 +26,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.TimePicker;
 import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -29,6 +34,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.Normalizer;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -85,6 +91,7 @@ public class MainActivity extends Activity {
     private boolean isDarkMode = true;
     private boolean isHighContrast = false;
     private boolean isAccessibilityMode = false;
+    private String fontScaleMode = "normal";
     private String activeTab = "home";
     private List<String> tabHistory = new ArrayList();
     private long lastBackPressTime = 0;
@@ -200,12 +207,20 @@ public class MainActivity extends Activity {
         return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
     }
 
+    private float getFontScaleFactor() {
+        float base = "xlarge".equals(this.fontScaleMode) ? 1.24f : ("large".equals(this.fontScaleMode) ? 1.12f : 1.0f);
+        if (this.isAccessibilityMode && base < 1.15f) {
+            base = 1.15f;
+        }
+        return base;
+    }
+
     private int dp(int i) {
-        return (int) TypedValue.applyDimension(1, i * (this.isAccessibilityMode ? 1.15f : 1.0f), getResources().getDisplayMetrics());
+        return (int) TypedValue.applyDimension(1, i * (this.isAccessibilityMode ? 1.12f : 1.0f), getResources().getDisplayMetrics());
     }
 
     private float sp(float f) {
-        return this.isAccessibilityMode ? f * 1.18f : f;
+        return f * getFontScaleFactor();
     }
 
     private GradientDrawable shape(int i, int i2, int i3, int i4) {
@@ -286,6 +301,7 @@ public class MainActivity extends Activity {
             this.isDarkMode = this.prefs.getBoolean("dark_mode", true);
             this.isHighContrast = this.prefs.getBoolean("high_contrast", false);
             this.isAccessibilityMode = this.prefs.getBoolean("accessibility_mode", false);
+            this.fontScaleMode = this.prefs.getString("font_scale_mode", "normal");
             this.lastSyncTimestamp = this.prefs.getString("last_sync_timestamp", "Sincronização automática ativa");
             String string = this.prefs.getString("profile", null);
             if (string != null) {
@@ -364,6 +380,7 @@ public class MainActivity extends Activity {
             .putBoolean("dark_mode", this.isDarkMode)
             .putBoolean("high_contrast", this.isHighContrast)
             .putBoolean("accessibility_mode", this.isAccessibilityMode)
+            .putString("font_scale_mode", this.fontScaleMode)
             .putString("last_sync_timestamp", this.lastSyncTimestamp)
             .putString("profile", this.profile.toString())
             .putString("meds", this.meds.toString())
@@ -2665,100 +2682,1293 @@ public class MainActivity extends Activity {
         b.show();
     }
 
+    private static final String[][] BRAZIL_MED_CATALOG = {
+        // {category, commercial_name, active_ingredient, dosage, form, unit, manufacturer, type (GEN/REF/SIM)}
+        {"ANTI-HIPERTENSIVOS", "Losartana Potássica 50mg", "Losartana Potássica", "50mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Enalapril 10mg", "Maleato de Enalapril", "10mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Anlodipino 5mg", "Anlodipino", "5mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Cozaar 50mg", "Losartana Potássica", "50mg", "Comprimido Revestido", "comprimido", "Organon", "REF"},
+        {"ANTI-HIPERTENSIVOS", "Aradois 50mg", "Losartana Potássica", "50mg", "Comprimido Revestido", "comprimido", "Biolab", "SIM"},
+        {"ANTI-HIPERTENSIVOS", "Captopril 25mg", "Captopril", "25mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Hidroclorotiazida 25mg", "Hidroclorotiazida", "25mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Atenolol 50mg", "Atenolol", "50mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Propranolol 40mg", "Cloridrato de Propranolol", "40mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Carvedilol 12,5mg", "Carvedilol", "12,5mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Furosemida 40mg", "Furosemida", "40mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Espironolactona 25mg", "Espironolactona", "25mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Valsartana 160mg", "Valsartana", "160mg", "Comprimido", "comprimido", "Medley", "GEN"},
+        {"ANTI-HIPERTENSIVOS", "Seloken 100mg", "Tartarato de Metoprolol", "100mg", "Comprimido", "comprimido", "AstraZeneca", "REF"},
+
+        {"DIABETES", "Metformina 850mg", "Cloridrato de Metformina", "850mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DIABETES", "Glifage XR 500mg", "Cloridrato de Metformina", "500mg", "Comprimido", "comprimido", "Merck", "REF"},
+        {"DIABETES", "Dapagliflozina 10mg", "Dapagliflozina", "10mg", "Comprimido", "comprimido", "AstraZeneca", "REF"},
+        {"DIABETES", "Metformina 500mg", "Cloridrato de Metformina", "500mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DIABETES", "Gliclazida 30mg", "Gliclazida", "30mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DIABETES", "Glibenclamida 5mg", "Glibenclamida", "5mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DIABETES", "Forxiga 10mg", "Dapagliflozina", "10mg", "Comprimido", "comprimido", "AstraZeneca", "REF"},
+        {"DIABETES", "Jardiance 25mg", "Empagliflozina", "25mg", "Comprimido", "comprimido", "Boehringer", "REF"},
+        {"DIABETES", "Ozempic 1mg", "Semaglutida", "1mg", "Solução Injetável", "ml", "Novo Nordisk", "REF"},
+        {"DIABETES", "Insulina NPH 100UI", "Insulina Isofana", "100UI/ml", "Solução Injetável", "ml", "Novo Nordisk", "REF"},
+
+        {"COLESTEROL", "Sinvastatina 20mg", "Sinvastatina", "20mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"COLESTEROL", "Atorvastatina 20mg", "Atorvastatina Cálcica", "20mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"COLESTEROL", "Rosuvastatina 10mg", "Rosuvastatina Cálcica", "10mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"COLESTEROL", "Crestor 10mg", "Rosuvastatina Cálcica", "10mg", "Comprimido", "comprimido", "AstraZeneca", "REF"},
+        {"COLESTEROL", "Lipitor 20mg", "Atorvastatina Cálcica", "20mg", "Comprimido", "comprimido", "Pfizer", "REF"},
+        {"COLESTEROL", "Ezetimiba 10mg", "Ezetimiba", "10mg", "Comprimido", "comprimido", "EMS", "GEN"},
+
+        {"DOR / FEBRE", "Paracetamol 750mg", "Paracetamol", "750mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DOR / FEBRE", "Dipirona 500mg", "Dipirona Monoidratada", "500mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DOR / FEBRE", "Ibuprofeno 400mg", "Ibuprofeno", "400mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DOR / FEBRE", "Novalgina 500mg", "Dipirona Monoidratada", "500mg", "Comprimido", "comprimido", "Sanofi", "REF"},
+        {"DOR / FEBRE", "Dipirona Gotas", "Dipirona Monoidratada", "500mg/ml", "Solução Oral", "gotas", "EMS", "GEN"},
+        {"DOR / FEBRE", "Tylenol 750mg", "Paracetamol", "750mg", "Comprimido", "comprimido", "Kenvue", "REF"},
+        {"DOR / FEBRE", "Advil 400mg", "Ibuprofeno", "400mg", "Cápsula Gelatinosa", "cápsula", "Haleon", "REF"},
+        {"DOR / FEBRE", "Nimesulida 100mg", "Nimesulida", "100mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DOR / FEBRE", "Diclofenaco 50mg", "Diclofenaco de Potássio", "50mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"DOR / FEBRE", "Torsilax", "Paracetamol + Carisoprodol + Diclofenaco", "300/125/50mg", "Comprimido", "comprimido", "Neo Química", "SIM"},
+
+        {"ESTÔMAGO", "Omeprazol 20mg", "Omeprazol", "20mg", "Cápsula", "cápsula", "EMS", "GEN"},
+        {"ESTÔMAGO", "Pantoprazol 40mg", "Pantoprazol Sódico", "40mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ESTÔMAGO", "Domperidona 10mg", "Domperidona", "10mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ESTÔMAGO", "Esomeprazol 40mg", "Esomeprazol Magnésico", "40mg", "Cápsula", "cápsula", "EMS", "GEN"},
+        {"ESTÔMAGO", "Buscopan Composto", "Butilescopolamina + Dipirona", "10mg+500mg", "Comprimido", "comprimido", "Boehringer", "REF"},
+        {"ESTÔMAGO", "Luftal Gel", "Simeticona", "80mg", "Gel Oral", "ml", "Takeda", "REF"},
+
+        {"TIREOIDE", "Puran T4 50mcg", "Levotiroxina Sódica", "50mcg", "Comprimido", "comprimido", "Abbott", "REF"},
+        {"TIREOIDE", "Levotiroxina 100mcg", "Levotiroxina Sódica", "100mcg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"TIREOIDE", "Levotiroxina 50mcg", "Levotiroxina Sódica", "50mcg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"TIREOIDE", "Synthroid 50mcg", "Levotiroxina Sódica", "50mcg", "Comprimido", "comprimido", "Abbott", "SIM"},
+
+        {"VITAMINAS", "Vitamina D3 2000UI", "Colecalciferol", "2000UI", "Cápsula", "cápsula", "EMS", "GEN"},
+        {"VITAMINAS", "Ômega 3 1000mg", "Ácidos Graxos Ômega-3", "1g", "Cápsula Gelatinosa", "cápsula", "EMS", "GEN"},
+        {"VITAMINAS", "Ácido Fólico 5mg", "Ácido Fólico", "5mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"VITAMINAS", "Vitamina C 1000mg", "Ácido Ascórbico", "1g", "Comprimido Efervescente", "comprimido", "EMS", "GEN"},
+        {"VITAMINAS", "Vitamina B12 1mg", "Cianocobalamina", "1mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"VITAMINAS", "Sulfato Ferroso 40mg", "Sulfato Ferroso", "40mg", "Comprimido", "comprimido", "EMS", "GEN"},
+
+        {"SAÚDE MENTAL / NEUROLOGIA", "Sertralina 50mg", "Cloridrato de Sertralina", "50mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Escitalopram 10mg", "Oxalato de Escitalopram", "10mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Fluoxetina 20mg", "Cloridrato de Fluoxetina", "20mg", "Cápsula", "cápsula", "EMS", "GEN"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Clonazepam 2mg", "Clonazepam", "2mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Rivotril 0,5mg", "Clonazepam", "0,5mg", "Comprimido", "comprimido", "Roche", "REF"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Amitriptilina 25mg", "Cloridrato de Amitriptilina", "25mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Quetiapina 25mg", "Fumarato de Quetiapina", "25mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Pregabalina 75mg", "Pregabalina", "75mg", "Cápsula", "cápsula", "EMS", "GEN"},
+        {"SAÚDE MENTAL / NEUROLOGIA", "Donepezila 5mg", "Cloridrato de Donepezila", "5mg", "Comprimido", "comprimido", "EMS", "GEN"},
+
+        {"ANTIBIÓTICOS", "Amoxicilina 500mg", "Amoxicilina", "500mg", "Cápsula", "cápsula", "EMS", "GEN"},
+        {"ANTIBIÓTICOS", "Azitromicina 500mg", "Azitromicina", "500mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTIBIÓTICOS", "Cefalexina 500mg", "Cefalexina", "500mg", "Cápsula", "cápsula", "EMS", "GEN"},
+        {"ANTIBIÓTICOS", "Ciprofloxacino 500mg", "Cloridrato de Ciprofloxacino", "500mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"ANTIBIÓTICOS", "Clavulin BD 875mg", "Amoxicilina + Clavulanato", "875/125mg", "Comprimido", "comprimido", "GSK", "REF"},
+
+        {"CARDIOVASCULAR / ANTICOAGULANTES", "AAS 100mg", "Ácido Acetilsalicílico", "100mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"CARDIOVASCULAR / ANTICOAGULANTES", "Xarelto 10mg", "Rivaroxabana", "10mg", "Comprimido", "comprimido", "Bayer", "REF"},
+        {"CARDIOVASCULAR / ANTICOAGULANTES", "Clopidogrel 75mg", "Clopidogrel", "75mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"CARDIOVASCULAR / ANTICOAGULANTES", "Marevan 5mg", "Varfarina Sódica", "5mg", "Comprimido", "comprimido", "Sanofi", "REF"},
+
+        {"RESPIRATÓRIO / ALERGIA", "Aerolin Spray", "Sulfato de Salbutamol", "100mcg/dose", "Aerossol", "dose", "GSK", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Loratadina 10mg", "Loratadina", "10mg", "Comprimido", "comprimido", "EMS", "GEN"},
+        {"RESPIRATÓRIO / ALERGIA", "Prednisona 20mg", "Prednisona", "20mg", "Comprimido", "comprimido", "EMS", "GEN"}
+    };
+
+    private static final String[][] POPULAR_CATALOG_GROUPS = {
+        {"ANTI-HIPERTENSIVOS", "Losartana Potássica 50mg", "Enalapril 10mg", "Anlodipino 5mg"},
+        {"DIABETES", "Metformina 850mg", "Glifage XR 500mg", "Dapagliflozina 10mg"},
+        {"COLESTEROL", "Sinvastatina 20mg", "Atorvastatina 20mg", "Rosuvastatina 10mg"},
+        {"DOR / FEBRE", "Paracetamol 750mg", "Dipirona 500mg", "Ibuprofeno 400mg"},
+        {"ESTÔMAGO", "Omeprazol 20mg", "Pantoprazol 40mg", "Domperidona 10mg"},
+        {"TIREOIDE", "Puran T4 50mcg", "Levotiroxina 100mcg"},
+        {"VITAMINAS", "Vitamina D3 2000UI", "Ômega 3 1000mg", "Ácido Fólico 5mg"}
+    };
+
+    private String normalizeForSearch(String s) {
+        if (s == null) return "";
+        String norm = Normalizer.normalize(s.toLowerCase(Locale.ROOT), Normalizer.Form.NFD);
+        return norm.replaceAll("[\\p{InCombiningDiacriticalMarks}]", "").trim();
+    }
+
     private void showMedModal(final JSONObject jSONObject, final int i) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        ScrollView scrollView = new ScrollView(this);
-        LinearLayout linearLayout = new LinearLayout(this);
-        linearLayout.setOrientation(1);
-        linearLayout.setPadding(dp(20), dp(20), dp(20), dp(20));
-        linearLayout.setBackgroundColor(this.cSurface);
+        if (jSONObject != null) {
+            showMedFormStepDialog(jSONObject, i, null, getMedType(jSONObject));
+        } else {
+            showMedCatalogSearchDialog();
+        }
+    }
 
-        TextView textView = new TextView(this);
-        textView.setText(jSONObject == null ? "Novo Medicamento" : "Editar Medicamento");
-        textView.setTextColor(this.cTextMain);
-        textView.setTextSize(sp(18.0f));
-        textView.setTypeface(null, 1);
-        textView.setPadding(0, 0, 0, dp(12));
-        linearLayout.addView(textView);
+    private void showMedCatalogSearchDialog() {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
 
-        final int prevStock = jSONObject != null ? getMedStock(jSONObject) : -1;
-        String initType = jSONObject != null ? getMedType(jSONObject) : ("temporary".equals(this.medFilter) ? "temporary" : ("sos".equals(this.medFilter) ? "sos" : "continuous"));
+        // 1. Header Row: [ 💊 ] Adicionar medicamento / Busque no catálogo ou cadastre manualmente [ × ]
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(dp(18), dp(20), dp(16), dp(14));
 
-        final EditText nameIn = createInput("Nome do Medicamento *", jSONObject != null ? jSONObject.optString("nome") : "");
-        final EditText activeIn = createInput("Princípio Ativo (opcional)", jSONObject != null ? jSONObject.optString("principio_ativo") : "");
-        final EditText doseIn = createInput("Dosagem * (ex: 50mg, 500mg)", jSONObject != null ? jSONObject.optString("dosagem") : "");
-        final EditText unitIn = createInput("Unidade (comprimido, cápsula, ml, gota)", jSONObject != null ? jSONObject.optString("unidade", jSONObject.optString("forma", "comprimido")) : "comprimido");
-        final EditText typeIn = createInput("Tipo de tratamento (continuous, temporary, sos)", initType);
-        final EditText durIn = createInput("Duração em dias (para Temporário, ex: 7)", jSONObject != null ? String.valueOf(jSONObject.optInt("duration_days", 7)) : "7");
-        durIn.setInputType(2);
-        final EditText schedIn = createInput("Horários separados por vírgula (ex: 08:00,20:00)", (jSONObject == null || jSONObject.optJSONArray("horarios") == null) ? "08:00" : joinArray(jSONObject.optJSONArray("horarios")));
-        final EditText stockIn = createInput("Quantidade em Estoque *", String.valueOf(jSONObject != null ? getMedStock(jSONObject) : 30));
+        TextView iconBox = new TextView(this);
+        iconBox.setText("💊");
+        iconBox.setTextSize(sp(20.0f));
+        iconBox.setGravity(17);
+        iconBox.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
+        LinearLayout.LayoutParams ibLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        ibLp.rightMargin = dp(12);
+        iconBox.setLayoutParams(ibLp);
+        hdr.addView(iconBox);
+
+        LinearLayout hdrTextCol = new LinearLayout(this);
+        hdrTextCol.setOrientation(1);
+        hdrTextCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Adicionar medicamento");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(18.0f));
+        tvTitle.setTypeface(null, 1);
+        hdrTextCol.addView(tvTitle);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Busque no catálogo ou cadastre manualmente");
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(12.5f));
+        tvSub.setPadding(0, dp(2), 0, 0);
+        hdrTextCol.addView(tvSub);
+        hdr.addView(hdrTextCol);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(16.0f));
+        btnClose.setTypeface(null, 1);
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 18, 0, 0));
+        LinearLayout.LayoutParams bcLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        bcLp.leftMargin = dp(8);
+        btnClose.setLayoutParams(bcLp);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        View topDiv = new View(this);
+        topDiv.setBackgroundColor(this.cBorder);
+        topDiv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        root.addView(topDiv);
+
+        // 2. Search Bar Container + Helper Text
+        LinearLayout searchWrap = new LinearLayout(this);
+        searchWrap.setOrientation(1);
+        searchWrap.setPadding(dp(16), dp(14), dp(16), dp(6));
+
+        final LinearLayout searchBox = new LinearLayout(this);
+        searchBox.setOrientation(0);
+        searchBox.setGravity(16);
+        int inpBg = this.isDarkMode ? Color.parseColor("#162032") : this.cBgMain;
+        searchBox.setBackground(shape(inpBg, 14, this.cBorder, 1));
+        searchBox.setPadding(dp(14), dp(10), dp(12), dp(10));
+
+        TextView tvMag = new TextView(this);
+        tvMag.setText("🔍");
+        tvMag.setTextSize(sp(15.0f));
+        tvMag.setPadding(0, 0, dp(10), 0);
+        searchBox.addView(tvMag);
+
+        final EditText etQuery = new EditText(this);
+        etQuery.setHint("Buscar medicamento, princípio ativo...");
+        etQuery.setHintTextColor(this.cTextLight);
+        etQuery.setTextColor(this.cTextMain);
+        etQuery.setTextSize(sp(14.5f));
+        etQuery.setSingleLine(true);
+        etQuery.setBackgroundColor(Color.TRANSPARENT);
+        etQuery.setPadding(0, dp(2), 0, dp(2));
+        etQuery.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        searchBox.addView(etQuery);
+
+        final TextView btnClear = new TextView(this);
+        btnClear.setText("✕");
+        btnClear.setTextColor(this.cTextMuted);
+        btnClear.setTextSize(sp(11.0f));
+        btnClear.setGravity(17);
+        btnClear.setBackground(shape(this.cSurfaceHover, 11, 0, 0));
+        btnClear.setLayoutParams(new LinearLayout.LayoutParams(dp(22), dp(22)));
+        btnClear.setVisibility(View.GONE);
+        searchBox.addView(btnClear);
+
+        searchWrap.addView(searchBox);
+
+        final TextView tvHelper = new TextView(this);
+        tvHelper.setText("Digite o nome comercial ou o princípio ativo");
+        tvHelper.setTextColor(this.cTextLight);
+        tvHelper.setTextSize(sp(11.5f));
+        tvHelper.setGravity(17);
+        tvHelper.setPadding(0, dp(6), 0, dp(2));
+        searchWrap.addView(tvHelper);
+        root.addView(searchWrap);
+
+        // 3. Scrollable Catalog Results List
+        ScrollView listScroll = new ScrollView(this);
+        listScroll.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(360)));
+        final LinearLayout listContainer = new LinearLayout(this);
+        listContainer.setOrientation(1);
+        listScroll.addView(listContainer);
+        root.addView(listScroll);
+
+        // 4. Sticky Footer: [ ✏️ Não encontrei — cadastrar manualmente ]
+        View botDiv = new View(this);
+        botDiv.setBackgroundColor(this.cBorder);
+        botDiv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        root.addView(botDiv);
+
+        LinearLayout footerWrap = new LinearLayout(this);
+        footerWrap.setOrientation(1);
+        footerWrap.setPadding(dp(16), dp(12), dp(16), dp(14));
+
+        TextView btnManual = new TextView(this);
+        btnManual.setText("✏️  Não encontrei — cadastrar manualmente");
+        btnManual.setTextColor(this.cTextMuted);
+        btnManual.setTextSize(sp(13.5f));
+        btnManual.setTypeface(null, 1);
+        btnManual.setGravity(17);
+        btnManual.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
+        btnManual.setPadding(dp(14), dp(13), dp(14), dp(13));
+        btnManual.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showMedTreatmentStepDialog(null);
+            }
+        });
+        footerWrap.addView(btnManual);
+        root.addView(footerWrap);
+
+        final Runnable populateCatalogList = new Runnable() {
+            @Override
+            public void run() {
+                listContainer.removeAllViews();
+                String rawQ = etQuery.getText().toString();
+                String q = normalizeForSearch(rawQ);
+                btnClear.setVisibility(rawQ.length() > 0 ? View.VISIBLE : View.GONE);
+                int boxBg = MainActivity.this.isDarkMode ? Color.parseColor("#162032") : MainActivity.this.cBgMain;
+                searchBox.setBackground(shape(boxBg, 14, q.length() >= 2 ? MainActivity.this.cPrimary : MainActivity.this.cBorder, 1));
+
+                if (q.length() == 0) {
+                    tvHelper.setVisibility(View.VISIBLE);
+                    tvHelper.setText("Digite o nome comercial ou o princípio ativo");
+                } else if (q.length() == 1) {
+                    tvHelper.setVisibility(View.VISIBLE);
+                    tvHelper.setText("Continue digitando…");
+                } else {
+                    tvHelper.setVisibility(View.GONE);
+                }
+
+                if (q.length() < 2) {
+                    TextView tvFreq = new TextView(MainActivity.this);
+                    tvFreq.setText("MEDICAMENTOS FREQUENTES");
+                    tvFreq.setTextColor(MainActivity.this.cTextLight);
+                    tvFreq.setTextSize(sp(10.5f));
+                    tvFreq.setTypeface(null, 1);
+                    tvFreq.setPadding(dp(16), dp(8), dp(16), dp(4));
+                    listContainer.addView(tvFreq);
+
+                    for (int g = 0; g < POPULAR_CATALOG_GROUPS.length; g++) {
+                        String[] group = POPULAR_CATALOG_GROUPS[g];
+                        TextView tvCat = new TextView(MainActivity.this);
+                        tvCat.setText(group[0]);
+                        tvCat.setTextColor(MainActivity.this.cTextLight);
+                        tvCat.setTextSize(sp(10.5f));
+                        tvCat.setTypeface(null, 1);
+                        tvCat.setPadding(dp(16), dp(10), dp(16), dp(4));
+                        listContainer.addView(tvCat);
+
+                        for (int mIdx = 1; mIdx < group.length; mIdx++) {
+                            String targetName = group[mIdx];
+                            for (int cIdx = 0; cIdx < BRAZIL_MED_CATALOG.length; cIdx++) {
+                                final String[] item = BRAZIL_MED_CATALOG[cIdx];
+                                if (item[1].equals(targetName)) {
+                                    listContainer.addView(buildCatalogResultRow(item, dialog));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                // Filter catalog by query
+                String[] terms = q.split("\\s+");
+                ArrayList<String[]> matches = new ArrayList<>();
+                for (int cIdx = 0; cIdx < BRAZIL_MED_CATALOG.length; cIdx++) {
+                    String[] item = BRAZIL_MED_CATALOG[cIdx];
+                    String hay = normalizeForSearch(item[1] + " " + item[2] + " " + item[3] + " " + item[6]);
+                    boolean allMatch = true;
+                    for (String t : terms) {
+                        if (!t.isEmpty() && !hay.contains(t)) {
+                            allMatch = false;
+                            break;
+                        }
+                    }
+                    if (allMatch) {
+                        matches.add(item);
+                    }
+                }
+
+                if (matches.isEmpty()) {
+                    LinearLayout emptyBox = new LinearLayout(MainActivity.this);
+                    emptyBox.setOrientation(1);
+                    emptyBox.setGravity(17);
+                    emptyBox.setPadding(dp(24), dp(32), dp(24), dp(32));
+
+                    TextView tvEIcon = new TextView(MainActivity.this);
+                    tvEIcon.setText("🔍");
+                    tvEIcon.setTextSize(sp(34.0f));
+                    tvEIcon.setGravity(17);
+                    emptyBox.addView(tvEIcon);
+
+                    TextView tvETitle = new TextView(MainActivity.this);
+                    tvETitle.setText("Não encontramos esse medicamento");
+                    tvETitle.setTextColor(MainActivity.this.cTextMain);
+                    tvETitle.setTextSize(sp(16.0f));
+                    tvETitle.setTypeface(null, 1);
+                    tvETitle.setGravity(17);
+                    tvETitle.setPadding(0, dp(10), 0, dp(6));
+                    emptyBox.addView(tvETitle);
+
+                    TextView tvESub = new TextView(MainActivity.this);
+                    tvESub.setText("Tente buscar pelo princípio ativo ou nome genérico, ou cadastre manualmente.");
+                    tvESub.setTextColor(MainActivity.this.cTextMuted);
+                    tvESub.setTextSize(sp(13.0f));
+                    tvESub.setGravity(17);
+                    tvESub.setPadding(0, 0, 0, dp(18));
+                    emptyBox.addView(tvESub);
+
+                    TextView btnCustomNow = new TextView(MainActivity.this);
+                    btnCustomNow.setText("+ Cadastrar \"" + rawQ.trim() + "\" manualmente");
+                    btnCustomNow.setTextColor(Color.WHITE);
+                    btnCustomNow.setTextSize(sp(14.0f));
+                    btnCustomNow.setTypeface(null, 1);
+                    btnCustomNow.setGravity(17);
+                    btnCustomNow.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
+                    btnCustomNow.setPadding(dp(22), dp(13), dp(22), dp(13));
+                    final String customName = rawQ.trim();
+                    btnCustomNow.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            dialog.dismiss();
+                            String[] customItem = {"PERSONALIZADO", customName, "", "", "Comprimido", "comprimido", "", "PER"};
+                            showMedTreatmentStepDialog(customItem);
+                        }
+                    });
+                    emptyBox.addView(btnCustomNow);
+                    listContainer.addView(emptyBox);
+                } else {
+                    TextView tvCnt = new TextView(MainActivity.this);
+                    tvCnt.setText(matches.size() + (matches.size() == 1 ? " RESULTADO" : " RESULTADOS"));
+                    tvCnt.setTextColor(MainActivity.this.cTextLight);
+                    tvCnt.setTextSize(sp(10.5f));
+                    tvCnt.setTypeface(null, 1);
+                    tvCnt.setPadding(dp(16), dp(8), dp(16), dp(4));
+                    listContainer.addView(tvCnt);
+
+                    for (int mIdx = 0; mIdx < matches.size(); mIdx++) {
+                        listContainer.addView(buildCatalogResultRow(matches.get(mIdx), dialog));
+                    }
+                }
+            }
+        };
+
+        btnClear.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                etQuery.setText("");
+            }
+        });
+
+        etQuery.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                populateCatalogList.run();
+            }
+        });
+
+        populateCatalogList.run();
+        dialog.setView(root);
+        dialog.show();
+    }
+
+    private View buildCatalogResultRow(final String[] item, final AlertDialog parentDialog) {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(1);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(0);
+        row.setGravity(16);
+        row.setPadding(dp(16), dp(12), dp(16), dp(12));
+
+        String mType = item[7]; // GEN, REF, SIM, PER
+        int badgeColor = "GEN".equals(mType) ? Color.parseColor("#22C55E")
+                : ("REF".equals(mType) ? Color.parseColor("#3B82F6")
+                : ("SIM".equals(mType) ? Color.parseColor("#F59E0B") : Color.parseColor("#8B5CF6")));
+        int badgeBg = Color.argb(38, Color.red(badgeColor), Color.green(badgeColor), Color.blue(badgeColor));
+
+        TextView tvIcon = new TextView(this);
+        tvIcon.setText("💊");
+        tvIcon.setTextSize(sp(17.0f));
+        tvIcon.setGravity(17);
+        tvIcon.setBackground(shape(badgeBg, 10, 0, 0));
+        LinearLayout.LayoutParams icLp = new LinearLayout.LayoutParams(dp(38), dp(38));
+        icLp.rightMargin = dp(12);
+        tvIcon.setLayoutParams(icLp);
+        row.addView(tvIcon);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(1);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        LinearLayout line1 = new LinearLayout(this);
+        line1.setOrientation(0);
+        line1.setGravity(16);
+
+        TextView tvName = new TextView(this);
+        tvName.setText(item[1]);
+        tvName.setTextColor(this.cTextMain);
+        tvName.setTextSize(sp(14.5f));
+        tvName.setTypeface(null, 1);
+        tvName.setPadding(0, 0, dp(8), 0);
+        line1.addView(tvName);
+
+        TextView tvBadge = new TextView(this);
+        tvBadge.setText(mType);
+        tvBadge.setTextColor(badgeColor);
+        tvBadge.setTextSize(sp(9.5f));
+        tvBadge.setTypeface(null, 1);
+        tvBadge.setBackground(shape(badgeBg, 99, 0, 0));
+        tvBadge.setPadding(dp(7), dp(2), dp(7), dp(2));
+        line1.addView(tvBadge);
+        col.addView(line1);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText(item[2] + (item[3].isEmpty() ? "" : " · " + item[3]) + (item[4].isEmpty() ? "" : " · " + item[4]));
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(11.5f));
+        tvSub.setPadding(0, dp(2), 0, 0);
+        col.addView(tvSub);
+
+        if (!item[6].isEmpty()) {
+            TextView tvLab = new TextView(this);
+            tvLab.setText(item[6]);
+            tvLab.setTextColor(this.cTextLight);
+            tvLab.setTextSize(sp(10.5f));
+            tvLab.setPadding(0, dp(1), 0, 0);
+            col.addView(tvLab);
+        }
+
+        row.addView(col);
+
+        TextView tvChev = new TextView(this);
+        tvChev.setText("›");
+        tvChev.setTextColor(this.cTextLight);
+        tvChev.setTextSize(sp(16.0f));
+        tvChev.setPadding(dp(8), 0, 0, 0);
+        row.addView(tvChev);
+
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                parentDialog.dismiss();
+                showMedTreatmentStepDialog(item);
+            }
+        });
+        wrap.addView(row);
+
+        View div = new View(this);
+        div.setBackgroundColor(this.cBorder);
+        div.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        wrap.addView(div);
+        return wrap;
+    }
+
+    private View buildCatalogPreviewCard(String[] catalogItem) {
+        String mType = catalogItem[7];
+        int badgeColor = "GEN".equals(mType) ? Color.parseColor("#22C55E")
+                : ("REF".equals(mType) ? Color.parseColor("#3B82F6")
+                : ("SIM".equals(mType) ? Color.parseColor("#F59E0B") : Color.parseColor("#8B5CF6")));
+        String badgeLabel = "GEN".equals(mType) ? "GENÉRICO"
+                : ("REF".equals(mType) ? "REFERÊNCIA"
+                : ("SIM".equals(mType) ? "SIMILAR" : "PERSONALIZ."));
+        int cardBg = Color.argb(24, Color.red(badgeColor), Color.green(badgeColor), Color.blue(badgeColor));
+        int borderCol = Color.argb(80, Color.red(badgeColor), Color.green(badgeColor), Color.blue(badgeColor));
+        int iconBg = Color.argb(42, Color.red(badgeColor), Color.green(badgeColor), Color.blue(badgeColor));
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(0);
+        card.setGravity(16);
+        card.setBackground(shape(cardBg, 16, borderCol, 1));
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(16);
+        card.setLayoutParams(lp);
+
+        TextView tvI = new TextView(this);
+        tvI.setText("💊");
+        tvI.setTextSize(sp(20.0f));
+        tvI.setGravity(17);
+        tvI.setBackground(shape(iconBg, 12, 0, 0));
+        LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        iLp.rightMargin = dp(12);
+        tvI.setLayoutParams(iLp);
+        card.addView(tvI);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(1);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(0);
+        topRow.setGravity(16);
+
+        TextView tvN = new TextView(this);
+        tvN.setText(catalogItem[1]);
+        tvN.setTextColor(this.cTextMain);
+        tvN.setTextSize(sp(15.0f));
+        tvN.setTypeface(null, 1);
+        tvN.setPadding(0, 0, dp(8), 0);
+        topRow.addView(tvN);
+
+        TextView tvB = new TextView(this);
+        tvB.setText(badgeLabel);
+        tvB.setTextColor(badgeColor);
+        tvB.setTextSize(sp(9.0f));
+        tvB.setTypeface(null, 1);
+        tvB.setBackground(shape(iconBg, 99, 0, 0));
+        tvB.setPadding(dp(8), dp(2), dp(8), dp(2));
+        topRow.addView(tvB);
+        col.addView(topRow);
+
+        if (!catalogItem[2].isEmpty() || !catalogItem[3].isEmpty()) {
+            TextView tvPa = new TextView(this);
+            tvPa.setText(catalogItem[2] + (catalogItem[3].isEmpty() ? "" : " · " + catalogItem[3]));
+            tvPa.setTextColor(this.cTextMuted);
+            tvPa.setTextSize(sp(12.0f));
+            tvPa.setPadding(0, dp(2), 0, 0);
+            col.addView(tvPa);
+        }
+        if (!catalogItem[6].isEmpty()) {
+            TextView tvMf = new TextView(this);
+            tvMf.setText("🏭 " + catalogItem[6]);
+            tvMf.setTextColor(this.cTextLight);
+            tvMf.setTextSize(sp(11.0f));
+            tvMf.setPadding(0, dp(2), 0, 0);
+            col.addView(tvMf);
+        }
+        card.addView(col);
+        return card;
+    }
+
+    private void showMedTreatmentStepDialog(final String[] catalogItem) {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        ScrollView sv = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+
+        // Header: [ ‹ ] Tipo de tratamento / Como este medicamento será utilizado?
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(dp(18), dp(20), dp(18), dp(16));
+
+        TextView btnBack = new TextView(this);
+        btnBack.setText("‹");
+        btnBack.setTextColor(this.cTextMuted);
+        btnBack.setTextSize(sp(20.0f));
+        btnBack.setTypeface(null, 1);
+        btnBack.setGravity(17);
+        btnBack.setBackground(shape(this.cSurfaceHover, 18, 0, 0));
+        LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        bkLp.rightMargin = dp(12);
+        btnBack.setLayoutParams(bkLp);
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showMedCatalogSearchDialog();
+            }
+        });
+        hdr.addView(btnBack);
+
+        LinearLayout hdrCol = new LinearLayout(this);
+        hdrCol.setOrientation(1);
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Tipo de tratamento");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(18.0f));
+        tvTitle.setTypeface(null, 1);
+        hdrCol.addView(tvTitle);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Como este medicamento será utilizado?");
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(12.0f));
+        tvSub.setPadding(0, dp(2), 0, 0);
+        hdrCol.addView(tvSub);
+        hdr.addView(hdrCol);
+        root.addView(hdr);
+
+        View div = new View(this);
+        div.setBackgroundColor(this.cBorder);
+        div.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        root.addView(div);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(1);
+        body.setPadding(dp(20), dp(20), dp(20), dp(24));
+
+        if (catalogItem != null) {
+            body.addView(buildCatalogPreviewCard(catalogItem));
+        }
+
+        final String[] selectedType = {"temporary".equals(this.medFilter) ? "temporary" : ("sos".equals(this.medFilter) ? "sos" : "continuous")};
+        final LinearLayout optionsWrap = new LinearLayout(this);
+        optionsWrap.setOrientation(1);
+        body.addView(optionsWrap);
+
+        final String[][] tTypes = {
+            {"continuous", "🟢", "Uso Contínuo", "Utilizado continuamente, sem data de término. Gera lembretes diários.", "#22C55E"},
+            {"temporary", "🟡", "Tratamento Temporário", "Utilizado durante um período específico. Encerra automaticamente ao final.", "#F59E0B"},
+            {"sos", "🔵", "Uso Sob Demanda (SOS)", "Utilizado apenas quando necessário. Não gera lembretes automáticos.", "#3B82F6"}
+        };
+
+        final Runnable renderOptions = new Runnable() {
+            @Override
+            public void run() {
+                optionsWrap.removeAllViews();
+                for (int idx = 0; idx < tTypes.length; idx++) {
+                    final String[] t = tTypes[idx];
+                    boolean active = t[0].equals(selectedType[0]);
+                    int tCol = Color.parseColor(t[4]);
+                    int bgCol = active ? Color.argb(24, Color.red(tCol), Color.green(tCol), Color.blue(tCol)) : MainActivity.this.cBgMain;
+
+                    LinearLayout optCard = new LinearLayout(MainActivity.this);
+                    optCard.setOrientation(0);
+                    optCard.setGravity(16);
+                    optCard.setBackground(shape(bgCol, 14, active ? tCol : MainActivity.this.cBorder, active ? 2 : 1));
+                    optCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+                    LinearLayout.LayoutParams oLp = new LinearLayout.LayoutParams(-1, -2);
+                    oLp.bottomMargin = dp(10);
+                    optCard.setLayoutParams(oLp);
+
+                    TextView tvI = new TextView(MainActivity.this);
+                    tvI.setText(t[1]);
+                    tvI.setTextSize(sp(22.0f));
+                    tvI.setPadding(0, 0, dp(12), 0);
+                    optCard.addView(tvI);
+
+                    LinearLayout col = new LinearLayout(MainActivity.this);
+                    col.setOrientation(1);
+                    col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                    TextView tvL = new TextView(MainActivity.this);
+                    tvL.setText(t[2]);
+                    tvL.setTextColor(active ? tCol : MainActivity.this.cTextMain);
+                    tvL.setTextSize(sp(14.5f));
+                    tvL.setTypeface(null, 1);
+                    col.addView(tvL);
+
+                    TextView tvD = new TextView(MainActivity.this);
+                    tvD.setText(t[3]);
+                    tvD.setTextColor(MainActivity.this.cTextLight);
+                    tvD.setTextSize(sp(11.5f));
+                    tvD.setPadding(0, dp(2), 0, 0);
+                    col.addView(tvD);
+                    optCard.addView(col);
+
+                    if (active) {
+                        TextView tvChk = new TextView(MainActivity.this);
+                        tvChk.setText("✓");
+                        tvChk.setTextColor(tCol);
+                        tvChk.setTextSize(sp(18.0f));
+                        tvChk.setTypeface(null, 1);
+                        tvChk.setPadding(dp(8), 0, 0, 0);
+                        optCard.addView(tvChk);
+                    }
+
+                    optCard.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            selectedType[0] = t[0];
+                            run();
+                        }
+                    });
+                    optionsWrap.addView(optCard);
+                }
+            }
+        };
+        renderOptions.run();
+
+        TextView btnContinue = new TextView(this);
+        btnContinue.setText("Continuar →");
+        btnContinue.setTextColor(Color.WHITE);
+        btnContinue.setTextSize(sp(15.0f));
+        btnContinue.setTypeface(null, 1);
+        btnContinue.setGravity(17);
+        btnContinue.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 14));
+        btnContinue.setPadding(dp(16), dp(16), dp(16), dp(16));
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-1, -2);
+        cLp.topMargin = dp(10);
+        btnContinue.setLayoutParams(cLp);
+        btnContinue.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showMedFormStepDialog(null, -1, catalogItem, selectedType[0]);
+            }
+        });
+        body.addView(btnContinue);
+
+        sv.addView(body);
+        root.addView(sv);
+        dialog.setView(root);
+        dialog.show();
+    }
+
+    private TextView createFormLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(this.cTextMuted);
+        tv.setTextSize(sp(11.0f));
+        tv.setTypeface(null, 1);
+        tv.setPadding(0, dp(4), 0, dp(6));
+        return tv;
+    }
+
+    private void showMedFormStepDialog(final JSONObject jSONObject, final int i, final String[] catalogItem, final String initialTreatmentType) {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        final boolean isEditing = (jSONObject != null);
+        final int prevStock = isEditing ? getMedStock(jSONObject) : -1;
+        final String[] currentTreatType = {initialTreatmentType != null ? initialTreatmentType : "continuous"};
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+
+        // Sticky Header: [ ‹ ] Confirmar dados / Editar medicamento [ × ]
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(dp(18), dp(20), dp(18), dp(16));
+
+        if (!isEditing) {
+            TextView btnBack = new TextView(this);
+            btnBack.setText("‹");
+            btnBack.setTextColor(this.cTextMuted);
+            btnBack.setTextSize(sp(20.0f));
+            btnBack.setTypeface(null, 1);
+            btnBack.setGravity(17);
+            btnBack.setBackground(shape(this.cSurfaceHover, 18, 0, 0));
+            LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+            bkLp.rightMargin = dp(10);
+            btnBack.setLayoutParams(bkLp);
+            btnBack.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                    showMedTreatmentStepDialog(catalogItem);
+                }
+            });
+            hdr.addView(btnBack);
+        }
+
+        TextView tvHdrTitle = new TextView(this);
+        tvHdrTitle.setText(isEditing ? "Editar medicamento" : "Confirmar dados");
+        tvHdrTitle.setTextColor(this.cTextMain);
+        tvHdrTitle.setTextSize(sp(18.0f));
+        tvHdrTitle.setTypeface(null, 1);
+        tvHdrTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hdr.addView(tvHdrTitle);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(16.0f));
+        btnClose.setTypeface(null, 1);
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 18, 0, 0));
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(36), dp(36)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        View div = new View(this);
+        div.setBackgroundColor(this.cBorder);
+        div.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        root.addView(div);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(1);
+        body.setPadding(dp(20), dp(18), dp(20), dp(24));
+
+        if (catalogItem != null && !isEditing) {
+            body.addView(buildCatalogPreviewCard(catalogItem));
+        }
+
+        // Treatment Type Banner with "Alterar"
+        boolean isTemp = "temporary".equals(currentTreatType[0]);
+        boolean isSOS = "sos".equals(currentTreatType[0]);
+        int tCol = isSOS ? Color.parseColor("#3B82F6") : (isTemp ? Color.parseColor("#F59E0B") : Color.parseColor("#22C55E"));
+        String tIcon = isSOS ? "🔵" : (isTemp ? "🟡" : "🟢");
+        String tLabel = isSOS ? "Uso Sob Demanda (SOS)" : (isTemp ? "Tratamento Temporário" : "Uso Contínuo");
+
+        LinearLayout treatBanner = new LinearLayout(this);
+        treatBanner.setOrientation(0);
+        treatBanner.setGravity(16);
+        treatBanner.setBackground(shape(Color.argb(24, Color.red(tCol), Color.green(tCol), Color.blue(tCol)), 12, Color.argb(75, Color.red(tCol), Color.green(tCol), Color.blue(tCol)), 1));
+        treatBanner.setPadding(dp(14), dp(10), dp(14), dp(10));
+        LinearLayout.LayoutParams tbLp = new LinearLayout.LayoutParams(-1, -2);
+        tbLp.bottomMargin = dp(18);
+        treatBanner.setLayoutParams(tbLp);
+
+        TextView tvTI = new TextView(this);
+        tvTI.setText(tIcon);
+        tvTI.setTextSize(sp(16.0f));
+        tvTI.setPadding(0, 0, dp(8), 0);
+        treatBanner.addView(tvTI);
+
+        TextView tvTL = new TextView(this);
+        tvTL.setText(tLabel);
+        tvTL.setTextColor(tCol);
+        tvTL.setTextSize(sp(13.0f));
+        tvTL.setTypeface(null, 1);
+        tvTL.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        treatBanner.addView(tvTL);
+
+        TextView btnChangeTreat = new TextView(this);
+        btnChangeTreat.setText("Alterar");
+        btnChangeTreat.setTextColor(tCol);
+        btnChangeTreat.setTextSize(sp(12.0f));
+        btnChangeTreat.setTypeface(null, 1);
+        btnChangeTreat.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final String[] labels = {"🟢 Uso Contínuo", "🟡 Tratamento Temporário", "🔵 Uso Sob Demanda (SOS)"};
+                final String[] codes = {"continuous", "temporary", "sos"};
+                new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("Tipo de tratamento")
+                    .setItems(labels, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int which) {
+                            dialog.dismiss();
+                            showMedFormStepDialog(jSONObject, i, catalogItem, codes[which]);
+                        }
+                    })
+                    .show();
+            }
+        });
+        treatBanner.addView(btnChangeTreat);
+        body.addView(treatBanner);
+
+        // Color swatches: COR DO MEDICAMENTO
+        body.addView(createFormLabel("COR DO MEDICAMENTO"));
+        final String[] pillColors = {"#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899", "#06B6D4", "#F97316"};
+        final String[] selectedColor = {isEditing ? jSONObject.optString("cor", "#3B82F6") : "#3B82F6"};
+        final LinearLayout colorRow = new LinearLayout(this);
+        colorRow.setOrientation(0);
+        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(-1, -2);
+        crLp.bottomMargin = dp(16);
+        colorRow.setLayoutParams(crLp);
+
+        final Runnable renderColors = new Runnable() {
+            @Override
+            public void run() {
+                colorRow.removeAllViews();
+                for (int cIdx = 0; cIdx < pillColors.length; cIdx++) {
+                    final String cHex = pillColors[cIdx];
+                    boolean isSel = cHex.equalsIgnoreCase(selectedColor[0]);
+                    View sw = new View(MainActivity.this);
+                    sw.setBackground(shape(Color.parseColor(cHex), 10, isSel ? Color.WHITE : Color.TRANSPARENT, isSel ? 3 : 0));
+                    LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+                    swLp.rightMargin = dp(8);
+                    sw.setLayoutParams(swLp);
+                    sw.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            selectedColor[0] = cHex;
+                            run();
+                        }
+                    });
+                    colorRow.addView(sw);
+                }
+            }
+        };
+        renderColors.run();
+        body.addView(colorRow);
+
+        // Fields
+        String initName = isEditing ? jSONObject.optString("nome") : (catalogItem != null ? catalogItem[1] : "");
+        String initActive = isEditing ? jSONObject.optString("principio_ativo") : (catalogItem != null ? catalogItem[2] : "");
+        String initDose = isEditing ? jSONObject.optString("dosagem") : (catalogItem != null ? catalogItem[3] : "");
+        String initUnit = isEditing ? jSONObject.optString("unidade", jSONObject.optString("forma", "comprimido")) : (catalogItem != null ? catalogItem[5] : "comprimido");
+        String initManuf = isEditing ? jSONObject.optString("fabricante") : (catalogItem != null ? catalogItem[6] : "");
+        String initObs = isEditing ? jSONObject.optString("observacoes", jSONObject.optString("instrucoes", "")) : "";
+
+        body.addView(createFormLabel("NOME *"));
+        final EditText nameIn = createInput("Nome do medicamento", initName);
+        body.addView(nameIn);
+
+        body.addView(createFormLabel("PRINCÍPIO ATIVO"));
+        final EditText activeIn = createInput("Princípio ativo", initActive);
+        body.addView(activeIn);
+
+        // 2-column row: DOSAGEM | QTD. DISPONÍVEL
+        LinearLayout doseStockRow = new LinearLayout(this);
+        doseStockRow.setOrientation(0);
+        LinearLayout doseCol = new LinearLayout(this);
+        doseCol.setOrientation(1);
+        LinearLayout.LayoutParams dcLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        dcLp.rightMargin = dp(6);
+        doseCol.setLayoutParams(dcLp);
+        doseCol.addView(createFormLabel("DOSAGEM"));
+        final EditText doseIn = createInput("Ex: 500mg", initDose);
+        doseCol.addView(doseIn);
+        doseStockRow.addView(doseCol);
+
+        LinearLayout stockCol = new LinearLayout(this);
+        stockCol.setOrientation(1);
+        LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        scLp.leftMargin = dp(6);
+        stockCol.setLayoutParams(scLp);
+        stockCol.addView(createFormLabel("QTD. DISPONÍVEL"));
+        final EditText stockIn = createInput("30", String.valueOf(isEditing ? getMedStock(jSONObject) : 30));
         stockIn.setInputType(2);
-        final EditText manufIn = createInput("Fabricante / Laboratório (opcional)", jSONObject != null ? jSONObject.optString("fabricante") : "");
-        final EditText obsIn = createInput("Observações (ex: Tomar após o café)", jSONObject != null ? jSONObject.optString("observacoes", jSONObject.optString("instrucoes", "")) : "");
-        final EditText colorIn = createInput("Cor (#3B82F6, #22C55E, #F59E0B, #EF4444, #A855F7)", jSONObject != null ? jSONObject.optString("cor", "#3B82F6") : "#3B82F6");
+        stockCol.addView(stockIn);
+        doseStockRow.addView(stockCol);
+        body.addView(doseStockRow);
+
+        // UNIDADE selector
+        body.addView(createFormLabel("UNIDADE"));
+        final String[] unitVal = {initUnit.isEmpty() ? "comprimido" : initUnit};
+        final TextView tvUnitSelect = new TextView(this);
+        tvUnitSelect.setText(unitVal[0] + "  ⌄");
+        tvUnitSelect.setTextColor(this.cTextMain);
+        tvUnitSelect.setTextSize(sp(14.0f));
+        tvUnitSelect.setBackground(shape(this.isDarkMode ? Color.parseColor("#162032") : this.cBgMain, 12, this.cBorder, 1));
+        tvUnitSelect.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams usLp = new LinearLayout.LayoutParams(-1, -2);
+        usLp.bottomMargin = dp(10);
+        tvUnitSelect.setLayoutParams(usLp);
+        tvUnitSelect.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final String[] units = {"comprimido", "cápsula", "ml", "gotas", "sachê", "unidade", "dose", "g"};
+                new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("Selecionar unidade")
+                    .setItems(units, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int which) {
+                            unitVal[0] = units[which];
+                            tvUnitSelect.setText(unitVal[0] + "  ⌄");
+                        }
+                    })
+                    .show();
+            }
+        });
+        body.addView(tvUnitSelect);
+
+        body.addView(createFormLabel("FABRICANTE"));
+        final EditText manufIn = createInput("Fabricante", initManuf);
+        body.addView(manufIn);
+
+        body.addView(createFormLabel("OBSERVAÇÕES"));
+        final EditText obsIn = createInput("Tomar com água, em jejum…", initObs);
+        body.addView(obsIn);
 
         final CheckBox emergCheck = new CheckBox(this);
-        emergCheck.setText(" Destacar no Cartão de Emergência");
+        emergCheck.setText("  Mostrar no Cartão de Emergência");
         emergCheck.setTextColor(this.cTextMain);
-        emergCheck.setChecked(jSONObject == null || jSONObject.optBoolean("important_for_emergency", true));
+        emergCheck.setTextSize(sp(13.5f));
+        emergCheck.setChecked(isEditing && jSONObject.optBoolean("important_for_emergency", false));
+        emergCheck.setPadding(0, dp(8), 0, dp(12));
+        body.addView(emergCheck);
 
-        linearLayout.addView(nameIn);
-        linearLayout.addView(activeIn);
-        linearLayout.addView(doseIn);
-        linearLayout.addView(unitIn);
-        linearLayout.addView(typeIn);
-        linearLayout.addView(durIn);
-        linearLayout.addView(schedIn);
-        linearLayout.addView(stockIn);
-        linearLayout.addView(manufIn);
-        linearLayout.addView(obsIn);
-        linearLayout.addView(colorIn);
-        linearLayout.addView(emergCheck);
+        // Conditional Temporary Duration
+        final EditText durIn = createInput("7", isEditing ? String.valueOf(jSONObject.optInt("duration_days", 7)) : "7");
+        durIn.setInputType(2);
+        if (isTemp) {
+            LinearLayout tempBox = new LinearLayout(this);
+            tempBox.setOrientation(1);
+            tempBox.setBackground(shape(Color.argb(20, 245, 158, 11), 14, Color.argb(65, 245, 158, 11), 1));
+            tempBox.setPadding(dp(14), dp(14), dp(14), dp(14));
+            LinearLayout.LayoutParams tmLp = new LinearLayout.LayoutParams(-1, -2);
+            tmLp.bottomMargin = dp(14);
+            tempBox.setLayoutParams(tmLp);
 
-        scrollView.addView(linearLayout);
-        builder.setView(scrollView);
-        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+            TextView tvTmHdr = new TextView(this);
+            tvTmHdr.setText("🟡 Duração do tratamento (dias)");
+            tvTmHdr.setTextColor(Color.parseColor("#F59E0B"));
+            tvTmHdr.setTextSize(sp(12.5f));
+            tvTmHdr.setTypeface(null, 1);
+            tvTmHdr.setPadding(0, 0, 0, dp(8));
+            tempBox.addView(tvTmHdr);
+            tempBox.addView(durIn);
+            body.addView(tempBox);
+        }
+
+        // Schedule Times & Weekdays for Continuous / Temporary
+        final ArrayList<String> scheduleList = new ArrayList<>();
+        if (isEditing && jSONObject.optJSONArray("horarios") != null && jSONObject.optJSONArray("horarios").length() > 0) {
+            JSONArray hArr = jSONObject.optJSONArray("horarios");
+            for (int k = 0; k < hArr.length(); k++) {
+                scheduleList.add(hArr.optString(k, "08:00"));
+            }
+        } else {
+            scheduleList.add("08:00");
+        }
+
+        final ArrayList<Integer> selectedDays = new ArrayList<>();
+        if (isEditing && jSONObject.optJSONArray("dias_semana") != null && jSONObject.optJSONArray("dias_semana").length() > 0) {
+            JSONArray dArr = jSONObject.optJSONArray("dias_semana");
+            for (int k = 0; k < dArr.length(); k++) {
+                selectedDays.add(dArr.optInt(k, k + 1));
+            }
+        } else {
+            for (int d = 1; d <= 7; d++) selectedDays.add(d);
+        }
+
+        if (!isSOS) {
+            LinearLayout schedHdr = new LinearLayout(this);
+            schedHdr.setOrientation(0);
+            schedHdr.setGravity(16);
+            schedHdr.setPadding(0, dp(6), 0, dp(8));
+
+            TextView tvSH = new TextView(this);
+            tvSH.setText("HORÁRIOS DE ADMINISTRAÇÃO");
+            tvSH.setTextColor(this.cTextMuted);
+            tvSH.setTextSize(sp(11.0f));
+            tvSH.setTypeface(null, 1);
+            tvSH.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            schedHdr.addView(tvSH);
+
+            final LinearLayout timesContainer = new LinearLayout(this);
+            timesContainer.setOrientation(1);
+
+            final Runnable renderTimes = new Runnable() {
+                @Override
+                public void run() {
+                    timesContainer.removeAllViews();
+                    for (int tIdx = 0; tIdx < scheduleList.size(); tIdx++) {
+                        final int curIdx = tIdx;
+                        final String curTime = scheduleList.get(tIdx);
+                        LinearLayout tRow = new LinearLayout(MainActivity.this);
+                        tRow.setOrientation(0);
+                        tRow.setGravity(16);
+                        LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(-1, -2);
+                        trLp.bottomMargin = dp(8);
+                        tRow.setLayoutParams(trLp);
+
+                        final TextView tvTimeBox = new TextView(MainActivity.this);
+                        tvTimeBox.setText("⏰  " + curTime);
+                        tvTimeBox.setTextColor(MainActivity.this.cTextMain);
+                        tvTimeBox.setTextSize(sp(15.0f));
+                        tvTimeBox.setTypeface(null, 1);
+                        tvTimeBox.setBackground(shape(MainActivity.this.isDarkMode ? Color.parseColor("#162032") : MainActivity.this.cBgMain, 12, MainActivity.this.cBorder, 1));
+                        tvTimeBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+                        tvTimeBox.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                        tvTimeBox.setOnClickListener(new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                int hr = 8, min = 0;
+                                try {
+                                    String[] p = curTime.split(":");
+                                    hr = Integer.parseInt(p[0]);
+                                    min = Integer.parseInt(p[1]);
+                                } catch (Exception ignored) {}
+                                new TimePickerDialog(MainActivity.this, new TimePickerDialog.OnTimeSetListener() {
+                                    @Override
+                                    public void onTimeSet(TimePicker view, int hourOfDay, int minute) {
+                                        scheduleList.set(curIdx, String.format(Locale.US, "%02d:%02d", hourOfDay, minute));
+                                        run();
+                                    }
+                                }, hr, min, true).show();
+                            }
+                        });
+                        tRow.addView(tvTimeBox);
+
+                        if (scheduleList.size() > 1) {
+                            TextView btnRemTime = new TextView(MainActivity.this);
+                            btnRemTime.setText("✕");
+                            btnRemTime.setTextColor(MainActivity.this.cDanger);
+                            btnRemTime.setTextSize(sp(15.0f));
+                            btnRemTime.setTypeface(null, 1);
+                            btnRemTime.setGravity(17);
+                            btnRemTime.setBackground(shape(Color.parseColor("#1AEF4444"), 12, Color.parseColor("#40EF4444"), 1));
+                            LinearLayout.LayoutParams rmLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+                            rmLp.leftMargin = dp(8);
+                            btnRemTime.setLayoutParams(rmLp);
+                            btnRemTime.setOnClickListener(new View.OnClickListener() {
+                                @Override
+                                public void onClick(View v) {
+                                    scheduleList.remove(curIdx);
+                                    run();
+                                }
+                            });
+                            tRow.addView(btnRemTime);
+                        }
+                        timesContainer.addView(tRow);
+                    }
+                }
+            };
+
+            TextView btnAddTime = new TextView(this);
+            btnAddTime.setText("+ Adicionar horário");
+            btnAddTime.setTextColor(this.cPrimary);
+            btnAddTime.setTextSize(sp(12.0f));
+            btnAddTime.setTypeface(null, 1);
+            btnAddTime.setBackground(shape(Color.parseColor("#143B82F6"), 99, Color.parseColor("#593B82F6"), 1));
+            btnAddTime.setPadding(dp(12), dp(5), dp(12), dp(5));
+            btnAddTime.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    scheduleList.add("12:00");
+                    renderTimes.run();
+                }
+            });
+            schedHdr.addView(btnAddTime);
+            body.addView(schedHdr);
+            renderTimes.run();
+            body.addView(timesContainer);
+
+            if ("continuous".equals(currentTreatType[0])) {
+                body.addView(createFormLabel("DIAS DA SEMANA"));
+                final LinearLayout daysRow = new LinearLayout(this);
+                daysRow.setOrientation(0);
+                LinearLayout.LayoutParams drLp = new LinearLayout.LayoutParams(-1, -2);
+                drLp.bottomMargin = dp(18);
+                daysRow.setLayoutParams(drLp);
+
+                final Runnable renderDays = new Runnable() {
+                    @Override
+                    public void run() {
+                        daysRow.removeAllViews();
+                        for (int dIdx = 0; dIdx < WEEKDAYS_SHORT_PT.length; dIdx++) {
+                            final int dayVal = dIdx + 1;
+                            final boolean active = selectedDays.contains(dayVal);
+                            TextView tvD = new TextView(MainActivity.this);
+                            tvD.setText(WEEKDAYS_SHORT_PT[dIdx]);
+                            tvD.setTextColor(active ? Color.WHITE : MainActivity.this.cTextMuted);
+                            tvD.setTextSize(sp(11.5f));
+                            tvD.setTypeface(null, 1);
+                            tvD.setGravity(17);
+                            tvD.setBackground(shape(active ? MainActivity.this.cPrimary : MainActivity.this.cSurfaceHover, 10, 0, 0));
+                            tvD.setPadding(0, dp(10), 0, dp(10));
+                            LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+                            if (dIdx < 6) dLp.rightMargin = dp(4);
+                            tvD.setLayoutParams(dLp);
+                            tvD.setOnClickListener(new View.OnClickListener() {
+                                @Override
+                                public void onClick(View v) {
+                                    if (active && selectedDays.size() > 1) {
+                                        selectedDays.remove(Integer.valueOf(dayVal));
+                                    } else if (!active) {
+                                        selectedDays.add(dayVal);
+                                    }
+                                    run();
+                                }
+                            });
+                            daysRow.addView(tvD);
+                        }
+                    }
+                };
+                renderDays.run();
+                body.addView(daysRow);
+            }
+        } else {
+            LinearLayout sosNote = new LinearLayout(this);
+            sosNote.setOrientation(1);
+            sosNote.setBackground(shape(Color.argb(20, 59, 130, 246), 12, Color.argb(65, 59, 130, 246), 1));
+            sosNote.setPadding(dp(14), dp(14), dp(14), dp(14));
+            LinearLayout.LayoutParams snLp = new LinearLayout.LayoutParams(-1, -2);
+            snLp.bottomMargin = dp(18);
+            sosNote.setLayoutParams(snLp);
+
+            TextView tvSn = new TextView(this);
+            tvSn.setText("🔵 Este medicamento não terá horários fixos. Ele ficará disponível na lista rápida de \"Medicamentos SOS\" para registro manual sempre que for utilizado.");
+            tvSn.setTextColor(Color.parseColor("#3B82F6"));
+            tvSn.setTextSize(sp(12.0f));
+            tvSn.setTypeface(null, 1);
+            sosNote.addView(tvSn);
+            body.addView(sosNote);
+        }
+
+        // Primary Save Button: "+ Adicionar medicamento" or "✓ Salvar alterações"
+        TextView btnSaveMed = new TextView(this);
+        btnSaveMed.setText(isEditing ? "✓ Salvar alterações" : "+ Adicionar medicamento");
+        btnSaveMed.setTextColor(Color.WHITE);
+        btnSaveMed.setTextSize(sp(15.5f));
+        btnSaveMed.setTypeface(null, 1);
+        btnSaveMed.setGravity(17);
+        btnSaveMed.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 14));
+        btnSaveMed.setPadding(dp(16), dp(16), dp(16), dp(16));
+        btnSaveMed.setOnClickListener(new View.OnClickListener() {
             @Override
-            public final void onClick(DialogInterface dialogInterface, int i2) {
+            public void onClick(View v) {
                 try {
                     String nomeVal = nameIn.getText().toString().trim();
                     if (nomeVal.isEmpty()) {
                         Toast.makeText(MainActivity.this, "Informe o nome do medicamento", 0).show();
                         return;
                     }
-                    JSONObject mObj = jSONObject != null ? jSONObject : new JSONObject();
-                    if (jSONObject == null) {
+                    JSONObject mObj = isEditing ? jSONObject : new JSONObject();
+                    if (!isEditing) {
                         mObj.put("id", "med-" + System.currentTimeMillis());
                     }
                     mObj.put("ativo", true);
                     mObj.put("nome", nomeVal);
                     mObj.put("principio_ativo", activeIn.getText().toString().trim());
                     mObj.put("dosagem", doseIn.getText().toString().trim());
-                    String uVal = unitIn.getText().toString().trim();
-                    if (uVal.isEmpty()) uVal = "comprimido";
-                    mObj.put("unidade", uVal);
-                    mObj.put("forma", uVal);
+                    mObj.put("unidade", unitVal[0]);
+                    mObj.put("forma", unitVal[0]);
 
-                    String rawT = typeIn.getText().toString().trim().toLowerCase(Locale.ROOT);
-                    String normT = rawT.contains("temp") ? "temporary" : (rawT.contains("sos") ? "sos" : "continuous");
+                    String normT = currentTreatType[0];
                     mObj.put("treatment_type", normT);
                     mObj.put("tipo_uso", "temporary".equals(normT) ? "temporario" : ("sos".equals(normT) ? "sos" : "continuo"));
                     if ("temporary".equals(normT)) {
                         int dDays = Integer.parseInt(durIn.getText().toString().trim().isEmpty() ? "7" : durIn.getText().toString().trim());
                         mObj.put("duration_days", dDays);
+                        mObj.put("treatment_days", dDays);
                         if (!mObj.has("start_date")) mObj.put("start_date", todayIso());
                     }
 
                     JSONArray hrsArr = new JSONArray();
                     if (!"sos".equals(normT)) {
-                        for (String hPart : schedIn.getText().toString().split(",")) {
-                            if (!hPart.trim().isEmpty()) hrsArr.put(hPart.trim());
+                        for (String hStr : scheduleList) {
+                            if (!hStr.trim().isEmpty()) hrsArr.put(hStr.trim());
                         }
                         if (hrsArr.length() == 0) hrsArr.put("08:00");
                     }
                     mObj.put("horarios", hrsArr);
                     mObj.put("frequencia", hrsArr.length() + "x ao dia");
+
+                    JSONArray daysArr = new JSONArray();
+                    if (!"sos".equals(normT)) {
+                        for (Integer dNum : selectedDays) daysArr.put(dNum);
+                    }
+                    mObj.put("dias_semana", daysArr);
 
                     int newStock = Integer.parseInt(stockIn.getText().toString().trim().isEmpty() ? "0" : stockIn.getText().toString().trim());
                     setMedStock(mObj, newStock);
@@ -2767,7 +3977,7 @@ public class MainActivity extends Activity {
                     String obsVal = obsIn.getText().toString().trim();
                     mObj.put("observacoes", obsVal);
                     mObj.put("instrucoes", obsVal);
-                    mObj.put("cor", colorIn.getText().toString().trim().isEmpty() ? "#3B82F6" : colorIn.getText().toString().trim());
+                    mObj.put("cor", selectedColor[0]);
                     mObj.put("important_for_emergency", emergCheck.isChecked());
 
                     if (i >= 0) {
@@ -2777,15 +3987,20 @@ public class MainActivity extends Activity {
                     }
                     MainActivity.this.medFilter = normT;
                     saveAll();
+                    dialog.dismiss();
                     render();
-                    if (jSONObject != null && prevStock >= 0 && prevStock != newStock) {
+                    if (isEditing && prevStock >= 0 && prevStock != newStock) {
                         showStockMovementModal(mObj, prevStock, newStock);
                     }
                 } catch (Exception ignored) {}
             }
         });
-        builder.setNegativeButton("Cancelar", null);
-        builder.show();
+        body.addView(btnSaveMed);
+
+        sv.addView(body);
+        root.addView(sv);
+        dialog.setView(root);
+        dialog.show();
     }
 
     private String joinArray(JSONArray jSONArray) {
@@ -4437,40 +5652,39 @@ public class MainActivity extends Activity {
 
     private void buildProfileTab(LinearLayout linearLayout) {
         if (!"main".equals(this.profileSubView)) {
-            if (!"show_card".equals(this.profileSubView)) {
-                LinearLayout subHdr = new LinearLayout(this);
-                subHdr.setOrientation(0);
-                subHdr.setGravity(16);
-                LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(-1, -2);
-                shLp.bottomMargin = dp(18);
-                subHdr.setLayoutParams(shLp);
+            LinearLayout subHdr = new LinearLayout(this);
+            subHdr.setOrientation(0);
+            subHdr.setGravity(16);
+            LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(-1, -2);
+            shLp.bottomMargin = dp(16);
+            subHdr.setLayoutParams(shLp);
 
-                TextView btnBack = new TextView(this);
-                btnBack.setText("‹");
-                btnBack.setTextColor(this.cTextMain);
-                btnBack.setTextSize(sp(24.0f));
-                btnBack.setGravity(17);
-                btnBack.setBackground(shape(this.cSurface, 12, this.cBorder, 1));
-                LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(42), dp(42));
-                bkLp.rightMargin = dp(14);
-                btnBack.setLayoutParams(bkLp);
-                btnBack.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        MainActivity.this.profileSubView = "main";
-                        render();
-                    }
-                });
-                subHdr.addView(btnBack);
+            TextView btnBack = new TextView(this);
+            btnBack.setText("‹");
+            btnBack.setTextColor(this.cTextMain);
+            btnBack.setTextSize(sp(18.0f));
+            btnBack.setTypeface(null, 1);
+            btnBack.setGravity(17);
+            btnBack.setBackground(shape(this.cSurfaceHover, 20, 0, 0));
+            LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(40), dp(40));
+            bkLp.rightMargin = dp(12);
+            btnBack.setLayoutParams(bkLp);
+            btnBack.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.profileSubView = "main";
+                    render();
+                }
+            });
+            subHdr.addView(btnBack);
 
-                TextView tvSubTitle = new TextView(this);
-                tvSubTitle.setText(getProfileSubViewTitle(this.profileSubView));
-                tvSubTitle.setTextColor(this.cTextMain);
-                tvSubTitle.setTextSize(sp(20.0f));
-                tvSubTitle.setTypeface(null, 1);
-                subHdr.addView(tvSubTitle);
-                linearLayout.addView(subHdr);
-            }
+            TextView tvSubTitle = new TextView(this);
+            tvSubTitle.setText(getProfileSubViewTitle(this.profileSubView));
+            tvSubTitle.setTextColor(this.cTextMain);
+            tvSubTitle.setTextSize(sp(18.0f));
+            tvSubTitle.setTypeface(null, 1);
+            subHdr.addView(tvSubTitle);
+            linearLayout.addView(subHdr);
 
             if ("personal".equals(this.profileSubView)) {
                 buildPersonalDataSubScreen(linearLayout);
@@ -4522,8 +5736,10 @@ public class MainActivity extends Activity {
         afLp.bottomMargin = dp(14);
         avatarFrame.setLayoutParams(afLp);
 
-        String nomeStr = this.profile.optString("nome", "Seu Nome");
-        String initial = nomeStr.trim().isEmpty() ? "👤" : nomeStr.trim().substring(0, 1).toUpperCase(Locale.ROOT);
+        String socialName = this.profile.optString("social_name", "").trim();
+        String fullName = this.profile.optString("nome", "Seu Nome").trim();
+        String displayName = !socialName.isEmpty() ? socialName : (!fullName.isEmpty() ? fullName : "Seu Nome");
+        String initial = displayName.isEmpty() ? "👤" : displayName.substring(0, 1).toUpperCase(Locale.ROOT);
         TextView tvAvatarCircle = new TextView(this);
         tvAvatarCircle.setText(initial);
         tvAvatarCircle.setTextColor(this.cTextMain);
@@ -4554,14 +5770,15 @@ public class MainActivity extends Activity {
         heroCenter.addView(avatarFrame);
 
         TextView tvName = new TextView(this);
-        tvName.setText(nomeStr);
+        tvName.setText(displayName);
         tvName.setTextColor(this.cTextMain);
         tvName.setTextSize(sp(22.0f));
         tvName.setTypeface(null, 1);
         tvName.setGravity(17);
         heroCenter.addView(tvName);
 
-        int age = calculateProfileAge(this.profile.optString("data_nascimento", ""));
+        String dobVal = this.profile.optString("data_nascimento", this.profile.optString("dob", ""));
+        int age = calculateProfileAge(dobVal);
         if (age > 0) {
             TextView tvAge = new TextView(this);
             tvAge.setText(age + " anos");
@@ -4767,17 +5984,18 @@ public class MainActivity extends Activity {
     }
 
     private String getProfileSubViewTitle(String sub) {
-        if ("personal".equals(sub)) return "Dados Pessoais";
-        if ("health".equals(sub)) return "Saúde";
-        if ("important_meds".equals(sub)) return "Tratamento";
-        if ("professionals".equals(sub)) return "Profissionais";
-        if ("contacts".equals(sub)) return "Contatos";
+        if ("personal".equals(sub)) return "Dados pessoais";
+        if ("health".equals(sub)) return "❤️ Saúde";
+        if ("important_meds".equals(sub)) return "Medicamentos Importantes";
+        if ("professionals".equals(sub)) return "Meus Profissionais";
+        if ("contacts".equals(sub)) return "Contatos de Emergência";
         if ("caregivers".equals(sub)) return "Cuidadores";
-        if ("stock".equals(sub) || "stock_history".equals(sub)) return "Estoque";
+        if ("stock".equals(sub) || "stock_history".equals(sub)) return "Estoque de Medicamentos";
         if ("role_swap".equals(sub)) return "Mudar Perfil";
         if ("privacy".equals(sub)) return "Privacidade";
         if ("prefs".equals(sub)) return "Preferências";
         if ("config_card".equals(sub)) return "Configurar Cartão";
+        if ("show_card".equals(sub) || "emergency_card".equals(sub)) return "🚨 Cartão de Emergência";
         return "Meu Perfil";
     }
 
@@ -4804,41 +6022,122 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(1);
         card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
-        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
 
         TextView tvSub = new TextView(this);
-        tvSub.setText("Escolha quais informações aparecerão no seu Cartão de Emergência:");
+        tvSub.setText("Escolha quais informações aparecerão no seu Cartão de Emergência. Recomendamos manter alergias e contatos sempre visíveis.");
         tvSub.setTextColor(this.cTextMuted);
-        tvSub.setTextSize(sp(14.0f));
-        tvSub.setPadding(0, 0, 0, dp(14));
+        tvSub.setTextSize(sp(13.0f));
+        tvSub.setPadding(0, 0, 0, dp(16));
         card.addView(tvSub);
 
         String[][] toggles = {
-            {"ec_show_allergies", "Exibir alergias"},
-            {"ec_show_conditions", "Exibir condições médicas"},
-            {"ec_show_meds", "Exibir medicamentos importantes"},
-            {"ec_show_contacts", "Exibir contatos de emergência"},
-            {"ec_show_doctors", "Exibir médico responsável"},
-            {"ec_show_notes", "Exibir observações importantes"}
+            {"ec_show_allergies", "Alergias", "Suas alergias graves ou moderadas", "⚠️"},
+            {"ec_show_conditions", "Condições de saúde", "Doenças crônicas ou relevantes", "❤️"},
+            {"ec_show_meds", "Medicamentos importantes", "Seus remédios de uso contínuo", "💊"},
+            {"ec_show_contacts", "Contatos de emergência", "Pessoas para ligar em caso de urgência", "📞"},
+            {"ec_show_doctors", "Médico principal", "Seu médico de referência", "👨‍⚕️"},
+            {"ec_show_notes", "Observações gerais", "Instruções adicionais de cuidado", "📝"}
         };
-        for (final String[] tg : toggles) {
+        for (int i = 0; i < toggles.length; i++) {
+            final String[] tg = toggles[i];
+            final boolean isChecked = this.profile.optBoolean(tg[0], true);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(0);
+            row.setGravity(16);
+            row.setBackground(shape(isChecked ? Color.parseColor("#143B82F6") : this.cBgMain, 14, isChecked ? this.cPrimary : this.cBorder, 1));
+            row.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(-1, -2);
+            rLp.bottomMargin = dp(10);
+            row.setLayoutParams(rLp);
+
+            TextView tvIcon = new TextView(this);
+            tvIcon.setText(tg[3]);
+            tvIcon.setTextSize(sp(20.0f));
+            tvIcon.setPadding(0, 0, dp(12), 0);
+            row.addView(tvIcon);
+
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(1);
+            col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+            TextView tvTitle = new TextView(this);
+            tvTitle.setText(tg[1]);
+            tvTitle.setTextColor(this.cTextMain);
+            tvTitle.setTextSize(sp(15.0f));
+            tvTitle.setTypeface(null, 1);
+            col.addView(tvTitle);
+
+            TextView tvDesc = new TextView(this);
+            tvDesc.setText(tg[2]);
+            tvDesc.setTextColor(this.cTextMuted);
+            tvDesc.setTextSize(sp(12.0f));
+            col.addView(tvDesc);
+
+            row.addView(col);
+
             final CheckBox cb = new CheckBox(this);
-            cb.setText("  " + tg[1]);
-            cb.setTextColor(this.cTextMain);
-            cb.setTextSize(sp(15.0f));
-            cb.setChecked(this.profile.optBoolean(tg[0], true));
-            cb.setPadding(0, dp(10), 0, dp(10));
-            cb.setOnClickListener(new View.OnClickListener() {
+            cb.setChecked(isChecked);
+            cb.setClickable(false);
+            row.addView(cb);
+
+            row.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     try {
-                        MainActivity.this.profile.put(tg[0], cb.isChecked());
+                        MainActivity.this.profile.put(tg[0], !isChecked);
                         saveAll();
+                        render();
                     } catch (Exception ignored) {}
                 }
             });
-            card.addView(cb);
+            card.addView(row);
         }
+
+        TextView tvNotesLbl = new TextView(this);
+        tvNotesLbl.setText("Observações rápidas para o cartão");
+        tvNotesLbl.setTextColor(this.cTextMuted);
+        tvNotesLbl.setTextSize(sp(12.0f));
+        tvNotesLbl.setTypeface(null, 1);
+        tvNotesLbl.setPadding(0, dp(8), 0, dp(6));
+        card.addView(tvNotesLbl);
+
+        final EditText etNotes = new EditText(this);
+        etNotes.setHint("Ex: Portador de marca-passo, diabético tipo 1...");
+        etNotes.setHintTextColor(this.cTextLight);
+        etNotes.setText(this.profile.optString("observacoes_medicas", this.profile.optString("emergency_notes", "")));
+        etNotes.setTextColor(this.cTextMain);
+        etNotes.setTextSize(sp(14.0f));
+        etNotes.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        etNotes.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams nLp = new LinearLayout.LayoutParams(-1, -2);
+        nLp.bottomMargin = dp(16);
+        etNotes.setLayoutParams(nLp);
+        card.addView(etNotes);
+
+        TextView btnSave = new TextView(this);
+        btnSave.setText("Salvar Configuração");
+        btnSave.setTextColor(Color.WHITE);
+        btnSave.setTextSize(sp(15.0f));
+        btnSave.setTypeface(null, 1);
+        btnSave.setGravity(17);
+        btnSave.setBackground(shape(this.cPrimary, 12, 0, 0));
+        btnSave.setPadding(dp(16), dp(14), dp(16), dp(14));
+        btnSave.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    String notesVal = etNotes.getText().toString().trim();
+                    MainActivity.this.profile.put("observacoes_medicas", notesVal);
+                    MainActivity.this.profile.put("emergency_notes", notesVal);
+                    saveAll();
+                    Toast.makeText(MainActivity.this, "Configuração salva!", 0).show();
+                } catch (Exception ignored) {}
+            }
+        });
+        card.addView(btnSave);
+
         linearLayout.addView(card);
     }
 
@@ -4846,62 +6145,126 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(1);
         card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
-        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("💊 Medicamentos na Emergência");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(16.0f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setPadding(0, 0, 0, dp(4));
+        card.addView(tvTitle);
 
         TextView tvSub = new TextView(this);
-        tvSub.setText("Selecione quais medicamentos devem aparecer em destaque no seu Cartão de Emergência:");
+        tvSub.setText("Selecione quais dos seus medicamentos cadastrados devem aparecer no seu Cartão de Emergência.");
         tvSub.setTextColor(this.cTextMuted);
-        tvSub.setTextSize(sp(14.0f));
-        tvSub.setPadding(0, 0, 0, dp(14));
+        tvSub.setTextSize(sp(13.0f));
+        tvSub.setPadding(0, 0, 0, dp(16));
         card.addView(tvSub);
 
         if (this.meds.length() == 0) {
             TextView tvEmpty = new TextView(this);
-            tvEmpty.setText("Nenhum medicamento cadastrado.");
+            tvEmpty.setText("Você ainda não tem medicamentos cadastrados.");
             tvEmpty.setTextColor(this.cTextMuted);
             tvEmpty.setTextSize(sp(14.0f));
+            tvEmpty.setGravity(17);
+            tvEmpty.setPadding(0, dp(20), 0, dp(20));
             card.addView(tvEmpty);
         } else {
             for (int i = 0; i < this.meds.length(); i++) {
                 final JSONObject m = this.meds.optJSONObject(i);
                 if (m == null) continue;
-                final CheckBox cb = new CheckBox(this);
-                cb.setText("  💊 " + m.optString("nome") + " (" + m.optString("dosagem") + ")");
-                cb.setTextColor(this.cTextMain);
-                cb.setTextSize(sp(15.0f));
-                cb.setChecked(m.optBoolean("important_for_emergency", true));
-                cb.setPadding(0, dp(10), 0, dp(10));
-                cb.setOnClickListener(new View.OnClickListener() {
+                final boolean isImp = m.optBoolean("important_for_emergency", true);
+
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(0);
+                row.setGravity(16);
+                row.setBackground(shape(isImp ? Color.parseColor("#143B82F6") : this.cBgMain, 14, isImp ? this.cPrimary : this.cBorder, 1));
+                row.setPadding(dp(14), dp(14), dp(14), dp(14));
+                LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(-1, -2);
+                if (i < this.meds.length() - 1) rLp.bottomMargin = dp(10);
+                row.setLayoutParams(rLp);
+
+                View dot = new View(this);
+                int dotCol = this.cPrimary;
+                try {
+                    dotCol = Color.parseColor(m.optString("cor", "#3B82F6"));
+                } catch (Exception ignored) {}
+                dot.setBackground(shape(dotCol, 6, 0, 0));
+                LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(dp(12), dp(12));
+                dLp.rightMargin = dp(12);
+                dot.setLayoutParams(dLp);
+                row.addView(dot);
+
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(1);
+                col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                TextView tvMName = new TextView(this);
+                tvMName.setText(m.optString("nome"));
+                tvMName.setTextColor(this.cTextMain);
+                tvMName.setTextSize(sp(15.0f));
+                tvMName.setTypeface(null, 1);
+                col.addView(tvMName);
+
+                TextView tvMDose = new TextView(this);
+                tvMDose.setText(m.optString("dosagem") + " " + m.optString("unidade", "comprimido(s)"));
+                tvMDose.setTextColor(this.cTextMuted);
+                tvMDose.setTextSize(sp(13.0f));
+                col.addView(tvMDose);
+
+                row.addView(col);
+
+                CheckBox cb = new CheckBox(this);
+                cb.setChecked(isImp);
+                cb.setClickable(false);
+                row.addView(cb);
+
+                row.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         try {
-                            m.put("important_for_emergency", cb.isChecked());
+                            m.put("important_for_emergency", !isImp);
                             saveAll();
+                            render();
                         } catch (Exception ignored) {}
                     }
                 });
-                card.addView(cb);
+                card.addView(row);
             }
         }
         linearLayout.addView(card);
     }
 
     private void buildRoleSwapSubScreen(LinearLayout linearLayout) {
+        LinearLayout outerCard = new LinearLayout(this);
+        outerCard.setOrientation(1);
+        outerCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        outerCard.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Escolha como você utiliza o MediCare. Você pode alterar isso a qualquer momento.");
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(13.0f));
+        tvSub.setPadding(0, 0, 0, dp(16));
+        outerCard.addView(tvSub);
+
         String curRole = this.profile.optString("user_role", "independent");
         String[][] roles = {
             {"patient", "🧑", "Sou Paciente", "Tenho alguém que me ajuda a controlar meus remédios."},
             {"caregiver", "🤝", "Sou Cuidador", "Ajudo outra pessoa (familiar ou paciente) com o tratamento."},
             {"independent", "⚙️", "Uso Independente", "Cuido do meu próprio tratamento sozinho."}
         };
-        for (final String[] r : roles) {
+        for (int i = 0; i < roles.length; i++) {
+            final String[] r = roles[i];
             boolean active = r[0].equals(curRole);
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(0);
             card.setGravity(16);
-            card.setBackground(shape(active ? Color.parseColor("#1A3B82F6") : this.cSurface, 18, active ? this.cPrimary : this.cBorder, active ? 2 : 1));
-            card.setPadding(dp(18), dp(18), dp(18), dp(18));
+            card.setBackground(shape(active ? Color.parseColor("#1A3B82F6") : this.cBgMain, 16, active ? this.cPrimary : this.cBorder, active ? 2 : 1));
+            card.setPadding(dp(16), dp(16), dp(16), dp(16));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.bottomMargin = dp(12);
+            if (i < roles.length - 1) lp.bottomMargin = dp(10);
             card.setLayoutParams(lp);
 
             TextView tvI = new TextView(this);
@@ -4914,12 +6277,31 @@ public class MainActivity extends Activity {
             col.setOrientation(1);
             col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
+            LinearLayout titleRow = new LinearLayout(this);
+            titleRow.setOrientation(0);
+            titleRow.setGravity(16);
+
             TextView tvT = new TextView(this);
-            tvT.setText(r[2] + (active ? "  [Atual]" : ""));
-            tvT.setTextColor(active ? this.cPrimary : this.cTextMain);
+            tvT.setText(r[2]);
+            tvT.setTextColor(this.cTextMain);
             tvT.setTextSize(sp(16.0f));
             tvT.setTypeface(null, 1);
-            col.addView(tvT);
+            titleRow.addView(tvT);
+
+            if (active) {
+                TextView badge = new TextView(this);
+                badge.setText("Atual");
+                badge.setTextColor(Color.WHITE);
+                badge.setTextSize(sp(11.0f));
+                badge.setTypeface(null, 1);
+                badge.setBackground(shape(this.cPrimary, 10, 0, 0));
+                badge.setPadding(dp(8), dp(2), dp(8), dp(2));
+                LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
+                bLp.leftMargin = dp(8);
+                badge.setLayoutParams(bLp);
+                titleRow.addView(badge);
+            }
+            col.addView(titleRow);
 
             TextView tvD = new TextView(this);
             tvD.setText(r[3]);
@@ -4940,8 +6322,9 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) {}
                 }
             });
-            linearLayout.addView(card);
+            outerCard.addView(card);
         }
+        linearLayout.addView(outerCard);
     }
 
     private void buildPrivacySubScreen(LinearLayout linearLayout) {
@@ -4950,16 +6333,25 @@ public class MainActivity extends Activity {
         card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
         card.setPadding(dp(20), dp(20), dp(20), dp(20));
 
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("🔐 Privacidade e Segurança");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(16.0f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setPadding(0, 0, 0, dp(8));
+        card.addView(tvTitle);
+
         TextView tvInfo = new TextView(this);
-        tvInfo.setText("Seus dados de saúde são armazenados com segurança no dispositivo e sincronizados com o servidor MediCare.");
+        tvInfo.setText("Seus dados de saúde são privados e protegidos. Nenhuma informação é compartilhada com terceiros sem sua autorização explícita (como ao vincular um cuidador).\n\nO Cartão de Emergência exibe apenas as informações que você autorizar na tela de configuração do cartão.");
         tvInfo.setTextColor(this.cTextMuted);
         tvInfo.setTextSize(sp(14.0f));
-        tvInfo.setPadding(0, 0, 0, dp(16));
+        tvInfo.setLineSpacing(dp(4), 1.0f);
+        tvInfo.setPadding(0, 0, 0, dp(18));
         card.addView(tvInfo);
 
         TextView btnSync = createButton("☁️ Sincronizar dados agora", this.cPrimary, Color.WHITE);
         LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(-1, -2);
-        sLp.bottomMargin = dp(12);
+        sLp.bottomMargin = dp(10);
         btnSync.setLayoutParams(sLp);
         btnSync.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -4986,17 +6378,55 @@ public class MainActivity extends Activity {
     }
 
     private void buildPrefsSubScreen(LinearLayout linearLayout) {
+        // Matches Screenshot 1 (Preferências) & ProfileScreen.jsx lines 234-294
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(1);
         card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
-        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+        card.setPadding(0, 0, 0, 0);
 
-        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
-        btnLp.bottomMargin = dp(12);
+        // Row 1: Tema Escuro / Tema Claro
+        LinearLayout rTheme = new LinearLayout(this);
+        rTheme.setOrientation(0);
+        rTheme.setGravity(16);
+        rTheme.setPadding(dp(18), dp(18), dp(18), dp(18));
 
-        TextView btnTheme = createButton(this.isDarkMode ? "☀️ Mudar para Tema Claro" : "🌙 Mudar para Tema Escuro", this.cBgMain, this.cTextMain);
-        btnTheme.setLayoutParams(btnLp);
-        btnTheme.setOnClickListener(new View.OnClickListener() {
+        TextView tvThemeIcon = new TextView(this);
+        tvThemeIcon.setText(this.isDarkMode ? "🌙" : "☀️");
+        tvThemeIcon.setTextSize(sp(22.0f));
+        tvThemeIcon.setPadding(0, 0, dp(14), 0);
+        rTheme.addView(tvThemeIcon);
+
+        LinearLayout themeCol = new LinearLayout(this);
+        themeCol.setOrientation(1);
+        themeCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvThemeTitle = new TextView(this);
+        tvThemeTitle.setText(this.isDarkMode ? "Tema Escuro" : "Tema Claro");
+        tvThemeTitle.setTextColor(this.cTextMain);
+        tvThemeTitle.setTextSize(sp(16.0f));
+        tvThemeTitle.setTypeface(null, 1);
+        themeCol.addView(tvThemeTitle);
+
+        TextView tvThemeSub = new TextView(this);
+        tvThemeSub.setText("Toque para alternar o modo visual");
+        tvThemeSub.setTextColor(this.cTextMuted);
+        tvThemeSub.setTextSize(sp(13.0f));
+        tvThemeSub.setPadding(0, dp(2), 0, 0);
+        themeCol.addView(tvThemeSub);
+
+        rTheme.addView(themeCol);
+
+        TextView btnThemeToggle = new TextView(this);
+        btnThemeToggle.setText("Alternar");
+        btnThemeToggle.setTextColor(this.cTextMain);
+        btnThemeToggle.setTextSize(sp(14.0f));
+        btnThemeToggle.setTypeface(null, 1);
+        btnThemeToggle.setGravity(17);
+        btnThemeToggle.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
+        btnThemeToggle.setPadding(dp(16), dp(10), dp(16), dp(10));
+        rTheme.addView(btnThemeToggle);
+
+        rTheme.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 MainActivity.this.isDarkMode = !MainActivity.this.isDarkMode;
@@ -5004,22 +6434,125 @@ public class MainActivity extends Activity {
                 render();
             }
         });
-        card.addView(btnTheme);
+        card.addView(rTheme);
 
-        TextView btnAccess = createButton(this.isAccessibilityMode ? "🔤 Fonte Ampliada (Idosos): ATIVA" : "🔤 Ativar Fonte Ampliada (Idosos)", this.cBgMain, this.cTextMain);
-        btnAccess.setLayoutParams(btnLp);
-        btnAccess.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                MainActivity.this.isAccessibilityMode = !MainActivity.this.isAccessibilityMode;
-                saveAll();
-                render();
-            }
-        });
-        card.addView(btnAccess);
+        View div1 = new View(this);
+        div1.setBackgroundColor(this.cBorder);
+        div1.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        card.addView(div1);
 
-        TextView btnContrast = createButton(this.isHighContrast ? "👁 Alto Contraste: ATIVO" : "👁 Ativar Alto Contraste", this.cBgMain, this.cTextMain);
-        btnContrast.setOnClickListener(new View.OnClickListener() {
+        // Row 2: Tamanho da fonte (Normal, Grande, Maior)
+        LinearLayout rFont = new LinearLayout(this);
+        rFont.setOrientation(1);
+        rFont.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        LinearLayout fontTop = new LinearLayout(this);
+        fontTop.setOrientation(0);
+        fontTop.setGravity(16);
+        LinearLayout.LayoutParams ftLp = new LinearLayout.LayoutParams(-1, -2);
+        ftLp.bottomMargin = dp(14);
+        fontTop.setLayoutParams(ftLp);
+
+        TextView tvFontIcon = new TextView(this);
+        tvFontIcon.setText("🔤");
+        tvFontIcon.setTextSize(sp(22.0f));
+        tvFontIcon.setPadding(0, 0, dp(14), 0);
+        fontTop.addView(tvFontIcon);
+
+        TextView tvFontTitle = new TextView(this);
+        tvFontTitle.setText("Tamanho da fonte");
+        tvFontTitle.setTextColor(this.cTextMain);
+        tvFontTitle.setTextSize(sp(16.0f));
+        tvFontTitle.setTypeface(null, 1);
+        fontTop.addView(tvFontTitle);
+
+        rFont.addView(fontTop);
+
+        LinearLayout fontBtnsRow = new LinearLayout(this);
+        fontBtnsRow.setOrientation(0);
+        String[][] fontOpts = {
+            {"normal", "Normal"},
+            {"large", "Grande"},
+            {"xlarge", "Maior"}
+        };
+        for (int i = 0; i < fontOpts.length; i++) {
+            final String fKey = fontOpts[i][0];
+            String fLabel = fontOpts[i][1];
+            boolean fSel = fKey.equals(this.fontScaleMode);
+
+            TextView fBtn = new TextView(this);
+            fBtn.setText(fLabel);
+            fBtn.setTextColor(fSel ? Color.WHITE : this.cTextMuted);
+            fBtn.setTextSize(sp(14.0f));
+            fBtn.setTypeface(null, 1);
+            fBtn.setGravity(17);
+            fBtn.setBackground(shape(fSel ? this.cPrimary : this.cSurfaceHover, 12, 0, 0));
+            fBtn.setPadding(dp(10), dp(12), dp(10), dp(12));
+            LinearLayout.LayoutParams fbLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            if (i < fontOpts.length - 1) fbLp.rightMargin = dp(8);
+            fBtn.setLayoutParams(fbLp);
+            fBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.fontScaleMode = fKey;
+                    MainActivity.this.isAccessibilityMode = !"normal".equals(fKey);
+                    saveAll();
+                    render();
+                }
+            });
+            fontBtnsRow.addView(fBtn);
+        }
+        rFont.addView(fontBtnsRow);
+        card.addView(rFont);
+
+        View div2 = new View(this);
+        div2.setBackgroundColor(this.cBorder);
+        div2.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        card.addView(div2);
+
+        // Row 3: Acessibilidade
+        LinearLayout rAccess = new LinearLayout(this);
+        rAccess.setOrientation(0);
+        rAccess.setGravity(16);
+        rAccess.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        TextView tvAccIcon = new TextView(this);
+        tvAccIcon.setText("♿");
+        tvAccIcon.setTextSize(sp(22.0f));
+        tvAccIcon.setPadding(0, 0, dp(14), 0);
+        rAccess.addView(tvAccIcon);
+
+        LinearLayout accCol = new LinearLayout(this);
+        accCol.setOrientation(1);
+        accCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvAccTitle = new TextView(this);
+        tvAccTitle.setText("Acessibilidade");
+        tvAccTitle.setTextColor(this.cTextMain);
+        tvAccTitle.setTextSize(sp(16.0f));
+        tvAccTitle.setTypeface(null, 1);
+        accCol.addView(tvAccTitle);
+
+        TextView tvAccSub = new TextView(this);
+        tvAccSub.setText("Alto contraste, botões 44px+");
+        tvAccSub.setTextColor(this.cTextMuted);
+        tvAccSub.setTextSize(sp(13.0f));
+        tvAccSub.setPadding(0, dp(2), 0, 0);
+        accCol.addView(tvAccSub);
+
+        rAccess.addView(accCol);
+
+        TextView btnAccToggle = new TextView(this);
+        btnAccToggle.setText("Alternar");
+        btnAccToggle.setTextColor(this.isHighContrast ? Color.WHITE : this.cTextMain);
+        btnAccToggle.setTextSize(sp(14.0f));
+        btnAccToggle.setTypeface(null, 1);
+        btnAccToggle.setGravity(17);
+        btnAccToggle.setBackground(shape(this.isHighContrast ? this.cPrimary : this.cSurfaceHover, 12, this.cBorder, this.isHighContrast ? 0 : 1));
+        btnAccToggle.setPadding(dp(16), dp(10), dp(16), dp(10));
+        rAccess.addView(btnAccToggle);
+
+        rAccess.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 MainActivity.this.isHighContrast = !MainActivity.this.isHighContrast;
@@ -5027,246 +6560,709 @@ public class MainActivity extends Activity {
                 render();
             }
         });
-        card.addView(btnContrast);
+        card.addView(rAccess);
+
+        View div3 = new View(this);
+        div3.setBackgroundColor(this.cBorder);
+        div3.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        card.addView(div3);
+
+        // Row 4: Notificações
+        final boolean notifEnabled = this.profile.optBoolean("notifications_enabled", true);
+        LinearLayout rNotif = new LinearLayout(this);
+        rNotif.setOrientation(0);
+        rNotif.setGravity(16);
+        rNotif.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        TextView tvNotifIcon = new TextView(this);
+        tvNotifIcon.setText("🔔");
+        tvNotifIcon.setTextSize(sp(22.0f));
+        tvNotifIcon.setPadding(0, 0, dp(14), 0);
+        rNotif.addView(tvNotifIcon);
+
+        LinearLayout notifCol = new LinearLayout(this);
+        notifCol.setOrientation(1);
+        notifCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvNotifTitle = new TextView(this);
+        tvNotifTitle.setText("Notificações");
+        tvNotifTitle.setTextColor(this.cTextMain);
+        tvNotifTitle.setTextSize(sp(16.0f));
+        tvNotifTitle.setTypeface(null, 1);
+        notifCol.addView(tvNotifTitle);
+
+        TextView tvNotifSub = new TextView(this);
+        tvNotifSub.setText(notifEnabled ? "Ativas" : "Desativadas");
+        tvNotifSub.setTextColor(this.cTextMuted);
+        tvNotifSub.setTextSize(sp(13.0f));
+        tvNotifSub.setPadding(0, dp(2), 0, 0);
+        notifCol.addView(tvNotifSub);
+
+        rNotif.addView(notifCol);
+
+        TextView btnNotifToggle = new TextView(this);
+        btnNotifToggle.setText(notifEnabled ? "Desativar" : "Ativar");
+        btnNotifToggle.setTextColor(notifEnabled ? Color.parseColor("#EF4444") : Color.WHITE);
+        btnNotifToggle.setTextSize(sp(14.0f));
+        btnNotifToggle.setTypeface(null, 1);
+        btnNotifToggle.setGravity(17);
+        btnNotifToggle.setBackground(shape(notifEnabled ? this.cSurfaceHover : this.cPrimary, 12, this.cBorder, notifEnabled ? 1 : 0));
+        btnNotifToggle.setPadding(dp(16), dp(10), dp(16), dp(10));
+        btnNotifToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    MainActivity.this.profile.put("notifications_enabled", !notifEnabled);
+                    saveAll();
+                    render();
+                    Toast.makeText(MainActivity.this, !notifEnabled ? "Notificações ativadas!" : "Notificações desativadas.", 0).show();
+                } catch (Exception ignored) {}
+            }
+        });
+        rNotif.addView(btnNotifToggle);
+        card.addView(rNotif);
 
         linearLayout.addView(card);
     }
 
+    private TextView makePersonalFieldLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(this.cTextMuted);
+        tv.setTextSize(sp(12.0f));
+        tv.setTypeface(null, 1);
+        tv.setPadding(0, 0, 0, dp(6));
+        return tv;
+    }
+
+    private EditText makePersonalInputBox(String hint, String val, int inputType) {
+        EditText et = new EditText(this);
+        et.setHint(hint);
+        et.setHintTextColor(this.cTextLight);
+        et.setText(val != null ? val : "");
+        et.setTextColor(this.cTextMain);
+        et.setTextSize(sp(15.0f));
+        et.setSingleLine(true);
+        if (inputType != 0) {
+            et.setInputType(inputType);
+        }
+        et.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        et.setPadding(dp(14), dp(12), dp(14), dp(12));
+        return et;
+    }
+
     private void buildPersonalDataSubScreen(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("✏️ Dados Pessoais", "Atualize suas informações gerais de cadastro"));
+        // Matches Screenshot 2 (Dados pessoais) & PersonalData.jsx
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
 
-        final EditText inNome = createInput("Nome Completo", this.profile.optString("nome", ""));
-        final EditText inDataNasc = createInput("Data de Nascimento (Ex: 15/04/1980)", this.profile.optString("data_nascimento", ""));
-        final EditText inCpf = createInput("CPF", this.profile.optString("cpf", ""));
-        final EditText inTel = createInput("Telefone", this.profile.optString("telefone", ""));
-        final EditText inEndereco = createInput("Endereço Completo", this.profile.optString("endereco", ""));
-        final EditText inSang = createInput("Tipo Sanguíneo (Ex: O+)", this.profile.optString("tipo_sanguineo", ""));
-        final EditText inPeso = createInput("Peso (kg)", this.profile.optString("peso", ""));
-        final EditText inAltura = createInput("Altura (cm)", this.profile.optString("altura", ""));
-        final EditText inObs = createInput("Observações Médicas Gerais", this.profile.optString("observacoes_medicas", ""));
+        // 1. Nome completo
+        card.addView(makePersonalFieldLabel("Nome completo"));
+        final EditText inNome = makePersonalInputBox("Seu nome completo", this.profile.optString("nome", ""), 0);
+        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(-1, -2);
+        lp1.bottomMargin = dp(14);
+        inNome.setLayoutParams(lp1);
+        card.addView(inNome);
 
-        linearLayout.addView(inNome);
-        linearLayout.addView(inDataNasc);
-        linearLayout.addView(inCpf);
-        linearLayout.addView(inTel);
-        linearLayout.addView(inEndereco);
-        linearLayout.addView(inSang);
-        linearLayout.addView(inPeso);
-        linearLayout.addView(inAltura);
-        linearLayout.addView(inObs);
+        // 2. Nome social / Apelido
+        card.addView(makePersonalFieldLabel("Nome social / Apelido"));
+        final EditText inSocial = makePersonalInputBox("Como prefere ser chamado", this.profile.optString("social_name", ""), 0);
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(-1, -2);
+        lp2.bottomMargin = dp(14);
+        inSocial.setLayoutParams(lp2);
+        card.addView(inSocial);
 
-        TextView btnSave = createButton("💾 Salvar Alterações", this.cPrimary, Color.WHITE);
+        // 3. 2-Column Row: Data de nascimento + Sexo
+        LinearLayout rowDobGender = new LinearLayout(this);
+        rowDobGender.setOrientation(0);
+        LinearLayout.LayoutParams rdgLp = new LinearLayout.LayoutParams(-1, -2);
+        rdgLp.bottomMargin = dp(14);
+        rowDobGender.setLayoutParams(rdgLp);
+
+        LinearLayout colDob = new LinearLayout(this);
+        colDob.setOrientation(1);
+        LinearLayout.LayoutParams cdLp = new LinearLayout.LayoutParams(0, -2, 1.15f);
+        cdLp.rightMargin = dp(10);
+        colDob.setLayoutParams(cdLp);
+        colDob.addView(makePersonalFieldLabel("Data de nascimento"));
+
+        LinearLayout dobBox = new LinearLayout(this);
+        dobBox.setOrientation(0);
+        dobBox.setGravity(16);
+        dobBox.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        dobBox.setPadding(dp(14), dp(4), dp(12), dp(4));
+
+        String rawDob = this.profile.optString("data_nascimento", this.profile.optString("dob", ""));
+        if (rawDob.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            String[] p = rawDob.split("-");
+            rawDob = p[2] + "/" + p[1] + "/" + p[0];
+        }
+        final EditText inDob = new EditText(this);
+        inDob.setHint("DD/MM/AAAA");
+        inDob.setHintTextColor(this.cTextLight);
+        inDob.setText(rawDob);
+        inDob.setTextColor(this.cTextMain);
+        inDob.setTextSize(sp(15.0f));
+        inDob.setSingleLine(true);
+        inDob.setBackgroundColor(Color.TRANSPARENT);
+        inDob.setPadding(0, dp(8), dp(6), dp(8));
+        inDob.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        dobBox.addView(inDob);
+
+        TextView tvCalIcon = new TextView(this);
+        tvCalIcon.setText("📅");
+        tvCalIcon.setTextSize(sp(16.0f));
+        tvCalIcon.setPadding(dp(4), dp(4), dp(2), dp(4));
+        tvCalIcon.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Calendar cal = Calendar.getInstance();
+                int yr = 1980, mo = 0, dy = 1;
+                String cur = inDob.getText().toString().trim();
+                try {
+                    if (cur.contains("/")) {
+                        String[] parts = cur.split("/");
+                        if (parts.length == 3) {
+                            dy = Integer.parseInt(parts[0]);
+                            mo = Integer.parseInt(parts[1]) - 1;
+                            yr = Integer.parseInt(parts[2]);
+                        }
+                    }
+                } catch (Exception ignored) {}
+                new DatePickerDialog(MainActivity.this, new DatePickerDialog.OnDateSetListener() {
+                    @Override
+                    public void onDateSet(DatePicker view, int year, int month, int dayOfMonth) {
+                        inDob.setText(String.format(Locale.ROOT, "%02d/%02d/%04d", dayOfMonth, month + 1, year));
+                    }
+                }, yr, mo, dy).show();
+            }
+        });
+        dobBox.addView(tvCalIcon);
+        colDob.addView(dobBox);
+        rowDobGender.addView(colDob);
+
+        LinearLayout colGender = new LinearLayout(this);
+        colGender.setOrientation(1);
+        colGender.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 0.85f));
+        colGender.addView(makePersonalFieldLabel("Sexo"));
+
+        final String[] genderValues = {"", "M", "F", "Outro"};
+        final String[] genderLabels = {"Selecionar", "Masculino", "Feminino", "Outro"};
+        String curGenderVal = this.profile.optString("gender", this.profile.optString("sexo", ""));
+        int initGIdx = 0;
+        for (int i = 0; i < genderValues.length; i++) {
+            if (genderValues[i].equalsIgnoreCase(curGenderVal) || genderLabels[i].equalsIgnoreCase(curGenderVal)) {
+                initGIdx = i;
+                break;
+            }
+        }
+        final int[] selectedGenderIdx = {initGIdx};
+
+        LinearLayout genderBox = new LinearLayout(this);
+        genderBox.setOrientation(0);
+        genderBox.setGravity(16);
+        genderBox.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        genderBox.setPadding(dp(14), dp(12), dp(12), dp(12));
+
+        final TextView tvGenderVal = new TextView(this);
+        tvGenderVal.setText(genderLabels[selectedGenderIdx[0]]);
+        tvGenderVal.setTextColor(this.cTextMain);
+        tvGenderVal.setTextSize(sp(15.0f));
+        tvGenderVal.setSingleLine(true);
+        tvGenderVal.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        genderBox.addView(tvGenderVal);
+
+        TextView tvGenderArrow = new TextView(this);
+        tvGenderArrow.setText("⌄");
+        tvGenderArrow.setTextColor(this.cTextMuted);
+        tvGenderArrow.setTextSize(sp(15.0f));
+        genderBox.addView(tvGenderArrow);
+
+        genderBox.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                AlertDialog.Builder gb = new AlertDialog.Builder(MainActivity.this);
+                gb.setTitle("Sexo");
+                gb.setItems(genderLabels, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        selectedGenderIdx[0] = which;
+                        tvGenderVal.setText(genderLabels[which]);
+                    }
+                });
+                gb.show();
+            }
+        });
+        colGender.addView(genderBox);
+        rowDobGender.addView(colGender);
+        card.addView(rowDobGender);
+
+        // 4. CPF (opcional)
+        card.addView(makePersonalFieldLabel("CPF (opcional)"));
+        final EditText inCpf = makePersonalInputBox("000.000.000-00", this.profile.optString("cpf", ""), 0);
+        LinearLayout.LayoutParams lp4 = new LinearLayout.LayoutParams(-1, -2);
+        lp4.bottomMargin = dp(14);
+        inCpf.setLayoutParams(lp4);
+        card.addView(inCpf);
+
+        // 5. Telefone
+        card.addView(makePersonalFieldLabel("Telefone"));
+        final EditText inTel = makePersonalInputBox("(00) 00000-0000", this.profile.optString("telefone", this.profile.optString("phone", "")), InputType.TYPE_CLASS_PHONE);
+        LinearLayout.LayoutParams lp5 = new LinearLayout.LayoutParams(-1, -2);
+        lp5.bottomMargin = dp(14);
+        inTel.setLayoutParams(lp5);
+        card.addView(inTel);
+
+        // 6. Endereço
+        card.addView(makePersonalFieldLabel("Endereço"));
+        final EditText inEnd = makePersonalInputBox("Rua, número, bairro, cidade", this.profile.optString("endereco", this.profile.optString("address", "")), 0);
+        LinearLayout.LayoutParams lp6 = new LinearLayout.LayoutParams(-1, -2);
+        lp6.bottomMargin = dp(14);
+        inEnd.setLayoutParams(lp6);
+        card.addView(inEnd);
+
+        // 7. 2-Column Row: Peso (kg) + Altura (m)
+        LinearLayout rowWeightHeight = new LinearLayout(this);
+        rowWeightHeight.setOrientation(0);
+        LinearLayout.LayoutParams rwhLp = new LinearLayout.LayoutParams(-1, -2);
+        rwhLp.bottomMargin = dp(14);
+        rowWeightHeight.setLayoutParams(rwhLp);
+
+        LinearLayout colWeight = new LinearLayout(this);
+        colWeight.setOrientation(1);
+        LinearLayout.LayoutParams cwLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        cwLp.rightMargin = dp(10);
+        colWeight.setLayoutParams(cwLp);
+        colWeight.addView(makePersonalFieldLabel("Peso (kg)"));
+        final EditText inPeso = makePersonalInputBox("70", this.profile.optString("peso", this.profile.optString("weight", "")), InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        colWeight.addView(inPeso);
+        rowWeightHeight.addView(colWeight);
+
+        LinearLayout colHeight = new LinearLayout(this);
+        colHeight.setOrientation(1);
+        colHeight.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        colHeight.addView(makePersonalFieldLabel("Altura (m)"));
+        final EditText inAltura = makePersonalInputBox("1.70", this.profile.optString("altura", this.profile.optString("height", "")), InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        colHeight.addView(inAltura);
+        rowWeightHeight.addView(colHeight);
+
+        card.addView(rowWeightHeight);
+
+        // 8. Tipo sanguíneo
+        card.addView(makePersonalFieldLabel("Tipo sanguíneo"));
+        final String[] bloodOptions = {"Selecionar", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"};
+        String curBlood = this.profile.optString("tipo_sanguineo", this.profile.optString("blood_type", ""));
+        int initBIdx = 0;
+        for (int i = 1; i < bloodOptions.length; i++) {
+            if (bloodOptions[i].equalsIgnoreCase(curBlood)) {
+                initBIdx = i;
+                break;
+            }
+        }
+        final int[] selectedBloodIdx = {initBIdx};
+
+        LinearLayout bloodBox = new LinearLayout(this);
+        bloodBox.setOrientation(0);
+        bloodBox.setGravity(16);
+        bloodBox.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        bloodBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams bbLp = new LinearLayout.LayoutParams(-1, -2);
+        bbLp.bottomMargin = dp(20);
+        bloodBox.setLayoutParams(bbLp);
+
+        final TextView tvBloodVal = new TextView(this);
+        tvBloodVal.setText(bloodOptions[selectedBloodIdx[0]]);
+        tvBloodVal.setTextColor(this.cTextMain);
+        tvBloodVal.setTextSize(sp(15.0f));
+        tvBloodVal.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        bloodBox.addView(tvBloodVal);
+
+        TextView tvBloodArrow = new TextView(this);
+        tvBloodArrow.setText("⌄");
+        tvBloodArrow.setTextColor(this.cTextMuted);
+        tvBloodArrow.setTextSize(sp(16.0f));
+        bloodBox.addView(tvBloodArrow);
+
+        bloodBox.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                AlertDialog.Builder bb = new AlertDialog.Builder(MainActivity.this);
+                bb.setTitle("Tipo sanguíneo");
+                bb.setItems(bloodOptions, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        selectedBloodIdx[0] = which;
+                        tvBloodVal.setText(bloodOptions[which]);
+                    }
+                });
+                bb.show();
+            }
+        });
+        card.addView(bloodBox);
+
+        // 9. Salvar dados button
+        TextView btnSave = new TextView(this);
+        btnSave.setText("Salvar dados");
+        btnSave.setTextColor(Color.WHITE);
+        btnSave.setTextSize(sp(16.0f));
+        btnSave.setTypeface(null, 1);
+        btnSave.setGravity(17);
+        btnSave.setBackground(shape(this.cPrimary, 12, 0, 0));
+        btnSave.setPadding(dp(16), dp(15), dp(16), dp(15));
         btnSave.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 try {
-                    MainActivity.this.profile.put("nome", inNome.getText().toString().trim());
-                    MainActivity.this.profile.put("data_nascimento", inDataNasc.getText().toString().trim());
-                    MainActivity.this.profile.put("cpf", inCpf.getText().toString().trim());
-                    MainActivity.this.profile.put("telefone", inTel.getText().toString().trim());
-                    MainActivity.this.profile.put("endereco", inEndereco.getText().toString().trim());
-                    MainActivity.this.profile.put("tipo_sanguineo", inSang.getText().toString().trim());
-                    MainActivity.this.profile.put("peso", inPeso.getText().toString().trim());
-                    MainActivity.this.profile.put("altura", inAltura.getText().toString().trim());
-                    MainActivity.this.profile.put("observacoes_medicas", inObs.getText().toString().trim());
+                    String nomeVal = inNome.getText().toString().trim();
+                    String socialVal = inSocial.getText().toString().trim();
+                    String dobVal = inDob.getText().toString().trim();
+                    String genderVal = genderValues[selectedGenderIdx[0]];
+                    String cpfVal = inCpf.getText().toString().trim();
+                    String telVal = inTel.getText().toString().trim();
+                    String endVal = inEnd.getText().toString().trim();
+                    String pesoVal = inPeso.getText().toString().trim();
+                    String alturaVal = inAltura.getText().toString().trim();
+                    String bloodVal = selectedBloodIdx[0] == 0 ? "" : bloodOptions[selectedBloodIdx[0]];
+
+                    MainActivity.this.profile.put("nome", nomeVal);
+                    MainActivity.this.profile.put("full_name", nomeVal);
+                    MainActivity.this.profile.put("social_name", socialVal);
+                    MainActivity.this.profile.put("data_nascimento", dobVal);
+                    MainActivity.this.profile.put("dob", dobVal);
+                    MainActivity.this.profile.put("gender", genderVal);
+                    MainActivity.this.profile.put("sexo", genderVal);
+                    MainActivity.this.profile.put("cpf", cpfVal);
+                    MainActivity.this.profile.put("telefone", telVal);
+                    MainActivity.this.profile.put("phone", telVal);
+                    MainActivity.this.profile.put("endereco", endVal);
+                    MainActivity.this.profile.put("address", endVal);
+                    MainActivity.this.profile.put("peso", pesoVal);
+                    MainActivity.this.profile.put("weight", pesoVal);
+                    MainActivity.this.profile.put("altura", alturaVal);
+                    MainActivity.this.profile.put("height", alturaVal);
+                    MainActivity.this.profile.put("tipo_sanguineo", bloodVal);
+                    MainActivity.this.profile.put("blood_type", bloodVal);
 
                     saveAll();
-                    Toast.makeText(MainActivity.this, "Dados pessoais atualizados!", 0).show();
-                    MainActivity.this.profileSubView = "main";
+                    Toast.makeText(MainActivity.this, "Dados pessoais salvos!", 0).show();
                     render();
                 } catch (Exception e) {
                     Toast.makeText(MainActivity.this, "Erro ao salvar dados", 0).show();
                 }
             }
         });
-        linearLayout.addView(btnSave);
+        card.addView(btnSave);
+
+        linearLayout.addView(card);
     }
 
     private void buildEmergencyCardSubScreen(LinearLayout linearLayout) {
-        TextView btnCloseCard = createButton("✕ Fechar Cartão", this.cSurface, this.cTextMain);
-        LinearLayout.LayoutParams ccLp = new LinearLayout.LayoutParams(-1, -2);
-        ccLp.bottomMargin = dp(14);
-        btnCloseCard.setLayoutParams(ccLp);
-        btnCloseCard.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                MainActivity.this.profileSubView = "main";
-                render();
-            }
-        });
-        linearLayout.addView(btnCloseCard);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 24, Color.parseColor("#EF4444"), 2));
+        card.setPadding(0, 0, 0, 0);
 
+        // Red Header Banner
         LinearLayout banner = new LinearLayout(this);
-        banner.setOrientation(1);
-        banner.setBackground(shape(this.cDanger, 18, 0, 0));
-        banner.setPadding(dp(18), dp(18), dp(18), dp(18));
-        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-1, -2);
-        bLp.bottomMargin = dp(16);
-        banner.setLayoutParams(bLp);
+        banner.setOrientation(0);
+        banner.setGravity(16);
+        banner.setBackground(shape(Color.parseColor("#EF4444"), 20, 0, 0));
+        banner.setPadding(dp(20), dp(20), dp(20), dp(20));
 
-        TextView tvTitle = new TextView(this);
-        tvTitle.setText("🚨 CARTÃO DE EMERGÊNCIA MÉDICA (ICE)");
-        tvTitle.setTextColor(Color.WHITE);
-        tvTitle.setTextSize(sp(16.0f));
-        tvTitle.setTypeface(null, 1);
-        banner.addView(tvTitle);
+        String nomeStr = this.profile.optString("social_name", "").trim();
+        if (nomeStr.isEmpty()) nomeStr = this.profile.optString("nome", "Paciente").trim();
+        String initial = nomeStr.isEmpty() ? "👤" : nomeStr.substring(0, 1).toUpperCase(Locale.ROOT);
 
-        TextView tvSub = new TextView(this);
-        tvSub.setText("Apresente esta tela a socorristas ou médicos de emergência");
-        tvSub.setTextColor(Color.parseColor("#FEE2E2"));
-        tvSub.setTextSize(sp(12.0f));
-        tvSub.setPadding(0, dp(4), 0, 0);
-        banner.addView(tvSub);
+        TextView tvAvatar = new TextView(this);
+        tvAvatar.setText(initial);
+        tvAvatar.setTextColor(Color.WHITE);
+        tvAvatar.setTextSize(sp(24.0f));
+        tvAvatar.setTypeface(null, 1);
+        tvAvatar.setGravity(17);
+        tvAvatar.setBackground(shape(Color.parseColor("#33FFFFFF"), 32, Color.WHITE, 2));
+        LinearLayout.LayoutParams avLp = new LinearLayout.LayoutParams(dp(64), dp(64));
+        avLp.rightMargin = dp(16);
+        tvAvatar.setLayoutParams(avLp);
+        banner.addView(tvAvatar);
 
-        linearLayout.addView(banner);
+        LinearLayout bCol = new LinearLayout(this);
+        bCol.setOrientation(1);
+        bCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
-        LinearLayout statsCard = new LinearLayout(this);
-        statsCard.setOrientation(1);
-        statsCard.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
-        statsCard.setPadding(dp(16), dp(16), dp(16), dp(16));
-        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(-1, -2);
-        sLp.bottomMargin = dp(14);
-        statsCard.setLayoutParams(sLp);
+        TextView tvBadge = new TextView(this);
+        tvBadge.setText("CARTÃO DE EMERGÊNCIA");
+        tvBadge.setTextColor(Color.parseColor("#E6FFFFFF"));
+        tvBadge.setTextSize(sp(11.0f));
+        tvBadge.setTypeface(null, 1);
+        bCol.addView(tvBadge);
 
-        TextView tvPName = new TextView(this);
-        tvPName.setText("👤 " + this.profile.optString("nome", "Paciente"));
-        tvPName.setTextColor(this.cTextMain);
-        tvPName.setTextSize(sp(18.0f));
-        tvPName.setTypeface(null, 1);
-        statsCard.addView(tvPName);
+        TextView tvName = new TextView(this);
+        tvName.setText(this.profile.optString("nome", "Nome não informado"));
+        tvName.setTextColor(Color.WHITE);
+        tvName.setTextSize(sp(20.0f));
+        tvName.setTypeface(null, 1);
+        tvName.setPadding(0, dp(2), 0, dp(4));
+        bCol.addView(tvName);
 
-        TextView tvPInfo = new TextView(this);
-        tvPInfo.setText("Tipo Sanguíneo: " + this.profile.optString("tipo_sanguineo", "N/I") + "\nPeso: " + this.profile.optString("peso", "-") + " kg • Altura: " + this.profile.optString("altura", "-") + " cm\nNascimento: " + this.profile.optString("data_nascimento", "-") + "\nCPF: " + this.profile.optString("cpf", "-"));
-        tvPInfo.setTextColor(this.cTextMuted);
-        tvPInfo.setTextSize(sp(13.0f));
-        tvPInfo.setPadding(0, dp(6), 0, 0);
-        statsCard.addView(tvPInfo);
+        int age = calculateProfileAge(this.profile.optString("data_nascimento", ""));
+        String blood = this.profile.optString("tipo_sanguineo", "");
+        String subInfo = (age > 0 ? age + " anos" : "") + (!blood.isEmpty() ? (age > 0 ? "  •  " : "") + "🩸 Tipo " + blood : "");
+        if (!subInfo.isEmpty()) {
+            TextView tvSubInfo = new TextView(this);
+            tvSubInfo.setText(subInfo);
+            tvSubInfo.setTextColor(Color.WHITE);
+            tvSubInfo.setTextSize(sp(13.0f));
+            tvSubInfo.setTypeface(null, 1);
+            bCol.addView(tvSubInfo);
+        }
+        banner.addView(bCol);
+        card.addView(banner);
 
-        linearLayout.addView(statsCard);
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(1);
+        body.setPadding(dp(20), dp(20), dp(20), dp(20));
 
-        LinearLayout algCard = new LinearLayout(this);
-        algCard.setOrientation(1);
-        algCard.setBackground(shape(this.allergies.length() > 0 ? this.cDangerBg : this.cSurface, 16, this.cBorder, 1));
-        algCard.setPadding(dp(14), dp(14), dp(14), dp(14));
-        LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(-1, -2);
-        aLp.bottomMargin = dp(14);
-        algCard.setLayoutParams(aLp);
+        // Alergias
+        if (this.profile.optBoolean("ec_show_allergies", true)) {
+            TextView tvAlgH = new TextView(this);
+            tvAlgH.setText("⚠️ ALERGIAS");
+            tvAlgH.setTextColor(Color.parseColor("#EF4444"));
+            tvAlgH.setTextSize(sp(12.0f));
+            tvAlgH.setTypeface(null, 1);
+            tvAlgH.setPadding(0, 0, 0, dp(8));
+            body.addView(tvAlgH);
 
-        TextView tvAlgT = new TextView(this);
-        tvAlgT.setText("⚠️ Alergias Medicamentosas / Alimentares (" + this.allergies.length() + ")");
-        tvAlgT.setTextColor(this.allergies.length() > 0 ? this.cDanger : this.cTextMain);
-        tvAlgT.setTextSize(sp(14.0f));
-        tvAlgT.setTypeface(null, 1);
-        algCard.addView(tvAlgT);
+            if (this.allergies.length() == 0) {
+                TextView tvNone = new TextView(this);
+                tvNone.setText("Nenhuma alergia registrada.");
+                tvNone.setTextColor(this.cTextMuted);
+                tvNone.setTextSize(sp(14.0f));
+                tvNone.setPadding(0, 0, 0, dp(16));
+                body.addView(tvNone);
+            } else {
+                for (int i = 0; i < this.allergies.length(); i++) {
+                    JSONObject alg = this.allergies.optJSONObject(i);
+                    if (alg == null) continue;
+                    LinearLayout algBox = new LinearLayout(this);
+                    algBox.setOrientation(1);
+                    algBox.setBackground(shape(Color.parseColor("#1AEF4444"), 12, Color.parseColor("#4DEF4444"), 1));
+                    algBox.setPadding(dp(12), dp(10), dp(12), dp(10));
+                    LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(-1, -2);
+                    aLp.bottomMargin = dp(8);
+                    algBox.setLayoutParams(aLp);
 
-        if (this.allergies.length() == 0) {
-            TextView tvNoAlg = new TextView(this);
-            tvNoAlg.setText("Nenhuma alergia cadastrada.");
-            tvNoAlg.setTextColor(this.cTextMuted);
-            tvNoAlg.setTextSize(sp(12.0f));
-            tvNoAlg.setPadding(0, dp(4), 0, 0);
-            algCard.addView(tvNoAlg);
-        } else {
-            for (int i = 0; i < this.allergies.length(); i++) {
-                JSONObject alg = this.allergies.optJSONObject(i);
-                if (alg != null) {
-                    TextView tvAlgItem = new TextView(this);
-                    tvAlgItem.setText("• " + alg.optString("nome") + " (" + alg.optString("gravidade", "Grave") + ") - " + alg.optString("reacao", "Sem reação descrita"));
-                    tvAlgItem.setTextColor(this.cDanger);
-                    tvAlgItem.setTextSize(sp(13.0f));
-                    tvAlgItem.setTypeface(null, 1);
-                    tvAlgItem.setPadding(0, dp(4), 0, 0);
-                    algCard.addView(tvAlgItem);
+                    TextView tvAN = new TextView(this);
+                    tvAN.setText(alg.optString("nome", alg.optString("allergen", "")) + " (" + alg.optString("gravidade", "Moderada") + ")");
+                    tvAN.setTextColor(Color.parseColor("#EF4444"));
+                    tvAN.setTextSize(sp(14.0f));
+                    tvAN.setTypeface(null, 1);
+                    algBox.addView(tvAN);
+
+                    String reac = alg.optString("reacao", alg.optString("reaction", ""));
+                    if (!reac.isEmpty()) {
+                        TextView tvAR = new TextView(this);
+                        tvAR.setText("Reação: " + reac);
+                        tvAR.setTextColor(this.cTextMain);
+                        tvAR.setTextSize(sp(12.0f));
+                        algBox.addView(tvAR);
+                    }
+                    body.addView(algBox);
                 }
             }
         }
-        linearLayout.addView(algCard);
 
-        LinearLayout medCard = new LinearLayout(this);
-        medCard.setOrientation(1);
-        medCard.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
-        medCard.setPadding(dp(14), dp(14), dp(14), dp(14));
-        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(-1, -2);
-        mLp.bottomMargin = dp(14);
-        medCard.setLayoutParams(mLp);
+        // Condições de Saúde
+        if (this.profile.optBoolean("ec_show_conditions", true) && this.conditions.length() > 0) {
+            TextView tvCondH = new TextView(this);
+            tvCondH.setText("❤️ CONDIÇÕES DE SAÚDE");
+            tvCondH.setTextColor(this.cTextMuted);
+            tvCondH.setTextSize(sp(12.0f));
+            tvCondH.setTypeface(null, 1);
+            tvCondH.setPadding(0, dp(8), 0, dp(8));
+            body.addView(tvCondH);
 
-        TextView tvMedT = new TextView(this);
-        tvMedT.setText("💊 Medicamentos em Uso Contínuo (" + this.meds.length() + ")");
-        tvMedT.setTextColor(this.cTextMain);
-        tvMedT.setTextSize(sp(14.0f));
-        tvMedT.setTypeface(null, 1);
-        medCard.addView(tvMedT);
-
-        for (int i = 0; i < this.meds.length(); i++) {
-            JSONObject m = this.meds.optJSONObject(i);
-            if (m != null) {
-                TextView tvM = new TextView(this);
-                tvM.setText("• " + m.optString("nome") + " " + m.optString("dosagem") + " (" + m.optString("frequencia") + ")");
-                tvM.setTextColor(this.cTextMuted);
-                tvM.setTextSize(sp(12.0f));
-                tvM.setPadding(0, dp(4), 0, 0);
-                medCard.addView(tvM);
+            for (int i = 0; i < this.conditions.length(); i++) {
+                JSONObject c = this.conditions.optJSONObject(i);
+                if (c == null) continue;
+                TextView tvC = new TextView(this);
+                tvC.setText("• " + c.optString("nome", c.optString("condition_name", "")));
+                tvC.setTextColor(this.cTextMain);
+                tvC.setTextSize(sp(14.0f));
+                tvC.setTypeface(null, 1);
+                tvC.setPadding(0, 0, 0, dp(6));
+                body.addView(tvC);
             }
         }
-        linearLayout.addView(medCard);
 
-        TextView tvCallTitle = new TextView(this);
-        tvCallTitle.setText("📞 Discar para Contatos de Emergência:");
-        tvCallTitle.setTextColor(this.cTextMain);
-        tvCallTitle.setTextSize(sp(14.0f));
-        tvCallTitle.setTypeface(null, 1);
-        tvCallTitle.setPadding(0, 0, 0, dp(8));
-        linearLayout.addView(tvCallTitle);
+        // Medicamentos em Uso
+        if (this.profile.optBoolean("ec_show_meds", true) && this.meds.length() > 0) {
+            TextView tvMedH = new TextView(this);
+            tvMedH.setText("💊 MEDICAMENTOS EM USO");
+            tvMedH.setTextColor(this.cTextMuted);
+            tvMedH.setTextSize(sp(12.0f));
+            tvMedH.setTypeface(null, 1);
+            tvMedH.setPadding(0, dp(10), 0, dp(8));
+            body.addView(tvMedH);
 
-        TextView btnSamu = createButton("📞 LIGAR PARA O SAMU 192", this.cDanger, Color.WHITE);
-        LinearLayout.LayoutParams samuLp = new LinearLayout.LayoutParams(-1, -2);
-        samuLp.bottomMargin = dp(10);
-        btnSamu.setLayoutParams(samuLp);
-        btnSamu.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:192")));
+            for (int i = 0; i < this.meds.length(); i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m == null || !m.optBoolean("important_for_emergency", true)) continue;
+                LinearLayout mRow = new LinearLayout(this);
+                mRow.setOrientation(0);
+                mRow.setGravity(16);
+                mRow.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                mRow.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(-1, -2);
+                mLp.bottomMargin = dp(6);
+                mRow.setLayoutParams(mLp);
+
+                TextView tvMN = new TextView(this);
+                tvMN.setText(m.optString("nome"));
+                tvMN.setTextColor(this.cTextMain);
+                tvMN.setTextSize(sp(14.0f));
+                tvMN.setTypeface(null, 1);
+                tvMN.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                mRow.addView(tvMN);
+
+                TextView tvMD = new TextView(this);
+                tvMD.setText(m.optString("dosagem") + " " + m.optString("unidade", ""));
+                tvMD.setTextColor(this.cTextMuted);
+                tvMD.setTextSize(sp(13.0f));
+                mRow.addView(tvMD);
+
+                body.addView(mRow);
             }
-        });
-        linearLayout.addView(btnSamu);
+        }
 
-        for (int i = 0; i < this.contacts.length(); i++) {
-            final JSONObject c = this.contacts.optJSONObject(i);
-            if (c != null) {
-                final String telNum = c.optString("telefone", "");
-                TextView btnCall = createButton("📞 Ligar para " + c.optString("nome") + " (" + c.optString("relacao") + "): " + telNum, this.cSurface, this.cPrimary);
+        // Contatos de Emergência
+        if (this.profile.optBoolean("ec_show_contacts", true) && this.contacts.length() > 0) {
+            TextView tvContH = new TextView(this);
+            tvContH.setText("📞 CONTATOS DE EMERGÊNCIA");
+            tvContH.setTextColor(this.cTextMuted);
+            tvContH.setTextSize(sp(12.0f));
+            tvContH.setTypeface(null, 1);
+            tvContH.setPadding(0, dp(10), 0, dp(8));
+            body.addView(tvContH);
+
+            for (int i = 0; i < this.contacts.length(); i++) {
+                JSONObject c = this.contacts.optJSONObject(i);
+                if (c == null) continue;
+                final String telNum = c.optString("telefone", c.optString("phone", ""));
+                LinearLayout cRow = new LinearLayout(this);
+                cRow.setOrientation(0);
+                cRow.setGravity(16);
+                cRow.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+                cRow.setPadding(dp(14), dp(12), dp(14), dp(12));
                 LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-1, -2);
                 cLp.bottomMargin = dp(8);
-                btnCall.setLayoutParams(cLp);
+                cRow.setLayoutParams(cLp);
+
+                LinearLayout cCol = new LinearLayout(this);
+                cCol.setOrientation(1);
+                cCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                TextView tvCN = new TextView(this);
+                tvCN.setText(c.optString("nome", c.optString("name", "")));
+                tvCN.setTextColor(this.cTextMain);
+                tvCN.setTextSize(sp(15.0f));
+                tvCN.setTypeface(null, 1);
+                cCol.addView(tvCN);
+
+                TextView tvCR = new TextView(this);
+                tvCR.setText(c.optString("relacao", c.optString("relationship", "")) + " • " + telNum);
+                tvCR.setTextColor(this.cTextMuted);
+                tvCR.setTextSize(sp(12.0f));
+                cCol.addView(tvCR);
+
+                cRow.addView(cCol);
+
+                TextView btnCall = new TextView(this);
+                btnCall.setText("📞 Ligar");
+                btnCall.setTextColor(Color.WHITE);
+                btnCall.setTextSize(sp(13.0f));
+                btnCall.setTypeface(null, 1);
+                btnCall.setBackground(shape(this.cSuccess, 10, 0, 0));
+                btnCall.setPadding(dp(12), dp(8), dp(12), dp(8));
                 btnCall.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + telNum.replaceAll("[^0-9+]", ""))));
                     }
                 });
-                linearLayout.addView(btnCall);
+                cRow.addView(btnCall);
+                body.addView(cRow);
             }
         }
+
+        // Observações
+        String emNotes = this.profile.optString("observacoes_medicas", this.profile.optString("emergency_notes", "")).trim();
+        if (this.profile.optBoolean("ec_show_notes", true) && !emNotes.isEmpty()) {
+            TextView tvNotesH = new TextView(this);
+            tvNotesH.setText("📝 OBSERVAÇÕES IMPORTANTES");
+            tvNotesH.setTextColor(this.cTextMuted);
+            tvNotesH.setTextSize(sp(12.0f));
+            tvNotesH.setTypeface(null, 1);
+            tvNotesH.setPadding(0, dp(10), 0, dp(6));
+            body.addView(tvNotesH);
+
+            TextView tvNotesBody = new TextView(this);
+            tvNotesBody.setText(emNotes);
+            tvNotesBody.setTextColor(this.cTextMain);
+            tvNotesBody.setTextSize(sp(14.0f));
+            tvNotesBody.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+            tvNotesBody.setPadding(dp(14), dp(12), dp(14), dp(12));
+            body.addView(tvNotesBody);
+        }
+
+        card.addView(body);
+        linearLayout.addView(card);
     }
 
     private void buildHealthSubScreen(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("🩺 Alergias & Condições de Saúde", "Mantenha seu histórico médico atualizado"));
+        // Card 1: Alergias
+        LinearLayout algCard = new LinearLayout(this);
+        algCard.setOrientation(1);
+        algCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        algCard.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout.LayoutParams acLp = new LinearLayout.LayoutParams(-1, -2);
+        acLp.bottomMargin = dp(20);
+        algCard.setLayoutParams(acLp);
 
         LinearLayout algHeader = new LinearLayout(this);
         algHeader.setOrientation(0);
         algHeader.setGravity(16);
-        algHeader.setPadding(0, 0, 0, dp(8));
+        LinearLayout.LayoutParams ahLp = new LinearLayout.LayoutParams(-1, -2);
+        ahLp.bottomMargin = dp(14);
+        algHeader.setLayoutParams(ahLp);
 
-        TextView tvA = new TextView(this);
-        tvA.setText("⚠️ Alergias (" + this.allergies.length() + ")");
-        tvA.setTextColor(this.cTextMain);
-        tvA.setTextSize(sp(15.0f));
-        tvA.setTypeface(null, 1);
-        tvA.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-        algHeader.addView(tvA);
+        LinearLayout algTitleCol = new LinearLayout(this);
+        algTitleCol.setOrientation(1);
+        algTitleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
-        TextView btnAddAlg = createButton("➕ Adicionar", this.cPrimaryLight, this.cPrimary);
-        btnAddAlg.setPadding(dp(10), dp(6), dp(10), dp(6));
+        TextView tvAT = new TextView(this);
+        tvAT.setText("⚠️ Alergias");
+        tvAT.setTextColor(this.cTextMain);
+        tvAT.setTextSize(sp(16.0f));
+        tvAT.setTypeface(null, 1);
+        algTitleCol.addView(tvAT);
+
+        TextView tvASub = new TextView(this);
+        tvASub.setText("Medicamentos, alimentos ou substâncias");
+        tvASub.setTextColor(this.cTextMuted);
+        tvASub.setTextSize(sp(12.0f));
+        algTitleCol.addView(tvASub);
+
+        algHeader.addView(algTitleCol);
+
+        TextView btnAddAlg = new TextView(this);
+        btnAddAlg.setText("+ Adicionar");
+        btnAddAlg.setTextColor(Color.WHITE);
+        btnAddAlg.setTextSize(sp(13.0f));
+        btnAddAlg.setTypeface(null, 1);
+        btnAddAlg.setBackground(shape(this.cPrimary, 10, 0, 0));
+        btnAddAlg.setPadding(dp(12), dp(8), dp(12), dp(8));
         btnAddAlg.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -5274,15 +7270,16 @@ public class MainActivity extends Activity {
             }
         });
         algHeader.addView(btnAddAlg);
-        linearLayout.addView(algHeader);
+        algCard.addView(algHeader);
 
         if (this.allergies.length() == 0) {
             TextView emptyA = new TextView(this);
-            emptyA.setText("Nenhuma alergia cadastrada.");
+            emptyA.setText("Nenhuma alergia registrada.");
             emptyA.setTextColor(this.cTextMuted);
-            emptyA.setTextSize(sp(12.0f));
-            emptyA.setPadding(0, 0, 0, dp(16));
-            linearLayout.addView(emptyA);
+            emptyA.setTextSize(sp(14.0f));
+            emptyA.setGravity(17);
+            emptyA.setPadding(0, dp(14), 0, dp(14));
+            algCard.addView(emptyA);
         } else {
             for (int i = 0; i < this.allergies.length(); i++) {
                 final int idx = i;
@@ -5292,10 +7289,10 @@ public class MainActivity extends Activity {
                 LinearLayout item = new LinearLayout(this);
                 item.setOrientation(0);
                 item.setGravity(16);
-                item.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
-                item.setPadding(dp(12), dp(10), dp(12), dp(10));
+                item.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                item.setPadding(dp(12), dp(12), dp(12), dp(12));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-                lp.bottomMargin = dp(8);
+                if (i < this.allergies.length() - 1) lp.bottomMargin = dp(8);
                 item.setLayoutParams(lp);
 
                 LinearLayout textCol = new LinearLayout(this);
@@ -5303,24 +7300,27 @@ public class MainActivity extends Activity {
                 textCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                 TextView tvN = new TextView(this);
-                tvN.setText(a.optString("nome"));
+                tvN.setText(a.optString("nome", a.optString("allergen", "")) + "  •  " + a.optString("gravidade", "Moderada"));
                 tvN.setTextColor(this.cTextMain);
-                tvN.setTextSize(sp(14.0f));
+                tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 textCol.addView(tvN);
 
-                TextView tvR = new TextView(this);
-                tvR.setText("Gravidade: " + a.optString("gravidade", "Moderada") + " • Reação: " + a.optString("reacao", "-"));
-                tvR.setTextColor(this.cTextMuted);
-                tvR.setTextSize(sp(12.0f));
-                textCol.addView(tvR);
+                String reac = a.optString("reacao", a.optString("reaction", ""));
+                if (!reac.isEmpty()) {
+                    TextView tvR = new TextView(this);
+                    tvR.setText("Reação: " + reac);
+                    tvR.setTextColor(this.cTextMuted);
+                    tvR.setTextSize(sp(13.0f));
+                    textCol.addView(tvR);
+                }
 
                 item.addView(textCol);
 
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
                 btnDel.setTextSize(sp(16.0f));
-                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setPadding(dp(8), dp(4), dp(4), dp(4));
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -5331,25 +7331,50 @@ public class MainActivity extends Activity {
                 });
                 item.addView(btnDel);
 
-                linearLayout.addView(item);
+                algCard.addView(item);
             }
         }
+        linearLayout.addView(algCard);
+
+        // Card 2: Condições de Saúde
+        LinearLayout condCard = new LinearLayout(this);
+        condCard.setOrientation(1);
+        condCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        condCard.setPadding(dp(18), dp(18), dp(18), dp(18));
 
         LinearLayout condHeader = new LinearLayout(this);
         condHeader.setOrientation(0);
         condHeader.setGravity(16);
-        condHeader.setPadding(0, dp(12), 0, dp(8));
+        LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(-1, -2);
+        chLp.bottomMargin = dp(14);
+        condHeader.setLayoutParams(chLp);
 
-        TextView tvC = new TextView(this);
-        tvC.setText("🩺 Condições / Doenças Crônicas (" + this.conditions.length() + ")");
-        tvC.setTextColor(this.cTextMain);
-        tvC.setTextSize(sp(15.0f));
-        tvC.setTypeface(null, 1);
-        tvC.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-        condHeader.addView(tvC);
+        LinearLayout condTitleCol = new LinearLayout(this);
+        condTitleCol.setOrientation(1);
+        condTitleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
-        TextView btnAddCond = createButton("➕ Adicionar", this.cPrimaryLight, this.cPrimary);
-        btnAddCond.setPadding(dp(10), dp(6), dp(10), dp(6));
+        TextView tvCT = new TextView(this);
+        tvCT.setText("❤️ Condições de Saúde");
+        tvCT.setTextColor(this.cTextMain);
+        tvCT.setTextSize(sp(16.0f));
+        tvCT.setTypeface(null, 1);
+        condTitleCol.addView(tvCT);
+
+        TextView tvCSub = new TextView(this);
+        tvCSub.setText("Doenças crônicas ou diagnósticos relevantes");
+        tvCSub.setTextColor(this.cTextMuted);
+        tvCSub.setTextSize(sp(12.0f));
+        condTitleCol.addView(tvCSub);
+
+        condHeader.addView(condTitleCol);
+
+        TextView btnAddCond = new TextView(this);
+        btnAddCond.setText("+ Adicionar");
+        btnAddCond.setTextColor(Color.WHITE);
+        btnAddCond.setTextSize(sp(13.0f));
+        btnAddCond.setTypeface(null, 1);
+        btnAddCond.setBackground(shape(this.cPrimary, 10, 0, 0));
+        btnAddCond.setPadding(dp(12), dp(8), dp(12), dp(8));
         btnAddCond.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -5357,14 +7382,16 @@ public class MainActivity extends Activity {
             }
         });
         condHeader.addView(btnAddCond);
-        linearLayout.addView(condHeader);
+        condCard.addView(condHeader);
 
         if (this.conditions.length() == 0) {
             TextView emptyC = new TextView(this);
-            emptyC.setText("Nenhuma condição crônica cadastrada.");
+            emptyC.setText("Nenhuma condição registrada.");
             emptyC.setTextColor(this.cTextMuted);
-            emptyC.setTextSize(sp(12.0f));
-            linearLayout.addView(emptyC);
+            emptyC.setTextSize(sp(14.0f));
+            emptyC.setGravity(17);
+            emptyC.setPadding(0, dp(14), 0, dp(14));
+            condCard.addView(emptyC);
         } else {
             for (int i = 0; i < this.conditions.length(); i++) {
                 final int idx = i;
@@ -5374,10 +7401,10 @@ public class MainActivity extends Activity {
                 LinearLayout item = new LinearLayout(this);
                 item.setOrientation(0);
                 item.setGravity(16);
-                item.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
-                item.setPadding(dp(12), dp(10), dp(12), dp(10));
+                item.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                item.setPadding(dp(12), dp(12), dp(12), dp(12));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-                lp.bottomMargin = dp(8);
+                if (i < this.conditions.length() - 1) lp.bottomMargin = dp(8);
                 item.setLayoutParams(lp);
 
                 LinearLayout textCol = new LinearLayout(this);
@@ -5385,24 +7412,27 @@ public class MainActivity extends Activity {
                 textCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                 TextView tvN = new TextView(this);
-                tvN.setText(c.optString("nome"));
+                tvN.setText(c.optString("nome", c.optString("condition_name", "")));
                 tvN.setTextColor(this.cTextMain);
-                tvN.setTextSize(sp(14.0f));
+                tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 textCol.addView(tvN);
 
-                TextView tvD = new TextView(this);
-                tvD.setText("Diagnóstico: " + c.optString("data_diagnostico", "Não informada") + " • Notas: " + c.optString("notas", "-"));
-                tvD.setTextColor(this.cTextMuted);
-                tvD.setTextSize(sp(12.0f));
-                textCol.addView(tvD);
+                String nts = c.optString("notas", c.optString("notes", ""));
+                if (!nts.isEmpty()) {
+                    TextView tvD = new TextView(this);
+                    tvD.setText(nts);
+                    tvD.setTextColor(this.cTextMuted);
+                    tvD.setTextSize(sp(13.0f));
+                    textCol.addView(tvD);
+                }
 
                 item.addView(textCol);
 
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
                 btnDel.setTextSize(sp(16.0f));
-                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setPadding(dp(8), dp(4), dp(4), dp(4));
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -5413,9 +7443,10 @@ public class MainActivity extends Activity {
                 });
                 item.addView(btnDel);
 
-                linearLayout.addView(item);
+                condCard.addView(item);
             }
         }
+        linearLayout.addView(condCard);
     }
 
     private void showAddAllergyDialog() {
@@ -5425,13 +7456,13 @@ public class MainActivity extends Activity {
         layout.setOrientation(1);
         layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
-        final EditText etNome = createInput("Nome da Alergia (Ex: Penicilina)", "");
-        final EditText etGrav = createInput("Gravidade (Leve, Moderada, Grave)", "Grave");
-        final EditText etReacao = createInput("Reação (Ex: Manchas vermelhas)", "");
+        final EditText etNome = createInput("Alérgeno (ex: Dipirona, Penicilina)", "");
+        final EditText etReacao = createInput("Reação (ex: Inchaço, falta de ar)", "");
+        final EditText etGrav = createInput("Severidade (Leve, Moderada, Grave)", "Moderada");
 
         layout.addView(etNome);
-        layout.addView(etGrav);
         layout.addView(etReacao);
+        layout.addView(etGrav);
         builder.setView(layout);
 
         builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
@@ -5443,8 +7474,10 @@ public class MainActivity extends Activity {
                         JSONObject newA = new JSONObject();
                         newA.put("id", "alg-" + System.currentTimeMillis());
                         newA.put("nome", nome);
+                        newA.put("allergen", nome);
                         newA.put("gravidade", etGrav.getText().toString().trim());
                         newA.put("reacao", etReacao.getText().toString().trim());
+                        newA.put("reaction", etReacao.getText().toString().trim());
                         MainActivity.this.allergies.put(newA);
                         saveAll();
                         render();
@@ -5458,17 +7491,15 @@ public class MainActivity extends Activity {
 
     private void showAddConditionDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Adicionar Condição Médica");
+        builder.setTitle("Adicionar Condição de Saúde");
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
         layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
-        final EditText etNome = createInput("Nome da Condição (Ex: Hipertensão)", "");
-        final EditText etDiag = createInput("Ano/Data do Diagnóstico", "");
-        final EditText etNotas = createInput("Observações Médicas", "");
+        final EditText etNome = createInput("Condição (ex: Hipertensão, Diabetes)", "");
+        final EditText etNotas = createInput("Observações (ex: Controlada com medicação)", "");
 
         layout.addView(etNome);
-        layout.addView(etDiag);
         layout.addView(etNotas);
         builder.setView(layout);
 
@@ -5481,8 +7512,9 @@ public class MainActivity extends Activity {
                         JSONObject newC = new JSONObject();
                         newC.put("id", "cond-" + System.currentTimeMillis());
                         newC.put("nome", nome);
-                        newC.put("data_diagnostico", etDiag.getText().toString().trim());
+                        newC.put("condition_name", nome);
                         newC.put("notas", etNotas.getText().toString().trim());
+                        newC.put("notes", etNotas.getText().toString().trim());
                         MainActivity.this.conditions.put(newC);
                         saveAll();
                         render();
@@ -5495,75 +7527,114 @@ public class MainActivity extends Activity {
     }
 
     private void buildContactsSubScreen(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("📞 Contatos de Emergência", "Pessoas de confiança para chamadas rápidas"));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
 
-        TextView btnAdd = createButton("➕ Adicionar Novo Contato", this.cPrimary, Color.WHITE);
-        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
-        btnLp.bottomMargin = dp(14);
-        btnAdd.setLayoutParams(btnLp);
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(-1, -2);
+        hLp.bottomMargin = dp(16);
+        hdr.setLayoutParams(hLp);
+
+        LinearLayout hCol = new LinearLayout(this);
+        hCol.setOrientation(1);
+        hCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvT = new TextView(this);
+        tvT.setText("👨‍👩‍👧 Contatos de Emergência");
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(16.0f));
+        tvT.setTypeface(null, 1);
+        hCol.addView(tvT);
+
+        TextView tvS = new TextView(this);
+        tvS.setText("Pessoas para acionar em caso de necessidade");
+        tvS.setTextColor(this.cTextMuted);
+        tvS.setTextSize(sp(12.0f));
+        hCol.addView(tvS);
+
+        hdr.addView(hCol);
+
+        TextView btnAdd = new TextView(this);
+        btnAdd.setText("+ Adicionar");
+        btnAdd.setTextColor(Color.WHITE);
+        btnAdd.setTextSize(sp(13.0f));
+        btnAdd.setTypeface(null, 1);
+        btnAdd.setBackground(shape(this.cPrimary, 10, 0, 0));
+        btnAdd.setPadding(dp(12), dp(8), dp(12), dp(8));
         btnAdd.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 showAddContactDialog();
             }
         });
-        linearLayout.addView(btnAdd);
+        hdr.addView(btnAdd);
+        card.addView(hdr);
 
         if (this.contacts.length() == 0) {
             TextView empty = new TextView(this);
-            empty.setText("Nenhum contato de emergência cadastrado.");
+            empty.setText("Nenhum contato cadastrado.");
             empty.setTextColor(this.cTextMuted);
-            empty.setTextSize(sp(12.0f));
-            linearLayout.addView(empty);
+            empty.setTextSize(sp(14.0f));
+            empty.setGravity(17);
+            empty.setPadding(0, dp(20), 0, dp(20));
+            card.addView(empty);
         } else {
             for (int i = 0; i < this.contacts.length(); i++) {
                 final int idx = i;
                 final JSONObject c = this.contacts.optJSONObject(i);
                 if (c == null) continue;
-                final String telNum = c.optString("telefone", "");
+                final String telNum = c.optString("telefone", c.optString("phone", ""));
 
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(0);
-                card.setGravity(16);
-                card.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
-                card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(0);
+                row.setGravity(16);
+                row.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+                row.setPadding(dp(14), dp(14), dp(14), dp(14));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-                lp.bottomMargin = dp(10);
-                card.setLayoutParams(lp);
+                if (i < this.contacts.length() - 1) lp.bottomMargin = dp(10);
+                row.setLayoutParams(lp);
 
                 LinearLayout col = new LinearLayout(this);
                 col.setOrientation(1);
                 col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                 TextView tvN = new TextView(this);
-                tvN.setText("👤 " + c.optString("nome") + " (" + c.optString("relacao") + ")");
+                tvN.setText(c.optString("nome", c.optString("name", "")));
                 tvN.setTextColor(this.cTextMain);
-                tvN.setTextSize(sp(14.0f));
+                tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 col.addView(tvN);
 
-                TextView tvT = new TextView(this);
-                tvT.setText("📞 " + telNum);
-                tvT.setTextColor(this.cTextMuted);
-                tvT.setTextSize(sp(12.0f));
-                col.addView(tvT);
+                TextView tvR = new TextView(this);
+                tvR.setText(c.optString("relacao", c.optString("relationship", "")) + " • " + telNum);
+                tvR.setTextColor(this.cTextMuted);
+                tvR.setTextSize(sp(13.0f));
+                col.addView(tvR);
 
-                card.addView(col);
+                row.addView(col);
 
-                TextView btnDial = createButton("📞 Ligar", this.cPrimaryLight, this.cPrimary);
-                btnDial.setPadding(dp(10), dp(6), dp(10), dp(6));
+                TextView btnDial = new TextView(this);
+                btnDial.setText("📞");
+                btnDial.setTextSize(sp(16.0f));
+                btnDial.setGravity(17);
+                btnDial.setBackground(shape(Color.parseColor("#1A10B981"), 10, 0, 0));
+                btnDial.setPadding(dp(10), dp(8), dp(10), dp(8));
                 btnDial.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + telNum.replaceAll("[^0-9+]", ""))));
                     }
                 });
-                card.addView(btnDial);
+                row.addView(btnDial);
 
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
                 btnDel.setTextSize(sp(16.0f));
-                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setPadding(dp(10), dp(8), dp(4), dp(8));
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -5572,11 +7643,12 @@ public class MainActivity extends Activity {
                         render();
                     }
                 });
-                card.addView(btnDel);
+                row.addView(btnDel);
 
-                linearLayout.addView(card);
+                card.addView(row);
             }
         }
+        linearLayout.addView(card);
     }
 
     private void showAddContactDialog() {
@@ -5586,9 +7658,9 @@ public class MainActivity extends Activity {
         layout.setOrientation(1);
         layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
-        final EditText etNome = createInput("Nome Completo", "");
-        final EditText etRel = createInput("Relação (Ex: Filho, Cônjuge)", "");
-        final EditText etTel = createInput("Telefone com DDD", "");
+        final EditText etNome = createInput("Nome completo", "");
+        final EditText etRel = createInput("Parentesco / Relação (ex: Filha, Esposo)", "");
+        final EditText etTel = createInput("Telefone (00) 00000-0000", "");
 
         layout.addView(etNome);
         layout.addView(etRel);
@@ -5604,8 +7676,11 @@ public class MainActivity extends Activity {
                         JSONObject newC = new JSONObject();
                         newC.put("id", "cnt-" + System.currentTimeMillis());
                         newC.put("nome", nome);
+                        newC.put("name", nome);
                         newC.put("relacao", etRel.getText().toString().trim());
+                        newC.put("relationship", etRel.getText().toString().trim());
                         newC.put("telefone", etTel.getText().toString().trim());
+                        newC.put("phone", etTel.getText().toString().trim());
                         MainActivity.this.contacts.put(newC);
                         saveAll();
                         render();
@@ -5618,77 +7693,128 @@ public class MainActivity extends Activity {
     }
 
     private void buildProfessionalsSubScreen(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("👨‍⚕️ Profissionais de Saúde", "Seus médicos, especialistas e farmacêuticos"));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
 
-        TextView btnAdd = createButton("➕ Adicionar Profissional", this.cPrimary, Color.WHITE);
-        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
-        btnLp.bottomMargin = dp(14);
-        btnAdd.setLayoutParams(btnLp);
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(-1, -2);
+        hLp.bottomMargin = dp(16);
+        hdr.setLayoutParams(hLp);
+
+        LinearLayout hCol = new LinearLayout(this);
+        hCol.setOrientation(1);
+        hCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvT = new TextView(this);
+        tvT.setText("👨‍⚕️ Profissionais de Saúde");
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(16.0f));
+        tvT.setTypeface(null, 1);
+        hCol.addView(tvT);
+
+        TextView tvS = new TextView(this);
+        tvS.setText("Seus médicos, especialistas e terapeutas");
+        tvS.setTextColor(this.cTextMuted);
+        tvS.setTextSize(sp(12.0f));
+        hCol.addView(tvS);
+
+        hdr.addView(hCol);
+
+        TextView btnAdd = new TextView(this);
+        btnAdd.setText("+ Adicionar");
+        btnAdd.setTextColor(Color.WHITE);
+        btnAdd.setTextSize(sp(13.0f));
+        btnAdd.setTypeface(null, 1);
+        btnAdd.setBackground(shape(this.cPrimary, 10, 0, 0));
+        btnAdd.setPadding(dp(12), dp(8), dp(12), dp(8));
         btnAdd.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 showAddProfessionalDialog();
             }
         });
-        linearLayout.addView(btnAdd);
+        hdr.addView(btnAdd);
+        card.addView(hdr);
 
         if (this.professionals.length() == 0) {
             TextView empty = new TextView(this);
-            empty.setText("Nenhum profissional de saúde cadastrado.");
+            empty.setText("Nenhum profissional cadastrado.");
             empty.setTextColor(this.cTextMuted);
-            empty.setTextSize(sp(12.0f));
-            linearLayout.addView(empty);
+            empty.setTextSize(sp(14.0f));
+            empty.setGravity(17);
+            empty.setPadding(0, dp(20), 0, dp(20));
+            card.addView(empty);
         } else {
             for (int i = 0; i < this.professionals.length(); i++) {
                 final int idx = i;
                 final JSONObject p = this.professionals.optJSONObject(i);
                 if (p == null) continue;
-                final String telNum = p.optString("telefone", "");
+                final String telNum = p.optString("telefone", p.optString("phone", ""));
 
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(0);
-                card.setGravity(16);
-                card.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
-                card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(0);
+                row.setGravity(16);
+                row.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+                row.setPadding(dp(14), dp(14), dp(14), dp(14));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-                lp.bottomMargin = dp(10);
-                card.setLayoutParams(lp);
+                if (i < this.professionals.length() - 1) lp.bottomMargin = dp(10);
+                row.setLayoutParams(lp);
 
                 LinearLayout col = new LinearLayout(this);
                 col.setOrientation(1);
                 col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                 TextView tvN = new TextView(this);
-                tvN.setText("👨‍⚕️ " + p.optString("nome") + " (" + p.optString("especialidade") + ")");
+                tvN.setText(p.optString("nome", p.optString("name", "")));
                 tvN.setTextColor(this.cTextMain);
-                tvN.setTextSize(sp(14.0f));
+                tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 col.addView(tvN);
 
-                TextView tvI = new TextView(this);
-                tvI.setText("CRM/Reg: " + p.optString("crm", "-") + " • Clínica: " + p.optString("clinica", "-") + "\nTel: " + telNum);
-                tvI.setTextColor(this.cTextMuted);
-                tvI.setTextSize(sp(12.0f));
-                col.addView(tvI);
+                TextView tvEsp = new TextView(this);
+                String esp = p.optString("especialidade", p.optString("specialty", ""));
+                String crm = p.optString("crm", "");
+                tvEsp.setText(esp + (!crm.isEmpty() ? " • " + crm : ""));
+                tvEsp.setTextColor(this.cPrimary);
+                tvEsp.setTextSize(sp(13.0f));
+                tvEsp.setTypeface(null, 1);
+                col.addView(tvEsp);
 
-                card.addView(col);
+                String clin = p.optString("clinica", p.optString("clinic_address", ""));
+                if (!clin.isEmpty() || !telNum.isEmpty()) {
+                    TextView tvI = new TextView(this);
+                    tvI.setText((!clin.isEmpty() ? "📍 " + clin : "") + (!telNum.isEmpty() ? (!clin.isEmpty() ? "\n" : "") + "📞 " + telNum : ""));
+                    tvI.setTextColor(this.cTextMuted);
+                    tvI.setTextSize(sp(12.0f));
+                    col.addView(tvI);
+                }
+
+                row.addView(col);
 
                 if (!telNum.isEmpty()) {
-                    TextView btnDial = createButton("📞 Ligar", this.cPrimaryLight, this.cPrimary);
-                    btnDial.setPadding(dp(10), dp(6), dp(10), dp(6));
+                    TextView btnDial = new TextView(this);
+                    btnDial.setText("📞");
+                    btnDial.setTextSize(sp(16.0f));
+                    btnDial.setGravity(17);
+                    btnDial.setBackground(shape(Color.parseColor("#1A10B981"), 10, 0, 0));
+                    btnDial.setPadding(dp(10), dp(8), dp(10), dp(8));
                     btnDial.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View v) {
                             startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + telNum.replaceAll("[^0-9+]", ""))));
                         }
                     });
-                    card.addView(btnDial);
+                    row.addView(btnDial);
                 }
 
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
                 btnDel.setTextSize(sp(16.0f));
-                btnDel.setPadding(dp(8), dp(4), dp(8), dp(4));
+                btnDel.setPadding(dp(10), dp(8), dp(4), dp(8));
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -5697,25 +7823,26 @@ public class MainActivity extends Activity {
                         render();
                     }
                 });
-                card.addView(btnDel);
+                row.addView(btnDel);
 
-                linearLayout.addView(card);
+                card.addView(row);
             }
         }
+        linearLayout.addView(card);
     }
 
     private void showAddProfessionalDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Adicionar Profissional de Saúde");
+        builder.setTitle("Adicionar Profissional");
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
         layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
-        final EditText etNome = createInput("Nome do Médico/Farmacêutico", "");
-        final EditText etEsp = createInput("Especialidade (Ex: Cardiologia)", "");
-        final EditText etCrm = createInput("CRM / Registro Profissional", "");
-        final EditText etClinica = createInput("Consultório / Hospital", "");
-        final EditText etTel = createInput("Telefone de Contato", "");
+        final EditText etNome = createInput("Nome (ex: Dr. Carlos Silva)", "");
+        final EditText etEsp = createInput("Especialidade (ex: Cardiologista)", "");
+        final EditText etCrm = createInput("CRM / Registro", "");
+        final EditText etClinica = createInput("Hospital / Clínica / Endereço", "");
+        final EditText etTel = createInput("Telefone (00) 00000-0000", "");
 
         layout.addView(etNome);
         layout.addView(etEsp);
@@ -5733,10 +7860,14 @@ public class MainActivity extends Activity {
                         JSONObject newP = new JSONObject();
                         newP.put("id", "prof-" + System.currentTimeMillis());
                         newP.put("nome", nome);
+                        newP.put("name", nome);
                         newP.put("especialidade", etEsp.getText().toString().trim());
+                        newP.put("specialty", etEsp.getText().toString().trim());
                         newP.put("crm", etCrm.getText().toString().trim());
                         newP.put("clinica", etClinica.getText().toString().trim());
+                        newP.put("clinic_address", etClinica.getText().toString().trim());
                         newP.put("telefone", etTel.getText().toString().trim());
+                        newP.put("phone", etTel.getText().toString().trim());
                         MainActivity.this.professionals.put(newP);
                         saveAll();
                         render();
@@ -5749,11 +7880,29 @@ public class MainActivity extends Activity {
     }
 
     private void buildCaregiversSubScreen(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("🤝 Cuidadores Vinculados", "Pessoas autorizadas a acompanhar sua adesão"));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
 
-        TextView btnInvite = createButton("🔑 Gerar Código de Convite para Cuidador", this.cPrimary, Color.WHITE);
+        TextView tvT = new TextView(this);
+        tvT.setText("🤝 Cuidadores Vinculados");
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(16.0f));
+        tvT.setTypeface(null, 1);
+        tvT.setPadding(0, 0, 0, dp(4));
+        card.addView(tvT);
+
+        TextView tvS = new TextView(this);
+        tvS.setText("Gere um código de convite para que um familiar ou cuidador acompanhe seu tratamento.");
+        tvS.setTextColor(this.cTextMuted);
+        tvS.setTextSize(sp(13.0f));
+        tvS.setPadding(0, 0, 0, dp(16));
+        card.addView(tvS);
+
+        TextView btnInvite = createButton("🔑 Gerar Código de Convite", this.cPrimary, Color.WHITE);
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
-        btnLp.bottomMargin = dp(14);
+        btnLp.bottomMargin = dp(16);
         btnInvite.setLayoutParams(btnLp);
         btnInvite.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -5761,28 +7910,30 @@ public class MainActivity extends Activity {
                 generateCaregiverInviteCode();
             }
         });
-        linearLayout.addView(btnInvite);
+        card.addView(btnInvite);
 
         if (this.caregivers.length() == 0) {
             TextView empty = new TextView(this);
             empty.setText("Nenhum cuidador vinculado a este perfil.");
             empty.setTextColor(this.cTextMuted);
-            empty.setTextSize(sp(12.0f));
-            linearLayout.addView(empty);
+            empty.setTextSize(sp(14.0f));
+            empty.setGravity(17);
+            empty.setPadding(0, dp(16), 0, dp(16));
+            card.addView(empty);
         } else {
             for (int i = 0; i < this.caregivers.length(); i++) {
                 final int idx = i;
                 final JSONObject cg = this.caregivers.optJSONObject(i);
                 if (cg == null) continue;
 
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(0);
-                card.setGravity(16);
-                card.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
-                card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(0);
+                row.setGravity(16);
+                row.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+                row.setPadding(dp(14), dp(12), dp(14), dp(12));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-                lp.bottomMargin = dp(10);
-                card.setLayoutParams(lp);
+                if (i < this.caregivers.length() - 1) lp.bottomMargin = dp(10);
+                row.setLayoutParams(lp);
 
                 LinearLayout col = new LinearLayout(this);
                 col.setOrientation(1);
@@ -5795,13 +7946,13 @@ public class MainActivity extends Activity {
                 tvN.setTypeface(null, 1);
                 col.addView(tvN);
 
-                TextView tvS = new TextView(this);
-                tvS.setText("Status: " + cg.optString("status", "Ativo") + " • Código: " + cg.optString("codigo_convite", "MED-883921"));
-                tvS.setTextColor(this.cTextMuted);
-                tvS.setTextSize(sp(12.0f));
-                col.addView(tvS);
+                TextView tvCode = new TextView(this);
+                tvCode.setText("Status: " + cg.optString("status", "Ativo") + " • Código: " + cg.optString("codigo_convite", "MED-883921"));
+                tvCode.setTextColor(this.cTextMuted);
+                tvCode.setTextSize(sp(12.0f));
+                col.addView(tvCode);
 
-                card.addView(col);
+                row.addView(col);
 
                 TextView btnRevoke = createButton("Revogar", this.cDangerBg, this.cDanger);
                 btnRevoke.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -5813,11 +7964,12 @@ public class MainActivity extends Activity {
                         render();
                     }
                 });
-                card.addView(btnRevoke);
+                row.addView(btnRevoke);
 
-                linearLayout.addView(card);
+                card.addView(row);
             }
         }
+        linearLayout.addView(card);
     }
 
     private void generateCaregiverInviteCode() {
@@ -5843,43 +7995,126 @@ public class MainActivity extends Activity {
     }
 
     private void buildStockHistorySubScreen(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("📦 Histórico de Movimentações de Estoque", "Registro de entradas, saídas e consumos de medicamentos"));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
 
-        if (this.stockMovements.length() == 0) {
+        TextView tvT = new TextView(this);
+        tvT.setText("📦 Situação do Estoque");
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(16.0f));
+        tvT.setTypeface(null, 1);
+        tvT.setPadding(0, 0, 0, dp(4));
+        card.addView(tvT);
+
+        TextView tvS = new TextView(this);
+        tvS.setText("Acompanhe a quantidade restante e adicione reposições");
+        tvS.setTextColor(this.cTextMuted);
+        tvS.setTextSize(sp(13.0f));
+        tvS.setPadding(0, 0, 0, dp(16));
+        card.addView(tvS);
+
+        if (this.meds.length() == 0) {
             TextView empty = new TextView(this);
-            empty.setText("Nenhuma movimentação de estoque registrada até o momento.");
+            empty.setText("Nenhum medicamento cadastrado.");
             empty.setTextColor(this.cTextMuted);
-            empty.setTextSize(sp(12.0f));
-            linearLayout.addView(empty);
+            empty.setTextSize(sp(14.0f));
+            empty.setGravity(17);
+            empty.setPadding(0, dp(16), 0, dp(16));
+            card.addView(empty);
         } else {
-            for (int i = this.stockMovements.length() - 1; i >= 0; i--) {
-                JSONObject sm = this.stockMovements.optJSONObject(i);
-                if (sm == null) continue;
+            for (int i = 0; i < this.meds.length(); i++) {
+                final JSONObject m = this.meds.optJSONObject(i);
+                if (m == null) continue;
+                int stock = getMedStock(m);
 
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(1);
-                card.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
-                card.setPadding(dp(12), dp(10), dp(12), dp(10));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-                lp.bottomMargin = dp(8);
-                card.setLayoutParams(lp);
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(0);
+                row.setGravity(16);
+                row.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+                row.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(-1, -2);
+                if (i < this.meds.length() - 1) rLp.bottomMargin = dp(10);
+                row.setLayoutParams(rLp);
 
-                TextView tvM = new TextView(this);
-                tvM.setText("📦 " + sm.optString("medicamento_nome") + " (" + sm.optString("tipo_movimento", "Ajuste") + ")");
-                tvM.setTextColor(this.cTextMain);
-                tvM.setTextSize(sp(13.0f));
-                tvM.setTypeface(null, 1);
-                card.addView(tvM);
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(1);
+                col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
-                TextView tvD = new TextView(this);
-                tvD.setText("Qtd: " + sm.optString("quantidade") + " • Data: " + sm.optString("data_hora") + " • Obs: " + sm.optString("observacao", "Sem observações"));
-                tvD.setTextColor(this.cTextMuted);
-                tvD.setTextSize(sp(11.0f));
-                card.addView(tvD);
+                TextView tvMN = new TextView(this);
+                tvMN.setText(m.optString("nome"));
+                tvMN.setTextColor(this.cTextMain);
+                tvMN.setTextSize(sp(15.0f));
+                tvMN.setTypeface(null, 1);
+                col.addView(tvMN);
 
-                linearLayout.addView(card);
+                TextView tvMS = new TextView(this);
+                tvMS.setText("Restam: " + stock + " " + m.optString("unidade", "unid."));
+                tvMS.setTextColor(stock <= 5 ? this.cWarning : this.cTextMuted);
+                tvMS.setTextSize(sp(13.0f));
+                col.addView(tvMS);
+
+                row.addView(col);
+
+                TextView btnRefill = new TextView(this);
+                btnRefill.setText("+ Repor");
+                btnRefill.setTextColor(this.cPrimary);
+                btnRefill.setTextSize(sp(13.0f));
+                btnRefill.setTypeface(null, 1);
+                btnRefill.setBackground(shape(this.cPrimaryLight, 10, 0, 0));
+                btnRefill.setPadding(dp(12), dp(8), dp(12), dp(8));
+                btnRefill.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showRefillStockDialog(m);
+                    }
+                });
+                row.addView(btnRefill);
+
+                card.addView(row);
             }
         }
+        linearLayout.addView(card);
+    }
+
+    private void showRefillStockDialog(final JSONObject med) {
+        final int curStock = getMedStock(med);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("📦 Repor Estoque — " + med.optString("nome"));
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(1);
+        layout.setPadding(dp(20), dp(12), dp(20), dp(8));
+
+        TextView tvCur = new TextView(this);
+        tvCur.setText("Quantidade atual: " + curStock + " " + med.optString("unidade", "unid."));
+        tvCur.setTextColor(this.cTextMuted);
+        tvCur.setTextSize(sp(13.0f));
+        tvCur.setPadding(0, 0, 0, dp(10));
+        layout.addView(tvCur);
+
+        final EditText etAdd = createInput("Quantidade comprada / adicionada (ex: 30)", "30");
+        etAdd.setInputType(InputType.TYPE_CLASS_NUMBER);
+        layout.addView(etAdd);
+        builder.setView(layout);
+
+        builder.setPositiveButton("Confirmar Reposição", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    int addQty = Integer.parseInt(etAdd.getText().toString().trim());
+                    if (addQty > 0) {
+                        int newQty = curStock + addQty;
+                        setMedStock(med, newQty);
+                        saveAll();
+                        render();
+                        showStockMovementModal(med, curStock, newQty);
+                    }
+                } catch (Exception ignored) {}
+            }
+        });
+        builder.setNegativeButton("Cancelar", null);
+        builder.show();
     }
 
     /* JADX INFO: Access modifiers changed from: package-private */
