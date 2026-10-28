@@ -6361,6 +6361,18 @@ public class MainActivity extends Activity {
         });
         card.addView(btnSync);
 
+        TextView btnVerifyDb = createButton("🔍 Conferir dados gravados no banco", this.cSurfaceHover, this.cTextMain);
+        LinearLayout.LayoutParams vLp = new LinearLayout.LayoutParams(-1, -2);
+        vLp.bottomMargin = dp(10);
+        btnVerifyDb.setLayoutParams(vLp);
+        btnVerifyDb.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                verifyDatabaseRecordsDialog();
+            }
+        });
+        card.addView(btnVerifyDb);
+
         TextView btnExport = createButton("📤 Exportar meus dados (JSON)", this.cBgMain, this.cTextMain);
         btnExport.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -8173,19 +8185,77 @@ public class MainActivity extends Activity {
             if (!EMBEDDED_API_KEY.isEmpty()) {
                 httpURLConnection.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
             }
+            String patId = this.profile.optString("id", "").trim();
+            if (patId.isEmpty() || patId.startsWith("pac-") || patId.equals("user-local-paciente")) {
+                patId = "98e5cdc4-7866-43e5-9c90-ebb712ecd816";
+                this.profile.put("id", patId);
+            }
+            JSONObject syncProfile = new JSONObject(this.profile.toString());
+            syncProfile.put("id", patId);
+            String apelido = this.profile.optString("apelido", this.profile.optString("social_name", "")).trim();
+            if (!apelido.isEmpty()) {
+                syncProfile.put("social_name", apelido);
+            }
+            String rawDob = this.profile.optString("data_nascimento", this.profile.optString("dob", "")).trim();
+            if (rawDob.matches("^\\d{2}/\\d{2}/\\d{4}$")) {
+                String[] parts = rawDob.split("/");
+                syncProfile.put("dob", parts[2] + "-" + parts[1] + "-" + parts[0]);
+            } else if (rawDob.matches("^\\d{4}-\\d{2}-\\d{2}.*")) {
+                syncProfile.put("dob", rawDob.substring(0, 10));
+            } else {
+                syncProfile.remove("dob");
+            }
+            String sexoVal = this.profile.optString("sexo", this.profile.optString("sex", "")).trim();
+            if (!sexoVal.isEmpty()) {
+                syncProfile.put("sex", sexoVal);
+            }
+            String telVal = this.profile.optString("telefone", this.profile.optString("phone", "")).trim();
+            if (!telVal.isEmpty()) {
+                syncProfile.put("phone", telVal);
+            }
+            String endVal = this.profile.optString("endereco", this.profile.optString("address", "")).trim();
+            if (!endVal.isEmpty()) {
+                syncProfile.put("address", endVal);
+            }
+            String rawWeight = this.profile.optString("peso", this.profile.optString("weight", "")).replace(",", ".").replaceAll("[^0-9.]", "").trim();
+            if (!rawWeight.isEmpty()) {
+                syncProfile.put("weight", rawWeight);
+            } else {
+                syncProfile.remove("weight");
+            }
+            String rawHeight = this.profile.optString("altura", this.profile.optString("height", "")).replace(",", ".").replaceAll("[^0-9.]", "").trim();
+            if (!rawHeight.isEmpty()) {
+                syncProfile.put("height", rawHeight);
+            } else {
+                syncProfile.remove("height");
+            }
+            String btVal = this.profile.optString("tipo_sanguineo", this.profile.optString("blood_type", "O+")).trim();
+            if (!btVal.isEmpty()) {
+                syncProfile.put("blood_type", btVal);
+            }
             JSONObject jSONObject = new JSONObject();
-            jSONObject.put("patientId", this.profile.optString("id", "pac-001"));
-            jSONObject.put("profile", this.profile);
+            jSONObject.put("patientId", patId);
+            jSONObject.put("userId", patId);
+            jSONObject.put("profile", syncProfile);
+            jSONObject.put("user", syncProfile);
             jSONObject.put("medicamentos", this.meds);
+            jSONObject.put("meds", this.meds);
             jSONObject.put("historico_doses", this.doseLogs);
+            jSONObject.put("history", this.doseLogs);
             jSONObject.put("health_events", this.events);
+            jSONObject.put("events", this.events);
             jSONObject.put("calendar_notes", this.calNotes);
+            jSONObject.put("notes", this.calNotesList);
             jSONObject.put("stock_movements", this.stockMovements);
             jSONObject.put("allergies", this.allergies);
             jSONObject.put("health_conditions", this.conditions);
+            jSONObject.put("conditions", this.conditions);
             jSONObject.put("emergency_contacts", this.contacts);
+            jSONObject.put("contacts", this.contacts);
             jSONObject.put("healthcare_professionals", this.professionals);
+            jSONObject.put("professionals", this.professionals);
             jSONObject.put("caregiver_relationships", this.caregivers);
+            jSONObject.put("caregivers", this.caregivers);
             byte[] bytes = jSONObject.toString().getBytes(StandardCharsets.UTF_8);
             OutputStream outputStream = httpURLConnection.getOutputStream();
             outputStream.write(bytes);
@@ -8206,6 +8276,11 @@ public class MainActivity extends Activity {
             if (responseCode != 200) {
                 z2 = false;
             }
+            String returnedUserId = jSONObject2.optString("userId", "").trim();
+            if (!returnedUserId.isEmpty()) {
+                this.profile.put("id", returnedUserId);
+                this.prefs.edit().putString("profile", this.profile.toString()).apply();
+            }
             final boolean optBoolean = jSONObject2.optBoolean("ok", z2);
             final String format = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(new Date());
             runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda8
@@ -8222,6 +8297,87 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    private void verifyDatabaseRecordsDialog() {
+        Toast.makeText(this, "Consultando banco de dados Oracle...", 0).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String patId = MainActivity.this.profile.optString("id", "").trim();
+                    if (patId.isEmpty() || patId.startsWith("pac-")) patId = "98e5cdc4-7866-43e5-9c90-ebb712ecd816";
+                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId));
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+                    int code = conn.getResponseCode();
+                    BufferedReader br = new BufferedReader(new InputStreamReader(
+                        (code < 200 || code >= 400) ? conn.getErrorStream() : conn.getInputStream(),
+                        StandardCharsets.UTF_8
+                    ));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    br.close();
+                    final JSONObject resp = new JSONObject(sb.toString());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            AlertDialog.Builder b = new AlertDialog.Builder(MainActivity.this);
+                            b.setTitle("🗄️ Status no Banco Oracle (PostgreSQL)");
+                            StringBuilder msg = new StringBuilder();
+                            boolean ok = resp.optBoolean("ok", false);
+                            msg.append("Status da conexão: ").append(ok ? "✅ ONLINE (Gravação Ativa)" : "⚠️ Indisponível").append("\n");
+                            msg.append("Servidor: ").append(EMBEDDED_BACKEND_URL).append("\n\n");
+                            JSONObject u = resp.optJSONObject("user");
+                            if (u != null) {
+                                msg.append("👤 PERFIL GRAVADO NO BANCO:\n");
+                                msg.append("• ID: ").append(u.optString("id", "-")).append("\n");
+                                msg.append("• Nome: ").append(u.optString("nome", "-")).append("\n");
+                                msg.append("• Nascimento: ").append(u.optString("dob", "-")).append("\n");
+                                msg.append("• CPF: ").append(u.optString("cpf", "-")).append("\n");
+                                msg.append("• Telefone: ").append(u.optString("phone", "-")).append("\n");
+                                msg.append("• Tipo Sanguíneo: ").append(u.optString("blood_type", "-")).append("\n");
+                                msg.append("• Atualizado em: ").append(u.optString("updated_at", "-")).append("\n\n");
+                            } else {
+                                msg.append("👤 Perfil ainda não localizado para ID ").append(MainActivity.this.profile.optString("id", "pac-001")).append(".\nToque em 'Sincronizar dados agora' para enviar.\n\n");
+                            }
+                            JSONArray mArr = resp.optJSONArray("meds");
+                            JSONArray hArr = resp.optJSONArray("history");
+                            JSONArray eArr = resp.optJSONArray("events");
+                            JSONArray nArr = resp.optJSONArray("notes");
+                            JSONArray aArr = resp.optJSONArray("allergies");
+                            JSONArray cArr = resp.optJSONArray("contacts");
+                            msg.append("📊 REGISTROS NAS TABELAS:\n");
+                            msg.append("• Medicamentos (medicamentos): ").append(mArr != null ? mArr.length() : 0).append("\n");
+                            msg.append("• Doses tomadas (historico_doses): ").append(hArr != null ? hArr.length() : 0).append("\n");
+                            msg.append("• Eventos/Consultas (health_events): ").append(eArr != null ? eArr.length() : 0).append("\n");
+                            msg.append("• Notas (calendar_notes): ").append(nArr != null ? nArr.length() : 0).append("\n");
+                            msg.append("• Alergias (allergies): ").append(aArr != null ? aArr.length() : 0).append("\n");
+                            msg.append("• Contatos SOS (emergency_contacts): ").append(cArr != null ? cArr.length() : 0).append("\n");
+                            b.setMessage(msg.toString());
+                            b.setPositiveButton("Fechar", null);
+                            b.show();
+                        }
+                    });
+                } catch (final Exception ex) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            AlertDialog.Builder b = new AlertDialog.Builder(MainActivity.this);
+                            b.setTitle("⚠️ Servidor Offline / Sem Conexão");
+                            b.setMessage("Não foi possível consultar " + EMBEDDED_BACKEND_URL + "/api/v1/sync.\n\nSeus dados estão salvos localmente no aparelho e serão sincronizados assim que o servidor responder.\n\nDetalhe: " + ex.getMessage());
+                            b.setPositiveButton("OK", null);
+                            b.show();
+                        }
+                    });
+                }
+            }
+        }).start();
     }
 
     /* JADX INFO: Access modifiers changed from: package-private */

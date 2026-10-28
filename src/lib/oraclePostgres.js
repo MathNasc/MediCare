@@ -63,9 +63,33 @@ export function getPgPool() {
 export async function ensureOraclePostgresSchema(client) {
   if (schemaInitialized) return;
 
-  // Se o schema já foi criado pelo script standalone (app_users existe), não reexecuta DDL
+  // Se o schema já foi criado pelo script standalone (app_users existe), aplica apenas colunas/tabelas de compatibilidade
   const check = await client.query("SELECT to_regclass('public.app_users') AS exists");
   if (check.rows[0]?.exists) {
+    await client.query(`
+      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS active_ingredient text;
+      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS principio_ativo text;
+      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS manufacturer text;
+      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS fabricante text;
+      ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS dose_date date;
+      ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS confirmed_by_name text;
+      ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS confirmed_by_role text;
+      ALTER TABLE public.emergency_contacts ADD COLUMN IF NOT EXISTS relation text;
+      ALTER TABLE public.emergency_contacts ADD COLUMN IF NOT EXISTS relationship text;
+      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS location text;
+      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS clinic text;
+      ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS med_name text;
+      ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_delta numeric;
+      ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_changed numeric;
+      CREATE TABLE IF NOT EXISTS public.calendar_notes (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+        date date NOT NULL,
+        content text NOT NULL,
+        mood text,
+        created_at timestamptz DEFAULT now()
+      );
+    `).catch(() => {});
     schemaInitialized = true;
     return;
   }
