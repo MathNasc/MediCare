@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.View;
+import android.widget.CheckBox;
 import android.widget.DatePicker;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -31,6 +32,8 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -43,6 +46,7 @@ public class MainActivity extends Activity {
     private static final String EMBEDDED_BACKEND_URL = "http://144.22.160.191:3009";
     private JSONArray allergies;
     private JSONObject calNotes;
+    private JSONArray calNotesList = new JSONArray();
     private JSONArray caregivers;
     private JSONArray conditions;
     private JSONArray contacts;
@@ -55,9 +59,9 @@ public class MainActivity extends Activity {
     private JSONObject profile;
     private FrameLayout rootContainer;
     private JSONArray stockMovements;
-    private int cPrimary = Color.parseColor("#0D9488");
-    private int cPrimaryHover = Color.parseColor("#0F766E");
-    private int cPrimaryLight = Color.parseColor("#CCFBF1");
+    private int cPrimary = Color.parseColor("#3B82F6");
+    private int cPrimaryHover = Color.parseColor("#6366F1");
+    private int cPrimaryLight = Color.parseColor("#DBEAFE");
     private int cBgMain = Color.parseColor("#F8FAFC");
     private int cSurface = Color.parseColor("#FFFFFF");
     private int cSurfaceHover = Color.parseColor("#F1F5F9");
@@ -65,29 +69,35 @@ public class MainActivity extends Activity {
     private int cTextMain = Color.parseColor("#0F172A");
     private int cTextMuted = Color.parseColor("#475569");
     private int cTextLight = Color.parseColor("#94A3B8");
-    private int cSuccess = Color.parseColor("#10B981");
-    private int cSuccessBg = Color.parseColor("#D1FAE5");
+    private int cSuccess = Color.parseColor("#22C55E");
+    private int cSuccessBg = Color.parseColor("#DCFCE7");
     private int cWarning = Color.parseColor("#F59E0B");
     private int cWarningBg = Color.parseColor("#FEF3C7");
     private int cDanger = Color.parseColor("#EF4444");
     private int cDangerBg = Color.parseColor("#FEE2E2");
     private int cInfo = Color.parseColor("#3B82F6");
     private int cInfoBg = Color.parseColor("#DBEAFE");
-    private int cPurple = Color.parseColor("#9333EA");
-    private int cPurpleBg = Color.parseColor("#F3E8FF");
+    private int cPurple = Color.parseColor("#8B5CF6");
+    private int cPurpleBg = Color.parseColor("#EDE9FE");
     private boolean isLoggedIn = false;
     private int onboardingStep = 0;
     private boolean isRegisterMode = false;
-    private boolean isDarkMode = false;
+    private boolean isDarkMode = true;
+    private boolean isHighContrast = false;
     private boolean isAccessibilityMode = false;
     private String activeTab = "home";
     private List<String> tabHistory = new ArrayList();
     private long lastBackPressTime = 0;
     private String medFilter = "todos";
     private String selectedCalDate = EMBEDDED_API_KEY;
+    private String calViewMode = "month";
+    private int calYear = 2026;
+    private int calMonth = 0;
     private boolean showCalSearch = false;
+    private String calSearchQuery = "";
     private String aiSubView = "main";
     private String profileSubView = "main";
+    private String selectedStockMedId = "";
     private String lastSyncTimestamp = "Sincronização automática ativa";
     private boolean backendStatusOk = true;
 
@@ -97,6 +107,9 @@ public class MainActivity extends Activity {
         requestWindowFeature(1);
         this.prefs = getSharedPreferences("medicare_patient_store_v2", 0);
         this.selectedCalDate = todayIso();
+        Calendar cal = Calendar.getInstance();
+        this.calYear = cal.get(Calendar.YEAR);
+        this.calMonth = cal.get(Calendar.MONTH);
         loadOrInitData();
         FrameLayout frameLayout = new FrameLayout(this);
         this.rootContainer = frameLayout;
@@ -212,10 +225,26 @@ public class MainActivity extends Activity {
     }
 
     private void applyThemeColors() {
-        if (this.isDarkMode) {
-            this.cPrimary = Color.parseColor("#14B8A6");
-            this.cPrimaryHover = Color.parseColor("#2DD4BF");
-            this.cPrimaryLight = Color.parseColor("#115E59");
+        if (this.isHighContrast) {
+            this.cPrimary = Color.parseColor("#3B82F6");
+            this.cPrimaryHover = Color.parseColor("#6366F1");
+            this.cPrimaryLight = Color.parseColor(this.isDarkMode ? "#1E3A8A" : "#DBEAFE");
+            this.cBgMain = Color.parseColor(this.isDarkMode ? "#000000" : "#FFFFFF");
+            this.cSurface = Color.parseColor(this.isDarkMode ? "#111111" : "#F9F9F9");
+            this.cSurfaceHover = Color.parseColor(this.isDarkMode ? "#222222" : "#EEEEEE");
+            this.cBorder = Color.parseColor(this.isDarkMode ? "#444444" : "#CCCCCC");
+            this.cTextMain = Color.parseColor(this.isDarkMode ? "#FFFFFF" : "#000000");
+            this.cTextMuted = Color.parseColor(this.isDarkMode ? "#DDDDDD" : "#222222");
+            this.cTextLight = Color.parseColor(this.isDarkMode ? "#AAAAAA" : "#555555");
+            this.cSuccessBg = Color.parseColor(this.isDarkMode ? "#052E16" : "#DCFCE7");
+            this.cWarningBg = Color.parseColor(this.isDarkMode ? "#1C1200" : "#FEF3C7");
+            this.cDangerBg = Color.parseColor(this.isDarkMode ? "#1C0505" : "#FEE2E2");
+            this.cInfoBg = Color.parseColor(this.isDarkMode ? "#0A1628" : "#DBEAFE");
+            this.cPurpleBg = Color.parseColor(this.isDarkMode ? "#2E1065" : "#EDE9FE");
+        } else if (this.isDarkMode) {
+            this.cPrimary = Color.parseColor("#3B82F6");
+            this.cPrimaryHover = Color.parseColor("#6366F1");
+            this.cPrimaryLight = Color.parseColor("#1E3A8A");
             this.cBgMain = Color.parseColor("#0F172A");
             this.cSurface = Color.parseColor("#1E293B");
             this.cSurfaceHover = Color.parseColor("#334155");
@@ -223,15 +252,15 @@ public class MainActivity extends Activity {
             this.cTextMain = Color.parseColor("#F8FAFC");
             this.cTextMuted = Color.parseColor("#CBD5E1");
             this.cTextLight = Color.parseColor("#64748B");
-            this.cSuccessBg = Color.parseColor("#064E3B");
-            this.cWarningBg = Color.parseColor("#78350F");
-            this.cDangerBg = Color.parseColor("#7F1D1D");
+            this.cSuccessBg = Color.parseColor("#052E16");
+            this.cWarningBg = Color.parseColor("#451A03");
+            this.cDangerBg = Color.parseColor("#450A0A");
             this.cInfoBg = Color.parseColor("#1E3A8A");
-            this.cPurpleBg = Color.parseColor("#4C1D95");
+            this.cPurpleBg = Color.parseColor("#2E1065");
         } else {
-            this.cPrimary = Color.parseColor("#0D9488");
-            this.cPrimaryHover = Color.parseColor("#0F766E");
-            this.cPrimaryLight = Color.parseColor("#CCFBF1");
+            this.cPrimary = Color.parseColor("#3B82F6");
+            this.cPrimaryHover = Color.parseColor("#6366F1");
+            this.cPrimaryLight = Color.parseColor("#DBEAFE");
             this.cBgMain = Color.parseColor("#F8FAFC");
             this.cSurface = Color.parseColor("#FFFFFF");
             this.cSurfaceHover = Color.parseColor("#F1F5F9");
@@ -239,21 +268,23 @@ public class MainActivity extends Activity {
             this.cTextMain = Color.parseColor("#0F172A");
             this.cTextMuted = Color.parseColor("#475569");
             this.cTextLight = Color.parseColor("#94A3B8");
-            this.cSuccessBg = Color.parseColor("#D1FAE5");
+            this.cSuccessBg = Color.parseColor("#DCFCE7");
             this.cWarningBg = Color.parseColor("#FEF3C7");
             this.cDangerBg = Color.parseColor("#FEE2E2");
             this.cInfoBg = Color.parseColor("#DBEAFE");
-            this.cPurpleBg = Color.parseColor("#F3E8FF");
+            this.cPurpleBg = Color.parseColor("#EDE9FE");
         }
         if (Build.VERSION.SDK_INT >= 21) {
-            getWindow().setStatusBarColor(this.cPrimaryHover);
+            getWindow().setStatusBarColor(this.cBgMain);
+            getWindow().setNavigationBarColor(this.cSurface);
         }
     }
 
     private void loadOrInitData() {
         try {
             this.isLoggedIn = this.prefs.getBoolean("is_logged_in", false);
-            this.isDarkMode = this.prefs.getBoolean("dark_mode", false);
+            this.isDarkMode = this.prefs.getBoolean("dark_mode", true);
+            this.isHighContrast = this.prefs.getBoolean("high_contrast", false);
             this.isAccessibilityMode = this.prefs.getBoolean("accessibility_mode", false);
             this.lastSyncTimestamp = this.prefs.getString("last_sync_timestamp", "Sincronização automática ativa");
             String string = this.prefs.getString("profile", null);
@@ -263,6 +294,7 @@ public class MainActivity extends Activity {
                 this.doseLogs = new JSONArray(this.prefs.getString("dose_logs", "[]"));
                 this.events = new JSONArray(this.prefs.getString("events", "[]"));
                 this.calNotes = new JSONObject(this.prefs.getString("cal_notes", "{}"));
+                this.calNotesList = new JSONArray(this.prefs.getString("cal_notes_list", "[]"));
                 this.stockMovements = new JSONArray(this.prefs.getString("stock_movements", "[]"));
                 this.allergies = new JSONArray(this.prefs.getString("allergies", "[]"));
                 this.conditions = new JSONArray(this.prefs.getString("conditions", "[]"));
@@ -271,7 +303,6 @@ public class MainActivity extends Activity {
                 this.caregivers = new JSONArray(this.prefs.getString("caregivers", "[]"));
                 this.aiMessages = new JSONArray(this.prefs.getString("ai_messages", "[]"));
 
-                // Se houver resquício do perfil mockado antigo "maria.silva@email.com", limpar completamente
                 if ("maria.silva@email.com".equalsIgnoreCase(this.profile.optString("email", ""))) {
                     this.isLoggedIn = false;
                     this.profile = new JSONObject();
@@ -279,6 +310,7 @@ public class MainActivity extends Activity {
                     this.doseLogs = new JSONArray();
                     this.events = new JSONArray();
                     this.calNotes = new JSONObject();
+                    this.calNotesList = new JSONArray();
                     this.stockMovements = new JSONArray();
                     this.allergies = new JSONArray();
                     this.conditions = new JSONArray();
@@ -293,20 +325,25 @@ public class MainActivity extends Activity {
                 this.profile = new JSONObject();
                 this.profile.put("id", "");
                 this.profile.put("nome", "");
+                this.profile.put("social_name", "");
                 this.profile.put("email", "");
                 this.profile.put("data_nascimento", "");
+                this.profile.put("dob", "");
+                this.profile.put("sex", "");
                 this.profile.put("telefone", "");
                 this.profile.put("cpf", "");
                 this.profile.put("tipo_sanguineo", "");
                 this.profile.put("peso", "");
                 this.profile.put("altura", "");
                 this.profile.put("endereco", "");
+                this.profile.put("role", "independente");
                 this.profile.put("observacoes_medicas", "");
                 this.profile.put("alerta_sonoro", true);
                 this.meds = new JSONArray();
                 this.doseLogs = new JSONArray();
                 this.events = new JSONArray();
                 this.calNotes = new JSONObject();
+                this.calNotesList = new JSONArray();
                 this.stockMovements = new JSONArray();
                 this.allergies = new JSONArray();
                 this.conditions = new JSONArray();
@@ -322,7 +359,26 @@ public class MainActivity extends Activity {
     }
 
     private void saveAll() {
-        this.prefs.edit().putBoolean("is_logged_in", this.isLoggedIn).putBoolean("dark_mode", this.isDarkMode).putBoolean("accessibility_mode", this.isAccessibilityMode).putString("last_sync_timestamp", this.lastSyncTimestamp).putString("profile", this.profile.toString()).putString("meds", this.meds.toString()).putString("dose_logs", this.doseLogs.toString()).putString("events", this.events.toString()).putString("cal_notes", this.calNotes.toString()).putString("stock_movements", this.stockMovements.toString()).putString("allergies", this.allergies.toString()).putString("conditions", this.conditions.toString()).putString("contacts", this.contacts.toString()).putString("professionals", this.professionals.toString()).putString("caregivers", this.caregivers.toString()).putString("ai_messages", this.aiMessages.toString()).apply();
+        this.prefs.edit()
+            .putBoolean("is_logged_in", this.isLoggedIn)
+            .putBoolean("dark_mode", this.isDarkMode)
+            .putBoolean("high_contrast", this.isHighContrast)
+            .putBoolean("accessibility_mode", this.isAccessibilityMode)
+            .putString("last_sync_timestamp", this.lastSyncTimestamp)
+            .putString("profile", this.profile.toString())
+            .putString("meds", this.meds.toString())
+            .putString("dose_logs", this.doseLogs.toString())
+            .putString("events", this.events.toString())
+            .putString("cal_notes", this.calNotes.toString())
+            .putString("cal_notes_list", this.calNotesList.toString())
+            .putString("stock_movements", this.stockMovements.toString())
+            .putString("allergies", this.allergies.toString())
+            .putString("conditions", this.conditions.toString())
+            .putString("contacts", this.contacts.toString())
+            .putString("professionals", this.professionals.toString())
+            .putString("caregivers", this.caregivers.toString())
+            .putString("ai_messages", this.aiMessages.toString())
+            .apply();
         syncWithBackendSilently(false);
     }
 
@@ -342,13 +398,12 @@ public class MainActivity extends Activity {
         LinearLayout linearLayout = new LinearLayout(this);
         linearLayout.setOrientation(1);
         linearLayout.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
-        linearLayout.addView(buildHeader());
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
         scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
         LinearLayout linearLayout2 = new LinearLayout(this);
         linearLayout2.setOrientation(1);
-        linearLayout2.setPadding(dp(16), dp(16), dp(16), dp(28));
+        linearLayout2.setPadding(dp(16), dp(22), dp(16), dp(32));
         if ("home".equals(this.activeTab)) {
             buildHomeTab(linearLayout2);
         } else if ("meds".equals(this.activeTab)) {
@@ -362,134 +417,155 @@ public class MainActivity extends Activity {
         }
         scrollView.addView(linearLayout2);
         linearLayout.addView(scrollView);
+        View navBorder = new View(this);
+        navBorder.setBackgroundColor(this.cBorder);
+        navBorder.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        linearLayout.addView(navBorder);
         linearLayout.addView(buildBottomNav());
         this.rootContainer.addView(linearLayout);
     }
 
     private View buildHeader() {
-        LinearLayout linearLayout = new LinearLayout(this);
-        linearLayout.setOrientation(0);
-        linearLayout.setGravity(16);
-        linearLayout.setBackgroundColor(this.cSurface);
-        linearLayout.setPadding(dp(16), dp(12), dp(16), dp(12));
-        if (("profile".equals(this.activeTab) && !"main".equals(this.profileSubView)) || ("ai".equals(this.activeTab) && !"main".equals(this.aiSubView)) || !"home".equals(this.activeTab)) {
-            TextView textView = new TextView(this);
-            textView.setText("←");
-            textView.setTextSize(sp(18.0f));
-            textView.setTextColor(this.cPrimary);
-            textView.setTypeface(null, 1);
-            textView.setGravity(17);
-            textView.setBackground(shape(this.cPrimaryLight, 10, 0, 0));
-            LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(dp(36), dp(36));
-            layoutParams.rightMargin = dp(10);
-            textView.setLayoutParams(layoutParams);
-            textView.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda1
-                @Override // android.view.View.OnClickListener
-                public final void onClick(View view) {
-                    MainActivity.this.m4lambda$buildHeader$0$commedicarepatientMainActivity(view);
-                }
-            });
-            linearLayout.addView(textView);
-        } else {
-            ImageView imageView = new ImageView(this);
-            imageView.setImageResource(R.mipmap.ic_launcher);
-            LinearLayout.LayoutParams layoutParams2 = new LinearLayout.LayoutParams(dp(38), dp(38));
-            layoutParams2.rightMargin = dp(10);
-            imageView.setLayoutParams(layoutParams2);
-            linearLayout.addView(imageView);
-        }
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        linearLayout2.setOrientation(1);
-        linearLayout2.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-        TextView textView2 = new TextView(this);
-        textView2.setText("MediCare");
-        textView2.setTextColor(this.cTextMain);
-        textView2.setTextSize(sp(18.0f));
-        textView2.setTypeface(null, 1);
-        linearLayout2.addView(textView2);
-        TextView textView3 = new TextView(this);
-        textView3.setText("Portal do Paciente • " + this.profile.optString("nome", "Paciente"));
-        textView3.setTextColor(this.cTextMuted);
-        textView3.setTextSize(sp(11.0f));
-        linearLayout2.addView(textView3);
-        linearLayout.addView(linearLayout2);
-        TextView textView4 = new TextView(this);
-        textView4.setText("🚨 SOS");
-        textView4.setTextColor(-1);
-        textView4.setTextSize(sp(12.0f));
-        textView4.setTypeface(null, 1);
-        textView4.setPadding(dp(12), dp(7), dp(12), dp(7));
-        textView4.setBackground(shape(this.cDanger, 18, 0, 0));
-        textView4.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda2
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m5lambda$buildHeader$1$commedicarepatientMainActivity(view);
-            }
-        });
-        linearLayout.addView(textView4);
-        return linearLayout;
+        return new View(this);
     }
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildHeader$0$com-medicare-patient-MainActivity, reason: not valid java name */
     public /* synthetic */ void m4lambda$buildHeader$0$commedicarepatientMainActivity(View view) {
         onBackPressed();
     }
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildHeader$1$com-medicare-patient-MainActivity, reason: not valid java name */
     public /* synthetic */ void m5lambda$buildHeader$1$commedicarepatientMainActivity(View view) {
         showSosEmergencyDialog();
+    }
+
+    private int getPendingDosesCountToday() {
+        int count = 0;
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject med = this.meds.optJSONObject(i);
+            if (med != null && med.optBoolean("ativo", true)) {
+                String tType = med.optString("treatment_type", med.optString("tipo_uso", "continuous"));
+                if (!"sos".equalsIgnoreCase(tType)) {
+                    String medId = med.optString("id");
+                    JSONArray horarios = med.optJSONArray("horarios");
+                    if (horarios != null) {
+                        for (int j = 0; j < horarios.length(); j++) {
+                            String h = horarios.optString(j);
+                            String st = getDoseStatus(medId, todayIso(), h);
+                            if (!"tomado".equals(st) && !"tomada".equals(st) && !"confirmed".equals(st) && !"pulada".equals(st)) {
+                                count++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    private int getCriticalStockCount() {
+        int count = 0;
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject med = this.meds.optJSONObject(i);
+            if (med != null && med.optBoolean("ativo", true)) {
+                int q = med.has("quantidade") ? med.optInt("quantidade", 30) : med.optInt("estoque_atual", 30);
+                if (q <= 5) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private View buildBottomNav() {
         LinearLayout linearLayout = new LinearLayout(this);
         linearLayout.setOrientation(0);
-        linearLayout.setBackgroundColor(this.cSurface);
-        linearLayout.setPadding(dp(6), dp(8), dp(6), dp(10));
-        int i = 5;
-        int i2 = 4;
-        String[][] strArr = {new String[]{"home", "🏠", "Início"}, new String[]{"meds", "💊", "Remédios"}, new String[]{"calendar", "📅", "Agenda"}, new String[]{"ai", "✨", "Assistente"}, new String[]{"profile", "👤", "Perfil"}};
-        int i3 = 0;
-        while (i3 < i) {
+        linearLayout.setBackgroundColor(this.isDarkMode ? Color.parseColor("#0F172A") : this.cSurface);
+        linearLayout.setPadding(dp(2), dp(6), dp(2), dp(0));
+        String[][] strArr = {
+            new String[]{"home", "🏠", "Início"},
+            new String[]{"meds", "💊", "Medicamentos"},
+            new String[]{"calendar", "📅", "Calendário"},
+            new String[]{"ai", "🩺", "Assistente"},
+            new String[]{"profile", "👤", "Perfil"}
+        };
+        int pendingCount = getPendingDosesCountToday();
+        int criticalCount = getCriticalStockCount();
+        for (int i3 = 0; i3 < 5; i3++) {
             final String[] strArr2 = strArr[i3];
             boolean equals = strArr2[0].equals(this.activeTab);
+            int badge = 0;
+            if ("home".equals(strArr2[0]) && pendingCount > 0) badge = pendingCount;
+            if ("meds".equals(strArr2[0]) && criticalCount > 0) badge = criticalCount;
+
+            FrameLayout tabFrame = new FrameLayout(this);
+            tabFrame.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
             LinearLayout linearLayout2 = new LinearLayout(this);
             linearLayout2.setOrientation(1);
             linearLayout2.setGravity(17);
-            linearLayout2.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-            linearLayout2.setPadding(dp(i2), dp(6), dp(i2), dp(6));
+            linearLayout2.setLayoutParams(new FrameLayout.LayoutParams(-1, -2));
+            linearLayout2.setPadding(dp(2), dp(4), dp(2), dp(0));
+
+            FrameLayout iconBox = new FrameLayout(this);
+            LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(42), dp(28));
+            iconBox.setLayoutParams(iconLp);
             if (equals) {
-                linearLayout2.setBackground(shape(this.cPrimaryLight, 14, 0, 0));
+                iconBox.setBackground(shape(Color.parseColor("#263B82F6"), 10, 0, 0));
             }
             TextView textView = new TextView(this);
             textView.setText(strArr2[1]);
-            textView.setTextSize(sp(18.0f));
+            textView.setTextSize(sp(16.0f));
             textView.setGravity(17);
-            linearLayout2.addView(textView);
+            textView.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+            iconBox.addView(textView);
+            linearLayout2.addView(iconBox);
+
             TextView textView2 = new TextView(this);
             textView2.setText(strArr2[2]);
-            textView2.setTextSize(sp(11.0f));
+            textView2.setTextSize(sp(9.5f));
             textView2.setTypeface(null, equals ? 1 : 0);
-            textView2.setTextColor(equals ? this.cPrimary : this.cTextMuted);
+            textView2.setTextColor(equals ? this.cPrimary : this.cTextLight);
             textView2.setGravity(17);
+            textView2.setSingleLine(true);
+            textView2.setPadding(0, dp(2), 0, dp(6));
             linearLayout2.addView(textView2);
-            linearLayout2.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda12
-                @Override // android.view.View.OnClickListener
+
+            View bottomBar = new View(this);
+            LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(dp(28), dp(3));
+            bottomBar.setLayoutParams(barLp);
+            if (equals) {
+                bottomBar.setBackground(shape(this.cPrimary, 2, 0, 0));
+            }
+            linearLayout2.addView(bottomBar);
+
+            tabFrame.addView(linearLayout2);
+
+            if (badge > 0) {
+                TextView badgeTv = new TextView(this);
+                badgeTv.setText(String.valueOf(badge));
+                badgeTv.setTextColor(-1);
+                badgeTv.setTextSize(sp(8.5f));
+                badgeTv.setTypeface(null, 1);
+                badgeTv.setGravity(17);
+                badgeTv.setBackground(shape(this.cDanger, 9, 0, 0));
+                FrameLayout.LayoutParams bLp = new FrameLayout.LayoutParams(dp(16), dp(16));
+                bLp.gravity = 53;
+                bLp.topMargin = dp(2);
+                bLp.rightMargin = dp(10);
+                badgeTv.setLayoutParams(bLp);
+                tabFrame.addView(badgeTv);
+            }
+
+            tabFrame.setOnClickListener(new View.OnClickListener() {
+                @Override
                 public final void onClick(View view) {
                     MainActivity.this.m0lambda$buildBottomNav$2$commedicarepatientMainActivity(strArr2, view);
                 }
             });
-            linearLayout.addView(linearLayout2);
-            i3++;
-            i = 5;
-            i2 = 4;
+            linearLayout.addView(tabFrame);
         }
         return linearLayout;
     }
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildBottomNav$2$com-medicare-patient-MainActivity, reason: not valid java name */
     public /* synthetic */ void m0lambda$buildBottomNav$2$commedicarepatientMainActivity(String[] strArr, View view) {
         switchTab(strArr[0]);
     }
@@ -1150,669 +1226,1443 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private String getDoseStatus(String str, String str2, String str3) {
+    private String getDoseStatus(String medId, String dateStr, String horaStr) {
         for (int i = 0; i < this.doseLogs.length(); i++) {
-            JSONObject optJSONObject = this.doseLogs.optJSONObject(i);
-            if (optJSONObject != null && str.equals(optJSONObject.optString("med_id")) && str2.equals(optJSONObject.optString("data")) && str3.equals(optJSONObject.optString("horario"))) {
-                return optJSONObject.optString("status", "pendente");
+            JSONObject log = this.doseLogs.optJSONObject(i);
+            if (log != null && medId.equals(log.optString("med_id"))) {
+                String d = log.optString("data", "");
+                if (d.isEmpty() && log.has("created_at")) {
+                    String ca = log.optString("created_at", "");
+                    if (ca.length() >= 10) d = ca.substring(0, 10);
+                }
+                String h = log.optString("horario", log.optString("hora", ""));
+                if (dateStr.equals(d) && horaStr.equals(h)) {
+                    String st = log.optString("status", "pendente");
+                    if ("confirmed".equals(st)) return "tomado";
+                    if ("missed".equals(st)) return "pulado";
+                    return st;
+                }
             }
         }
         return "pendente";
     }
 
-    /* JADX WARN: Removed duplicated region for block: B:32:0x01af  */
-    /* JADX WARN: Removed duplicated region for block: B:37:0x01b2  */
-    /*
-        Code decompiled incorrectly, please refer to instructions dump.
-    */
-    private void registerDose(JSONObject jSONObject, String str, String str2, String str3) {
-        String str4;
-        String str5;
-        String str6;
-        MainActivity mainActivity;
-        String str7;
-        MainActivity mainActivity2 = this;
-        String str8 = "estoque_atual";
-        String str9 = "tomado";
-        try {
-            String optString = jSONObject.optString("id");
-            int i = 0;
-            while (true) {
-                str4 = str9;
-                str5 = str8;
-                if (i >= mainActivity2.doseLogs.length()) {
-                    i = -1;
-                    str6 = "pendente";
-                    break;
+    private JSONObject getDoseLogObject(String medId, String dateStr, String horaStr) {
+        for (int i = 0; i < this.doseLogs.length(); i++) {
+            JSONObject log = this.doseLogs.optJSONObject(i);
+            if (log != null && medId.equals(log.optString("med_id"))) {
+                String d = log.optString("data", "");
+                if (d.isEmpty() && log.has("created_at")) {
+                    String ca = log.optString("created_at", "");
+                    if (ca.length() >= 10) d = ca.substring(0, 10);
                 }
-                try {
-                    JSONObject optJSONObject = mainActivity2.doseLogs.optJSONObject(i);
-                    if (optJSONObject == null || !optString.equals(optJSONObject.optString("med_id")) || !str.equals(optJSONObject.optString("data")) || !str2.equals(optJSONObject.optString("horario"))) {
-                        i++;
-                        mainActivity2 = this;
-                        str9 = str4;
-                        str8 = str5;
-                    } else {
-                        str6 = optJSONObject.optString("status", "pendente");
+                String h = log.optString("horario", log.optString("hora", ""));
+                if (dateStr.equals(d) && horaStr.equals(h)) {
+                    return log;
+                }
+            }
+        }
+        return null;
+    }
+
+    private int getMedStock(JSONObject med) {
+        if (med == null) return 0;
+        if (med.has("quantidade")) return med.optInt("quantidade", 0);
+        return med.optInt("estoque_atual", 0);
+    }
+
+    private void setMedStock(JSONObject med, int newQty) {
+        if (med == null) return;
+        try {
+            int val = Math.max(0, newQty);
+            med.put("quantidade", val);
+            med.put("estoque_atual", val);
+        } catch (Exception ignored) {}
+    }
+
+    private String getMedType(JSONObject med) {
+        if (med == null) return "continuous";
+        String t = med.optString("treatment_type", med.optString("tipo_uso", "continuous")).toLowerCase(Locale.ROOT);
+        if ("continuo".equals(t) || "continuous".equals(t)) return "continuous";
+        if ("temporario".equals(t) || "temporary".equals(t)) return "temporary";
+        if ("sos".equals(t)) return "sos";
+        return "continuous";
+    }
+
+    private void registerDose(JSONObject med, String dateStr, String horaStr, String targetStatus) {
+        try {
+            String medId = med.optString("id");
+            int foundIdx = -1;
+            String prevStatus = "pendente";
+            for (int i = 0; i < this.doseLogs.length(); i++) {
+                JSONObject log = this.doseLogs.optJSONObject(i);
+                if (log != null && medId.equals(log.optString("med_id"))) {
+                    String d = log.optString("data", "");
+                    if (d.isEmpty() && log.has("created_at")) {
+                        String ca = log.optString("created_at", "");
+                        if (ca.length() >= 10) d = ca.substring(0, 10);
+                    }
+                    String h = log.optString("horario", log.optString("hora", ""));
+                    if (dateStr.equals(d) && horaStr.equals(h)) {
+                        foundIdx = i;
+                        prevStatus = log.optString("status", "pendente");
+                        if ("confirmed".equals(prevStatus)) prevStatus = "tomado";
                         break;
                     }
-                } catch (Exception e) {
-                    e = e;
-                    e.printStackTrace();
-                    return;
                 }
             }
-            String str10 = str3;
-            if (str6.equals(str10)) {
-                str10 = "pendente";
+            String newStatus = targetStatus;
+            if (prevStatus.equals(newStatus)) {
+                newStatus = "pendente";
             }
-            String str11 = str6;
-            int i2 = i;
-            String format = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
-            JSONObject jSONObject2 = new JSONObject();
-            String str12 = str10;
-            jSONObject2.put("id", "log-" + System.currentTimeMillis());
-            jSONObject2.put("med_id", optString);
-            jSONObject2.put("med_nome", jSONObject.optString("nome") + " " + jSONObject.optString("dosagem"));
-            jSONObject2.put("data", str);
-            jSONObject2.put("horario", str2);
-            jSONObject2.put("status", str12);
-            jSONObject2.put("hora_real", format);
-            if (i2 >= 0) {
-                mainActivity = this;
-                mainActivity.doseLogs.put(i2, jSONObject2);
+            String nowTime = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+            int atrasoMin = 0;
+            try {
+                String[] p1 = horaStr.split(":");
+                String[] p2 = nowTime.split(":");
+                int mSched = Integer.parseInt(p1[0]) * 60 + Integer.parseInt(p1[1]);
+                int mNow = Integer.parseInt(p2[0]) * 60 + Integer.parseInt(p2[1]);
+                if (mNow > mSched) atrasoMin = mNow - mSched;
+            } catch (Exception ignored) {}
+
+            JSONObject logEntry = new JSONObject();
+            logEntry.put("id", "log-" + System.currentTimeMillis());
+            logEntry.put("med_id", medId);
+            logEntry.put("med_nome", med.optString("nome") + " " + med.optString("dosagem"));
+            logEntry.put("data", dateStr);
+            logEntry.put("created_at", dateStr + "T" + nowTime + ":00.000Z");
+            logEntry.put("horario", horaStr);
+            logEntry.put("hora", horaStr);
+            logEntry.put("status", newStatus);
+            logEntry.put("hora_real", nowTime);
+            logEntry.put("atraso_minutos", atrasoMin);
+
+            if (foundIdx >= 0) {
+                this.doseLogs.put(foundIdx, logEntry);
             } else {
-                mainActivity = this;
-                mainActivity.doseLogs.put(jSONObject2);
+                this.doseLogs.put(logEntry);
             }
-            int optInt = jSONObject.optInt(str5, 0);
-            if (str4.equals(str12)) {
-                str7 = str11;
-                if (!str4.equals(str7)) {
-                    jSONObject.put(str5, Math.max(0, optInt - 1));
-                    mainActivity.stockMovements.put(new JSONObject().put("id", "sm-" + System.currentTimeMillis()).put("med_nome", jSONObject.optString("nome")).put("tipo", "saida").put("qtd", 1).put("data", str + " " + format).put("motivo", "Dose tomada (" + str2 + ")"));
-                    saveAll();
-                    render();
-                    Toast.makeText(mainActivity, !str4.equals(str12) ? "Dose confirmada!" : "Status da dose atualizado", 0).show();
-                }
-            } else {
-                str7 = str11;
-            }
-            if (!str4.equals(str12) && str4.equals(str7)) {
-                jSONObject.put(str5, optInt + 1);
+
+            int currentStock = getMedStock(med);
+            if ("tomado".equals(newStatus) && !"tomado".equals(prevStatus)) {
+                setMedStock(med, currentStock - 1);
+                this.stockMovements.put(new JSONObject()
+                    .put("id", "sm-" + System.currentTimeMillis())
+                    .put("med_id", medId)
+                    .put("med_nome", med.optString("nome"))
+                    .put("tipo", "saida")
+                    .put("movement_type", "consumption")
+                    .put("qtd", 1)
+                    .put("quantity_change", -1)
+                    .put("previous_quantity", currentStock)
+                    .put("new_quantity", Math.max(0, currentStock - 1))
+                    .put("data", dateStr + " " + nowTime)
+                    .put("created_at", dateStr + "T" + nowTime + ":00.000Z")
+                    .put("motivo", "Dose tomada (" + horaStr + ")"));
+            } else if (!"tomado".equals(newStatus) && "tomado".equals(prevStatus)) {
+                setMedStock(med, currentStock + 1);
             }
             saveAll();
             render();
-            Toast.makeText(mainActivity, !str4.equals(str12) ? "Dose confirmada!" : "Status da dose atualizado", 0).show();
-        } catch (Exception e2) {
+            Toast.makeText(this, "tomado".equals(newStatus) ? "✓ Dose confirmada!" : "↩ Confirmação desfeita", 0).show();
+        } catch (Exception ignored) {}
+    }
+
+    private void handleDoseConfirmWithWarning(final JSONObject med, final String dateStr, final String horaStr, final boolean isSnooze) {
+        try {
+            String[] parts = horaStr.split(":");
+            int schedMin = Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
+            Calendar cal = Calendar.getInstance();
+            int nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
+            int diffMin = schedMin - nowMin;
+            if (Math.abs(diffMin) > 60 && !isSnooze) {
+                AlertDialog.Builder b = new AlertDialog.Builder(this);
+                LinearLayout box = new LinearLayout(this);
+                box.setOrientation(1);
+                box.setPadding(dp(22), dp(22), dp(22), dp(18));
+                box.setBackgroundColor(this.cSurface);
+                TextView title = new TextView(this);
+                title.setText(diffMin > 0 ? "⏰ Confirmar adiantado?" : "⚠️ Confirmar com atraso?");
+                title.setTextColor(this.cTextMain);
+                title.setTextSize(sp(18.0f));
+                title.setTypeface(null, 1);
+                box.addView(title);
+                TextView desc = new TextView(this);
+                int hrs = Math.abs(diffMin) / 60;
+                int mins = Math.abs(diffMin) % 60;
+                String timeStr = (hrs > 0 ? hrs + "h " : "") + mins + "min";
+                desc.setText("Esta dose de " + med.optString("nome") + " (" + horaStr + ") está " + timeStr + (diffMin > 0 ? " adiantada" : " atrasada") + " em relação ao horário programado. Deseja confirmar mesmo assim?");
+                desc.setTextColor(this.cTextMuted);
+                desc.setTextSize(sp(14.0f));
+                desc.setPadding(0, dp(10), 0, dp(6));
+                box.addView(desc);
+                b.setView(box);
+                b.setPositiveButton("Sim, confirmar", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        registerDose(med, dateStr, horaStr, "tomado");
+                    }
+                });
+                b.setNegativeButton("Cancelar", null);
+                b.show();
+                return;
+            }
+            if (isSnooze) {
+                Toast.makeText(this, "⏰ Lembrete de " + med.optString("nome") + " em 15 minutos", 0).show();
+            } else {
+                registerDose(med, dateStr, horaStr, "tomado");
+            }
+        } catch (Exception e) {
+            registerDose(med, dateStr, horaStr, "tomado");
+        }
+    }
+
+    private void showUndoConfirmDialog(final JSONObject med, final String dateStr, final String horaStr) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(1);
+        box.setPadding(dp(22), dp(22), dp(22), dp(16));
+        box.setBackgroundColor(this.cSurface);
+        TextView t = new TextView(this);
+        t.setText("↩ Desfazer confirmação?");
+        t.setTextColor(this.cTextMain);
+        t.setTextSize(sp(18.0f));
+        t.setTypeface(null, 1);
+        box.addView(t);
+        TextView sub = new TextView(this);
+        sub.setText("A dose de " + med.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque.");
+        sub.setTextColor(this.cTextMuted);
+        sub.setTextSize(sp(14.0f));
+        sub.setPadding(0, dp(10), 0, dp(6));
+        box.addView(sub);
+        b.setView(box);
+        b.setPositiveButton("Desfazer", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                registerDose(med, dateStr, horaStr, "pendente");
+            }
+        });
+        b.setNegativeButton("Cancelar", null);
+        b.show();
+    }
+
+    private String getGreetingText() {
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        String prefix = hour < 12 ? "Bom dia" : (hour < 18 ? "Boa tarde" : "Boa noite");
+        String fullName = this.profile.optString("social_name", "");
+        if (fullName.isEmpty()) fullName = this.profile.optString("nome", "");
+        if (fullName.isEmpty()) return prefix;
+        String firstName = fullName.trim().split("\\s+")[0];
+        return prefix + ", " + firstName;
+    }
+
+    private String getFormattedTodayHeader() {
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("EEEE, d 'de' MMMM", new Locale("pt", "BR"));
+            return sdf.format(new Date());
+        } catch (Exception e) {
+            return todayIso();
         }
     }
 
     private void buildHomeTab(LinearLayout linearLayout) {
-        String str;
-        String str2;
-        String str3;
-        String str4;
-        String str5;
-        JSONArray optJSONArray;
-        String str6;
-        int i;
-        JSONArray optJSONArray2;
-        final String str7 = todayIso();
-        int i2 = 0;
-        int i3 = 0;
-        int i4 = 0;
-        int i5 = 0;
-        while (true) {
-            str = "horarios";
-            str2 = "tipo_uso";
-            str3 = "sos";
-            if (i2 >= this.meds.length()) {
+        final String today = todayIso();
+        String nowHm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+        int nowMins = Calendar.getInstance().get(Calendar.HOUR_OF_DAY) * 60 + Calendar.getInstance().get(Calendar.MINUTE);
+
+        // 1. Greeting Header (matching Screenshot 1)
+        LinearLayout greetBox = new LinearLayout(this);
+        greetBox.setOrientation(1);
+        LinearLayout.LayoutParams greetLp = new LinearLayout.LayoutParams(-1, -2);
+        greetLp.bottomMargin = dp(20);
+        greetBox.setLayoutParams(greetLp);
+
+        TextView dateTv = new TextView(this);
+        dateTv.setText(getFormattedTodayHeader());
+        dateTv.setTextColor(this.cTextMuted);
+        dateTv.setTextSize(sp(13.0f));
+        greetBox.addView(dateTv);
+
+        TextView greetTv = new TextView(this);
+        greetTv.setText(getGreetingText() + " 👋");
+        greetTv.setTextColor(this.cTextMain);
+        greetTv.setTextSize(sp(24.0f));
+        greetTv.setTypeface(null, 1);
+        greetTv.setPadding(0, dp(2), 0, 0);
+        greetBox.addView(greetTv);
+        linearLayout.addView(greetBox);
+
+        // 2. Collect today's scheduled doses & critical stock
+        StringBuilder criticalSb = new StringBuilder();
+        int criticalCount = 0;
+        final ArrayList<JSONObject> doseItems = new ArrayList<>();
+
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject med = this.meds.optJSONObject(i);
+            if (med != null && med.optBoolean("ativo", true)) {
+                int stock = getMedStock(med);
+                if (stock <= 5) {
+                    if (criticalCount > 0) criticalSb.append(" · ");
+                    criticalSb.append(med.optString("nome")).append(" (").append(stock).append(")");
+                    criticalCount++;
+                }
+                String tType = getMedType(med);
+                if (!"sos".equals(tType)) {
+                    JSONArray horarios = med.optJSONArray("horarios");
+                    if (horarios != null) {
+                        for (int j = 0; j < horarios.length(); j++) {
+                            String h = horarios.optString(j, "08:00");
+                            String rawSt = getDoseStatus(med.optString("id"), today, h);
+                            String uiSt = "upcoming";
+                            int hMins = 480;
+                            try {
+                                String[] p = h.split(":");
+                                hMins = Integer.parseInt(p[0]) * 60 + Integer.parseInt(p[1]);
+                            } catch (Exception ignored) {}
+                            if ("tomado".equals(rawSt)) {
+                                uiSt = "confirmed";
+                            } else if ("pulado".equals(rawSt)) {
+                                uiSt = "missed";
+                            } else {
+                                int diff = nowMins - hMins;
+                                if (diff > 120) uiSt = "missed";
+                                else if (diff > 15) uiSt = "late";
+                                else if (diff >= -15) uiSt = "pending";
+                                else if (diff >= -60) uiSt = "soon";
+                                else uiSt = "upcoming";
+                            }
+                            try {
+                                JSONObject item = new JSONObject();
+                                item.put("med", med);
+                                item.put("hora", h);
+                                item.put("status", uiSt);
+                                doseItems.add(item);
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                }
+            }
+        }
+
+        Collections.sort(doseItems, new Comparator<JSONObject>() {
+            @Override
+            public int compare(JSONObject a, JSONObject b) {
+                return a.optString("hora", "").compareTo(b.optString("hora", ""));
+            }
+        });
+
+        // 3. Critical stock alert banner
+        if (criticalCount > 0) {
+            LinearLayout critBanner = new LinearLayout(this);
+            critBanner.setOrientation(0);
+            critBanner.setGravity(16);
+            critBanner.setBackground(shape(Color.parseColor("#1AEF4444"), 14, Color.parseColor("#4DEF4444"), 1));
+            critBanner.setPadding(dp(16), dp(12), dp(16), dp(12));
+            LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(-1, -2);
+            cbLp.bottomMargin = dp(16);
+            critBanner.setLayoutParams(cbLp);
+
+            TextView cEmoji = new TextView(this);
+            cEmoji.setText("🚨");
+            cEmoji.setTextSize(sp(20.0f));
+            cEmoji.setPadding(0, 0, dp(10), 0);
+            critBanner.addView(cEmoji);
+
+            LinearLayout cTextCol = new LinearLayout(this);
+            cTextCol.setOrientation(1);
+            TextView cTitle = new TextView(this);
+            cTitle.setText("Estoque crítico");
+            cTitle.setTextColor(Color.parseColor("#F87171"));
+            cTitle.setTextSize(sp(13.0f));
+            cTitle.setTypeface(null, 1);
+            cTextCol.addView(cTitle);
+            TextView cSub = new TextView(this);
+            cSub.setText(criticalSb.toString());
+            cSub.setTextColor(Color.parseColor("#FCA5A5"));
+            cSub.setTextSize(sp(12.0f));
+            cTextCol.addView(cSub);
+            critBanner.addView(cTextCol);
+            linearLayout.addView(critBanner);
+        }
+
+        // 4. NextDoseHero (if there is at least one dose today)
+        JSONObject nextDose = null;
+        for (int i = 0; i < doseItems.size(); i++) {
+            JSONObject d = doseItems.get(i);
+            String st = d.optString("status");
+            if ("late".equals(st) || "pending".equals(st) || "soon".equals(st) || "upcoming".equals(st)) {
+                nextDose = d;
                 break;
             }
-            JSONObject optJSONObject = this.meds.optJSONObject(i2);
-            if (optJSONObject != null) {
-                if (optJSONObject.optInt("estoque_atual", 0) <= optJSONObject.optInt("estoque_minimo", 5)) {
-                    i5++;
-                }
-                if (!"sos".equals(optJSONObject.optString("tipo_uso")) && (optJSONArray2 = optJSONObject.optJSONArray("horarios")) != null) {
-                    for (int i6 = 0; i6 < optJSONArray2.length(); i6++) {
-                        i3++;
-                        if ("tomado".equals(getDoseStatus(optJSONObject.optString("id"), str7, optJSONArray2.optString(i6)))) {
-                            i4++;
-                        }
-                    }
+        }
+        if (nextDose == null && !doseItems.isEmpty()) {
+            for (int i = 0; i < doseItems.size(); i++) {
+                if ("confirmed".equals(doseItems.get(i).optString("status"))) {
+                    nextDose = doseItems.get(i);
+                    break;
                 }
             }
-            i2++;
         }
-        int round = i3 > 0 ? Math.round((i4 * 100.0f) / i3) : 100;
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        linearLayout2.setOrientation(1);
-        linearLayout2.setBackground(gradientShape(this.cPrimary, this.cPrimaryHover, 22));
-        linearLayout2.setPadding(dp(20), dp(20), dp(20), dp(20));
-        LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
-        layoutParams.bottomMargin = dp(16);
-        linearLayout2.setLayoutParams(layoutParams);
-        TextView textView = new TextView(this);
-        String str8 = "tomado";
-        textView.setText("Olá, " + this.profile.optString("nome", "Maria Silva") + " 👋");
-        textView.setTextColor(-1);
-        textView.setTextSize(sp(21.0f));
-        textView.setTypeface(null, 1);
-        linearLayout2.addView(textView);
-        TextView textView2 = new TextView(this);
-        textView2.setText("Resumo de Hoje • " + i4 + " de " + i3 + " doses concluídas");
-        textView2.setTextColor(Color.parseColor("#E6FFFA"));
-        textView2.setTextSize(sp(13.0f));
-        textView2.setPadding(0, dp(4), 0, dp(14));
-        linearLayout2.addView(textView2);
-        LinearLayout linearLayout3 = new LinearLayout(this);
-        linearLayout3.setOrientation(0);
-        linearLayout3.addView(buildHeroKpi("Adesão Hoje", round + "%"));
-        linearLayout3.addView(buildHeroKpi("Pendentes", String.valueOf(Math.max(0, i3 - i4))));
-        linearLayout3.addView(buildHeroKpi("Estoque Baixo", String.valueOf(i5)));
-        linearLayout2.addView(linearLayout3);
-        linearLayout.addView(linearLayout2);
-        if (i5 > 0) {
-            LinearLayout linearLayout4 = new LinearLayout(this);
-            linearLayout4.setOrientation(0);
-            linearLayout4.setGravity(16);
-            linearLayout4.setBackground(shape(this.cWarningBg, 16, this.cWarning, 1));
-            linearLayout4.setPadding(dp(14), dp(12), dp(14), dp(12));
-            LinearLayout.LayoutParams layoutParams2 = new LinearLayout.LayoutParams(-1, -2);
-            layoutParams2.bottomMargin = dp(16);
-            linearLayout4.setLayoutParams(layoutParams2);
-            TextView textView3 = new TextView(this);
-            textView3.setText("⚠️ Atenção: " + i5 + " medicamento(s) com estoque baixo. Toque para repor.");
-            textView3.setTextColor(this.cTextMain);
-            textView3.setTextSize(sp(12.0f));
-            textView3.setTypeface(null, 1);
-            textView3.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-            linearLayout4.addView(textView3);
-            linearLayout4.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda21
-                @Override // android.view.View.OnClickListener
-                public final void onClick(View view) {
-                    MainActivity.this.m6lambda$buildHomeTab$4$commedicarepatientMainActivity(view);
-                }
-            });
-            linearLayout.addView(linearLayout4);
-        }
-        linearLayout.addView(sectionHeader("Cronograma de Doses de Hoje", "Toque em Confirmar Dose ou Não Tomei"));
-        String format = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
-        int i7 = 0;
-        while (i7 < this.meds.length()) {
-            final JSONObject optJSONObject2 = this.meds.optJSONObject(i7);
-            if (optJSONObject2 != null && !str3.equals(optJSONObject2.optString(str2)) && (optJSONArray = optJSONObject2.optJSONArray(str)) != null) {
-                int i8 = 0;
-                while (i8 < optJSONArray.length()) {
-                    final String optString = optJSONArray.optString(i8);
-                    String doseStatus = getDoseStatus(optJSONObject2.optString("id"), str7, optString);
-                    boolean z = "pendente".equals(doseStatus) && optString.compareTo(format) < 0;
-                    LinearLayout linearLayout5 = new LinearLayout(this);
-                    String str9 = format;
-                    linearLayout5.setOrientation(1);
-                    int i9 = this.cSurface;
-                    if (z) {
-                        str6 = str;
-                        i = this.cDanger;
-                    } else {
-                        str6 = str;
-                        i = this.cBorder;
+
+        if (nextDose != null) {
+            final JSONObject heroMed = nextDose.optJSONObject("med");
+            final String heroHora = nextDose.optString("hora");
+            String heroSt = nextDose.optString("status");
+            boolean isLate = "late".equals(heroSt);
+            boolean isPend = "pending".equals(heroSt) || "soon".equals(heroSt);
+            boolean isDone = "confirmed".equals(heroSt);
+            int accent = isLate ? this.cDanger : (isPend ? this.cWarning : (isDone ? this.cSuccess : this.cPrimary));
+
+            LinearLayout heroCard = new LinearLayout(this);
+            heroCard.setOrientation(1);
+            heroCard.setBackground(shape(this.cSurface, 22, accent, 1));
+            heroCard.setPadding(dp(20), dp(18), dp(20), dp(18));
+            LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(-1, -2);
+            hLp.bottomMargin = dp(14);
+            heroCard.setLayoutParams(hLp);
+
+            LinearLayout heroTop = new LinearLayout(this);
+            heroTop.setOrientation(0);
+            heroTop.setGravity(48);
+
+            LinearLayout heroLeft = new LinearLayout(this);
+            heroLeft.setOrientation(1);
+            heroLeft.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+            TextView badge = new TextView(this);
+            badge.setText(isLate ? "🚨 Dose atrasada" : (isPend ? "⏰ Hora do remédio" : (isDone ? "✅ Concluído" : "🕐 Próxima dose")));
+            badge.setTextColor(accent);
+            badge.setTextSize(sp(11.0f));
+            badge.setTypeface(null, 1);
+            badge.setBackground(shape(Color.argb(35, Color.red(accent), Color.green(accent), Color.blue(accent)), 12, 0, 0));
+            badge.setPadding(dp(10), dp(4), dp(10), dp(4));
+            LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
+            bLp.bottomMargin = dp(8);
+            badge.setLayoutParams(bLp);
+            heroLeft.addView(badge);
+
+            TextView hName = new TextView(this);
+            hName.setText(heroMed.optString("nome"));
+            hName.setTextColor(this.cTextMain);
+            hName.setTextSize(sp(20.0f));
+            hName.setTypeface(null, 1);
+            heroLeft.addView(hName);
+
+            TextView hDose = new TextView(this);
+            hDose.setText(heroMed.optString("dosagem") + " · " + heroMed.optString("unidade", heroMed.optString("forma", "comprimido")));
+            hDose.setTextColor(this.cTextMuted);
+            hDose.setTextSize(sp(13.0f));
+            heroLeft.addView(hDose);
+            heroTop.addView(heroLeft);
+
+            TextView hTime = new TextView(this);
+            hTime.setText(heroHora);
+            hTime.setTextColor(accent);
+            hTime.setTextSize(sp(26.0f));
+            hTime.setTypeface(null, 1);
+            heroTop.addView(hTime);
+            heroCard.addView(heroTop);
+
+            if (!isDone) {
+                TextView btnConfirm = new TextView(this);
+                btnConfirm.setText("✓  Já tomei");
+                btnConfirm.setTextColor(-1);
+                btnConfirm.setTextSize(sp(16.0f));
+                btnConfirm.setTypeface(null, 1);
+                btnConfirm.setGravity(17);
+                btnConfirm.setPadding(dp(16), dp(14), dp(16), dp(14));
+                btnConfirm.setBackground(shape(Color.parseColor("#16A34A"), 14, 0, 0));
+                LinearLayout.LayoutParams bcLp = new LinearLayout.LayoutParams(-1, -2);
+                bcLp.topMargin = dp(14);
+                bcLp.bottomMargin = dp(8);
+                btnConfirm.setLayoutParams(bcLp);
+                btnConfirm.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        handleDoseConfirmWithWarning(heroMed, today, heroHora, false);
                     }
-                    String str10 = str3;
-                    JSONArray jSONArray = optJSONArray;
-                    linearLayout5.setBackground(shape(i9, 16, i, 1));
-                    String str11 = str2;
-                    linearLayout5.setPadding(dp(14), dp(14), dp(14), dp(14));
-                    LinearLayout.LayoutParams layoutParams3 = new LinearLayout.LayoutParams(-1, -2);
-                    layoutParams3.bottomMargin = dp(10);
-                    linearLayout5.setLayoutParams(layoutParams3);
-                    LinearLayout linearLayout6 = new LinearLayout(this);
-                    linearLayout6.setOrientation(0);
-                    linearLayout6.setGravity(16);
-                    TextView textView4 = new TextView(this);
-                    textView4.setText("⏰ " + optString);
-                    textView4.setTextSize(sp(13.0f));
-                    textView4.setTypeface(null, 1);
-                    textView4.setTextColor(z ? this.cDanger : this.cPrimary);
-                    textView4.setBackground(shape(z ? this.cDangerBg : this.cPrimaryLight, 10, 0, 0));
-                    int i10 = i7;
-                    int i11 = i8;
-                    textView4.setPadding(dp(10), dp(5), dp(10), dp(5));
-                    linearLayout6.addView(textView4);
-                    LinearLayout linearLayout7 = new LinearLayout(this);
-                    linearLayout7.setOrientation(1);
-                    linearLayout7.setPadding(dp(10), 0, dp(8), 0);
-                    linearLayout7.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-                    TextView textView5 = new TextView(this);
-                    textView5.setText(optJSONObject2.optString("nome") + " • " + optJSONObject2.optString("dosagem"));
-                    textView5.setTextColor(this.cTextMain);
-                    textView5.setTextSize(sp(15.0f));
-                    textView5.setTypeface(null, 1);
-                    linearLayout7.addView(textView5);
-                    TextView textView6 = new TextView(this);
-                    textView6.setText(optJSONObject2.optString("forma") + " • " + optJSONObject2.optString("instrucoes"));
-                    textView6.setTextColor(this.cTextMuted);
-                    textView6.setTextSize(sp(12.0f));
-                    linearLayout7.addView(textView6);
-                    linearLayout6.addView(linearLayout7);
-                    TextView textView7 = new TextView(this);
-                    String str12 = str8;
-                    if (str12.equals(doseStatus)) {
-                        textView7.setText("✓ Tomado");
-                        textView7.setTextColor(this.cSuccess);
-                        textView7.setBackground(shape(this.cSuccessBg, 10, 0, 0));
-                    } else if ("pulado".equals(doseStatus)) {
-                        textView7.setText("✕ Pulado");
-                        textView7.setTextColor(this.cWarning);
-                        textView7.setBackground(shape(this.cWarningBg, 10, 0, 0));
-                    } else if (z) {
-                        textView7.setText("Atrasado");
-                        textView7.setTextColor(this.cDanger);
-                        textView7.setBackground(shape(this.cDangerBg, 10, 0, 0));
-                    } else {
-                        textView7.setText("Pendente");
-                        textView7.setTextColor(this.cInfo);
-                        textView7.setBackground(shape(this.cInfoBg, 10, 0, 0));
+                });
+                heroCard.addView(btnConfirm);
+
+                TextView btnSnooze = new TextView(this);
+                btnSnooze.setText("⏰  Lembrar em 15 minutos");
+                btnSnooze.setTextColor(this.cTextMuted);
+                btnSnooze.setTextSize(sp(13.0f));
+                btnSnooze.setTypeface(null, 1);
+                btnSnooze.setGravity(17);
+                btnSnooze.setPadding(dp(12), dp(10), dp(12), dp(10));
+                btnSnooze.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
+                btnSnooze.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+                btnSnooze.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        handleDoseConfirmWithWarning(heroMed, today, heroHora, true);
                     }
-                    textView7.setTextSize(sp(11.0f));
-                    textView7.setTypeface(null, 1);
-                    textView7.setPadding(dp(8), dp(4), dp(8), dp(4));
-                    linearLayout6.addView(textView7);
-                    linearLayout5.addView(linearLayout6);
-                    LinearLayout linearLayout8 = new LinearLayout(this);
-                    linearLayout8.setOrientation(0);
-                    linearLayout8.setPadding(0, dp(10), 0, 0);
-                    TextView textView8 = new TextView(this);
-                    textView8.setText(str12.equals(doseStatus) ? "✓ Dose Confirmada (Desfazer)" : "✓ Confirmar Dose");
-                    textView8.setGravity(17);
-                    textView8.setTextSize(sp(12.0f));
-                    textView8.setTypeface(null, 1);
-                    textView8.setTextColor(str12.equals(doseStatus) ? this.cSuccess : -1);
-                    textView8.setBackground(shape(str12.equals(doseStatus) ? this.cSuccessBg : this.cPrimary, 10, 0, 0));
-                    textView8.setPadding(dp(12), dp(9), dp(12), dp(9));
-                    LinearLayout.LayoutParams layoutParams4 = new LinearLayout.LayoutParams(0, -2, 1.0f);
-                    layoutParams4.rightMargin = dp(8);
-                    textView8.setLayoutParams(layoutParams4);
-                    textView8.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda22
-                        @Override // android.view.View.OnClickListener
-                        public final void onClick(View view) {
-                            MainActivity.this.m7lambda$buildHomeTab$5$commedicarepatientMainActivity(optJSONObject2, str7, optString, view);
-                        }
-                    });
-                    linearLayout8.addView(textView8);
-                    TextView textView9 = new TextView(this);
-                    textView9.setText("pulado".equals(doseStatus) ? "Não Tomada" : "Não Tomei");
-                    textView9.setGravity(17);
-                    textView9.setTextSize(sp(12.0f));
-                    textView9.setTextColor(this.cTextMuted);
-                    textView9.setBackground(shape(this.cSurfaceHover, 10, this.cBorder, 1));
-                    textView9.setPadding(dp(12), dp(9), dp(12), dp(9));
-                    textView9.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda23
-                        @Override // android.view.View.OnClickListener
-                        public final void onClick(View view) {
-                            MainActivity.this.m8lambda$buildHomeTab$6$commedicarepatientMainActivity(optJSONObject2, str7, optString, view);
-                        }
-                    });
-                    linearLayout8.addView(textView9);
-                    linearLayout5.addView(linearLayout8);
-                    linearLayout.addView(linearLayout5);
-                    i8 = i11 + 1;
-                    str8 = str12;
-                    i7 = i10;
-                    format = str9;
-                    str = str6;
-                    optJSONArray = jSONArray;
-                    str3 = str10;
-                    str2 = str11;
-                }
+                });
+                heroCard.addView(btnSnooze);
             }
-            str8 = str8;
-            format = format;
-            str = str;
-            str3 = str3;
-            str2 = str2;
-            i7++;
+            linearLayout.addView(heroCard);
         }
-        String str13 = str2;
-        String str14 = str3;
-        linearLayout.addView(sectionHeader("Medicamentos SOS (Se Necessário)", "Registro imediato de sintomas ou dor"));
-        int i12 = 0;
-        while (i12 < this.meds.length()) {
-            final JSONObject optJSONObject3 = this.meds.optJSONObject(i12);
-            if (optJSONObject3 != null) {
-                str5 = str13;
-                str4 = str14;
-                if (str4.equals(optJSONObject3.optString(str5))) {
-                    LinearLayout linearLayout9 = new LinearLayout(this);
-                    linearLayout9.setOrientation(0);
-                    linearLayout9.setGravity(16);
-                    linearLayout9.setBackground(shape(this.cSurface, 16, this.cBorder, 1));
-                    linearLayout9.setPadding(dp(14), dp(12), dp(14), dp(12));
-                    LinearLayout.LayoutParams layoutParams5 = new LinearLayout.LayoutParams(-1, -2);
-                    layoutParams5.bottomMargin = dp(10);
-                    linearLayout9.setLayoutParams(layoutParams5);
-                    LinearLayout linearLayout10 = new LinearLayout(this);
-                    linearLayout10.setOrientation(1);
-                    linearLayout10.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-                    TextView textView10 = new TextView(this);
-                    textView10.setText("⚡ " + optJSONObject3.optString("nome") + " " + optJSONObject3.optString("dosagem"));
-                    textView10.setTextColor(this.cTextMain);
-                    textView10.setTextSize(sp(14.0f));
-                    textView10.setTypeface(null, 1);
-                    linearLayout10.addView(textView10);
-                    TextView textView11 = new TextView(this);
-                    textView11.setText(optJSONObject3.optString("instrucoes"));
-                    textView11.setTextColor(this.cTextMuted);
-                    textView11.setTextSize(sp(12.0f));
-                    linearLayout10.addView(textView11);
-                    linearLayout9.addView(linearLayout10);
-                    TextView textView12 = new TextView(this);
-                    textView12.setText("Registrar Uso");
-                    textView12.setTextColor(this.cPurple);
-                    textView12.setBackground(shape(this.cPurpleBg, 10, 0, 0));
-                    textView12.setTypeface(null, 1);
-                    textView12.setTextSize(sp(12.0f));
-                    textView12.setPadding(dp(12), dp(8), dp(12), dp(8));
-                    textView12.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda24
-                        @Override // android.view.View.OnClickListener
-                        public final void onClick(View view) {
-                            MainActivity.this.m9lambda$buildHomeTab$7$commedicarepatientMainActivity(optJSONObject3, view);
+
+        // 5. DayProgress Card (matching Screenshot 1)
+        int confCount = 0;
+        int pendCount = 0;
+        int missCount = 0;
+        int totCount = doseItems.size();
+        for (int i = 0; i < totCount; i++) {
+            String st = doseItems.get(i).optString("status");
+            if ("confirmed".equals(st)) confCount++;
+            else if ("missed".equals(st)) missCount++;
+            else pendCount++;
+        }
+        int adhPct = totCount > 0 ? Math.round((confCount * 100.0f) / totCount) : 0;
+        int pctColor = adhPct >= 80 ? this.cSuccess : (adhPct >= 50 ? this.cWarning : this.cDanger);
+
+        LinearLayout progCard = new LinearLayout(this);
+        progCard.setOrientation(1);
+        progCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        progCard.setPadding(dp(18), dp(16), dp(18), dp(16));
+        LinearLayout.LayoutParams pcLp = new LinearLayout.LayoutParams(-1, -2);
+        pcLp.bottomMargin = dp(14);
+        progCard.setLayoutParams(pcLp);
+
+        LinearLayout progTop = new LinearLayout(this);
+        progTop.setOrientation(0);
+        progTop.setGravity(16);
+        TextView progTitle = new TextView(this);
+        progTitle.setText("Progresso do dia");
+        progTitle.setTextColor(this.cTextMain);
+        progTitle.setTextSize(sp(15.0f));
+        progTitle.setTypeface(null, 1);
+        progTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        progTop.addView(progTitle);
+
+        TextView progVal = new TextView(this);
+        progVal.setText(adhPct + "%");
+        progVal.setTextColor(pctColor);
+        progVal.setTextSize(sp(20.0f));
+        progVal.setTypeface(null, 1);
+        progTop.addView(progVal);
+        progCard.addView(progTop);
+
+        FrameLayout barTrack = new FrameLayout(this);
+        barTrack.setBackground(shape(this.cSurfaceHover, 6, 0, 0));
+        LinearLayout.LayoutParams btLp = new LinearLayout.LayoutParams(-1, dp(8));
+        btLp.topMargin = dp(10);
+        btLp.bottomMargin = dp(14);
+        barTrack.setLayoutParams(btLp);
+        if (adhPct > 0) {
+            View barFill = new View(this);
+            barFill.setBackground(shape(pctColor, 6, 0, 0));
+            int wPx = (int) ((getResources().getDisplayMetrics().widthPixels - dp(72)) * (adhPct / 100.0f));
+            barFill.setLayoutParams(new FrameLayout.LayoutParams(Math.max(dp(8), wPx), -1));
+            barTrack.addView(barFill);
+        }
+        progCard.addView(barTrack);
+
+        LinearLayout statsRow = new LinearLayout(this);
+        statsRow.setOrientation(0);
+        statsRow.setGravity(16);
+        Object[][] statCols = {
+            {"Tomadas", confCount, this.cSuccess},
+            {"Pendentes", pendCount, this.cWarning},
+            {"Perdidas", missCount, missCount > 0 ? this.cDanger : this.cTextLight},
+            {"Total", totCount, this.cTextMain}
+        };
+        for (int sIdx = 0; sIdx < 4; sIdx++) {
+            if (sIdx > 0) {
+                View vDiv = new View(this);
+                vDiv.setBackgroundColor(this.cBorder);
+                vDiv.setLayoutParams(new LinearLayout.LayoutParams(dp(1), dp(36)));
+                statsRow.addView(vDiv);
+            }
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(1);
+            col.setGravity(17);
+            col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            TextView vTv = new TextView(this);
+            vTv.setText(String.valueOf(statCols[sIdx][1]));
+            vTv.setTextColor((Integer) statCols[sIdx][2]);
+            vTv.setTextSize(sp(20.0f));
+            vTv.setTypeface(null, 1);
+            vTv.setGravity(17);
+            col.addView(vTv);
+            TextView lTv = new TextView(this);
+            lTv.setText((String) statCols[sIdx][0]);
+            lTv.setTextColor(this.cTextLight);
+            lTv.setTextSize(sp(11.0f));
+            lTv.setGravity(17);
+            col.addView(lTv);
+            statsRow.addView(col);
+        }
+        progCard.addView(statsRow);
+        linearLayout.addView(progCard);
+
+        // 6. Timeline ("📅 Linha do dia" card matching Screenshot 1)
+        LinearLayout timelineCard = new LinearLayout(this);
+        timelineCard.setOrientation(1);
+        timelineCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        timelineCard.setPadding(dp(16), dp(16), dp(16), dp(16));
+        timelineCard.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+
+        TextView tlTitle = new TextView(this);
+        tlTitle.setText("📅 Linha do dia");
+        tlTitle.setTextColor(this.cTextMain);
+        tlTitle.setTextSize(sp(15.0f));
+        tlTitle.setTypeface(null, 1);
+        tlTitle.setPadding(0, 0, 0, dp(16));
+        timelineCard.addView(tlTitle);
+
+        if (doseItems.isEmpty()) {
+            LinearLayout emptyBox = new LinearLayout(this);
+            emptyBox.setOrientation(1);
+            emptyBox.setGravity(17);
+            emptyBox.setPadding(dp(16), dp(28), dp(16), dp(28));
+            TextView pillEmoji = new TextView(this);
+            pillEmoji.setText("💊");
+            pillEmoji.setTextSize(sp(36.0f));
+            pillEmoji.setGravity(17);
+            pillEmoji.setPadding(0, 0, 0, dp(10));
+            emptyBox.addView(pillEmoji);
+            TextView emptyTxt = new TextView(this);
+            emptyTxt.setText("Adicione medicamentos na aba Medicamentos");
+            emptyTxt.setTextColor(this.cTextMuted);
+            emptyTxt.setTextSize(sp(14.0f));
+            emptyTxt.setGravity(17);
+            emptyBox.addView(emptyTxt);
+            timelineCard.addView(emptyBox);
+        } else {
+            for (int i = 0; i < doseItems.size(); i++) {
+                final JSONObject dItem = doseItems.get(i);
+                final JSONObject dMed = dItem.optJSONObject("med");
+                final String dHora = dItem.optString("hora");
+                String dStatus = dItem.optString("status");
+                boolean isConfirmed = "confirmed".equals(dStatus);
+                boolean isMissed = "missed".equals(dStatus);
+                boolean isLateDose = "late".equals(dStatus);
+                boolean isPendingDose = "pending".equals(dStatus);
+                boolean isSoonDose = "soon".equals(dStatus);
+
+                int stColor = isConfirmed ? this.cSuccess : ((isMissed || isLateDose) ? this.cDanger : ((isPendingDose || isSoonDose) ? this.cWarning : this.cTextLight));
+                String stLabel = isConfirmed ? "Tomado" : (isLateDose ? "Atrasado" : (isPendingDose ? "Agora" : (isMissed ? "Perdida" : (isSoonDose ? "Em breve" : "Agendado"))));
+                String stIcon = isConfirmed ? "✓" : (isMissed ? "✕" : (isLateDose ? "!" : (isPendingDose ? "●" : "○")));
+
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(0);
+
+                // Left timeline dot & connector
+                LinearLayout leftTrack = new LinearLayout(this);
+                leftTrack.setOrientation(1);
+                leftTrack.setGravity(1);
+                LinearLayout.LayoutParams ltLp = new LinearLayout.LayoutParams(dp(34), -1);
+                ltLp.rightMargin = dp(10);
+                leftTrack.setLayoutParams(ltLp);
+
+                TextView dot = new TextView(this);
+                dot.setText(stIcon);
+                dot.setTextColor(stColor);
+                dot.setTextSize(sp(13.0f));
+                dot.setTypeface(null, 1);
+                dot.setGravity(17);
+                dot.setBackground(shape(Color.argb(35, Color.red(stColor), Color.green(stColor), Color.blue(stColor)), 17, stColor, 2));
+                dot.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+                leftTrack.addView(dot);
+
+                if (i < doseItems.size() - 1) {
+                    View line = new View(this);
+                    line.setBackgroundColor(isConfirmed ? Color.parseColor("#4D22C55E") : this.cBorder);
+                    LinearLayout.LayoutParams lnLp = new LinearLayout.LayoutParams(dp(2), 0, 1.0f);
+                    lnLp.topMargin = dp(3);
+                    lnLp.bottomMargin = dp(3);
+                    line.setLayoutParams(lnLp);
+                    leftTrack.addView(line);
+                }
+                row.addView(leftTrack);
+
+                // Right card content
+                LinearLayout dCard = new LinearLayout(this);
+                dCard.setOrientation(1);
+                int cardBg = isConfirmed ? Color.parseColor("#1222C55E") : (isLateDose ? Color.parseColor("#1AEF4444") : (isPendingDose ? Color.parseColor("#1AF59E0B") : this.cSurfaceHover));
+                dCard.setBackground(shape(cardBg, 14, this.cBorder, 1));
+                dCard.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout.LayoutParams dcLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+                dcLp.bottomMargin = i < doseItems.size() - 1 ? dp(10) : 0;
+                dCard.setLayoutParams(dcLp);
+
+                LinearLayout dTop = new LinearLayout(this);
+                dTop.setOrientation(0);
+                dTop.setGravity(16);
+
+                LinearLayout dInfo = new LinearLayout(this);
+                dInfo.setOrientation(1);
+                dInfo.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                LinearLayout timeBadgeRow = new LinearLayout(this);
+                timeBadgeRow.setOrientation(0);
+                timeBadgeRow.setGravity(16);
+                TextView tTv = new TextView(this);
+                tTv.setText(dHora);
+                tTv.setTextColor(stColor);
+                tTv.setTextSize(sp(12.0f));
+                tTv.setTypeface(null, 1);
+                tTv.setPadding(0, 0, dp(6), 0);
+                timeBadgeRow.addView(tTv);
+
+                TextView bTv = new TextView(this);
+                bTv.setText(stLabel);
+                bTv.setTextColor(stColor);
+                bTv.setTextSize(sp(10.0f));
+                bTv.setTypeface(null, 1);
+                bTv.setBackground(shape(Color.argb(35, Color.red(stColor), Color.green(stColor), Color.blue(stColor)), 10, 0, 0));
+                bTv.setPadding(dp(8), dp(2), dp(8), dp(2));
+                timeBadgeRow.addView(bTv);
+                dInfo.addView(timeBadgeRow);
+
+                TextView mNameTv = new TextView(this);
+                mNameTv.setText(dMed.optString("nome"));
+                mNameTv.setTextColor(this.cTextMain);
+                mNameTv.setTextSize(sp(15.0f));
+                mNameTv.setTypeface(null, 1);
+                mNameTv.setPadding(0, dp(2), 0, 0);
+                dInfo.addView(mNameTv);
+
+                int stQty = getMedStock(dMed);
+                TextView mSubTv = new TextView(this);
+                mSubTv.setText(dMed.optString("dosagem") + " · " + dMed.optString("unidade", dMed.optString("forma", "comprimido")) + "  📦 " + stQty);
+                mSubTv.setTextColor(this.cTextMuted);
+                mSubTv.setTextSize(sp(12.0f));
+                dInfo.addView(mSubTv);
+                dTop.addView(dInfo);
+
+                if (!isConfirmed) {
+                    TextView actBtn = new TextView(this);
+                    actBtn.setText("Tomar");
+                    actBtn.setTextColor(-1);
+                    actBtn.setTextSize(sp(12.0f));
+                    actBtn.setTypeface(null, 1);
+                    actBtn.setBackground(shape(isLateDose ? this.cDanger : Color.parseColor("#16A34A"), 10, 0, 0));
+                    actBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+                    actBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            handleDoseConfirmWithWarning(dMed, today, dHora, false);
                         }
                     });
-                    linearLayout9.addView(textView12);
-                    linearLayout.addView(linearLayout9);
+                    dTop.addView(actBtn);
+                } else {
+                    TextView undoBtn = new TextView(this);
+                    undoBtn.setText("↩ Desfazer");
+                    undoBtn.setTextColor(this.cTextMuted);
+                    undoBtn.setTextSize(sp(11.0f));
+                    undoBtn.setTypeface(null, 1);
+                    undoBtn.setBackground(shape(this.cSurface, 8, this.cBorder, 1));
+                    undoBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
+                    undoBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            showUndoConfirmDialog(dMed, today, dHora);
+                        }
+                    });
+                    dTop.addView(undoBtn);
                 }
-            } else {
-                str4 = str14;
-                str5 = str13;
+
+                dCard.addView(dTop);
+                row.addView(dCard);
+                timelineCard.addView(row);
             }
-            i12++;
-            str13 = str5;
-            str14 = str4;
         }
-    }
-
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildHomeTab$4$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m6lambda$buildHomeTab$4$commedicarepatientMainActivity(View view) {
-        switchTab("meds");
-    }
-
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildHomeTab$5$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m7lambda$buildHomeTab$5$commedicarepatientMainActivity(JSONObject jSONObject, String str, String str2, View view) {
-        registerDose(jSONObject, str, str2, "tomado");
-    }
-
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildHomeTab$6$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m8lambda$buildHomeTab$6$commedicarepatientMainActivity(JSONObject jSONObject, String str, String str2, View view) {
-        registerDose(jSONObject, str, str2, "pulado");
-    }
-
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildHomeTab$7$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m9lambda$buildHomeTab$7$commedicarepatientMainActivity(JSONObject jSONObject, View view) {
-        registerDose(jSONObject, todayIso(), new SimpleDateFormat("HH:mm", Locale.US).format(new Date()), "tomado");
-    }
-
-    private View buildHeroKpi(String str, String str2) {
-        LinearLayout linearLayout = new LinearLayout(this);
-        linearLayout.setOrientation(1);
-        linearLayout.setBackground(shape(Color.parseColor("#26FFFFFF"), 14, 0, 0));
-        linearLayout.setPadding(dp(10), dp(10), dp(10), dp(10));
-        LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(0, -2, 1.0f);
-        layoutParams.rightMargin = dp(6);
-        linearLayout.setLayoutParams(layoutParams);
-        TextView textView = new TextView(this);
-        textView.setText(str2);
-        textView.setTextColor(-1);
-        textView.setTextSize(sp(18.0f));
-        textView.setTypeface(null, 1);
-        linearLayout.addView(textView);
-        TextView textView2 = new TextView(this);
-        textView2.setText(str);
-        textView2.setTextColor(Color.parseColor("#E6FFFA"));
-        textView2.setTextSize(sp(11.0f));
-        linearLayout.addView(textView2);
-        return linearLayout;
+        linearLayout.addView(timelineCard);
     }
 
     private void buildMedsTab(LinearLayout linearLayout) {
-        String str;
-        String str2;
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        char c = 0;
-        linearLayout2.setOrientation(0);
-        linearLayout2.setGravity(16);
-        LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
-        layoutParams.bottomMargin = dp(12);
-        linearLayout2.setLayoutParams(layoutParams);
-        TextView textView = new TextView(this);
-        textView.setText("Meus Medicamentos");
-        textView.setTextColor(this.cTextMain);
-        textView.setTextSize(sp(20.0f));
-        char c2 = 1;
-        textView.setTypeface(null, 1);
-        textView.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-        linearLayout2.addView(textView);
-        TextView textView2 = new TextView(this);
-        textView2.setText("+ Novo Remédio");
-        textView2.setTextColor(-1);
-        textView2.setBackground(shape(this.cPrimary, 12, 0, 0));
-        textView2.setTypeface(null, 1);
-        float f = 12.0f;
-        textView2.setTextSize(sp(12.0f));
-        textView2.setPadding(dp(14), dp(9), dp(14), dp(9));
-        textView2.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda3
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m14lambda$buildMedsTab$8$commedicarepatientMainActivity(view);
+        if ("todos".equals(this.medFilter) || "continuo".equals(this.medFilter)) {
+            this.medFilter = "continuous";
+        } else if ("temporario".equals(this.medFilter)) {
+            this.medFilter = "temporary";
+        }
+
+        // Header: "Meus medicamentos" + "＋ Novo"
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(0);
+        headerRow.setGravity(16);
+        LinearLayout.LayoutParams hrLp = new LinearLayout.LayoutParams(-1, -2);
+        hrLp.bottomMargin = dp(20);
+        headerRow.setLayoutParams(hrLp);
+
+        TextView titleTv = new TextView(this);
+        titleTv.setText("Meus medicamentos");
+        titleTv.setTextColor(this.cTextMain);
+        titleTv.setTextSize(sp(22.0f));
+        titleTv.setTypeface(null, 1);
+        titleTv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        headerRow.addView(titleTv);
+
+        TextView addBtn = new TextView(this);
+        addBtn.setText("＋ Novo");
+        addBtn.setTextColor(-1);
+        addBtn.setTextSize(sp(14.0f));
+        addBtn.setTypeface(null, 1);
+        addBtn.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
+        addBtn.setPadding(dp(18), dp(10), dp(18), dp(10));
+        addBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showMedModal(null, -1);
             }
         });
-        linearLayout2.addView(textView2);
-        linearLayout.addView(linearLayout2);
-        HorizontalScrollView horizontalScrollView = new HorizontalScrollView(this);
-        horizontalScrollView.setHorizontalScrollBarEnabled(false);
-        LinearLayout linearLayout3 = new LinearLayout(this);
-        linearLayout3.setOrientation(0);
-        linearLayout3.setPadding(0, 0, 0, dp(12));
-        int i = 5;
-        String str3 = "continuo";
-        String str4 = "temporario";
-        String[][] strArr = {new String[]{"todos", "Todos"}, new String[]{"continuo", "Uso Contínuo"}, new String[]{"temporario", "Temporários"}, new String[]{"sos", "SOS (Se Necessário)"}, new String[]{"baixo", "Estoque Baixo"}};
-        int i2 = 0;
-        while (i2 < i) {
-            final String[] strArr2 = strArr[i2];
-            boolean equals = strArr2[c].equals(this.medFilter);
-            TextView textView3 = new TextView(this);
-            textView3.setText(strArr2[c2]);
-            textView3.setTextSize(sp(f));
-            textView3.setTypeface(null, equals ? 1 : 0);
-            textView3.setTextColor(equals ? -1 : this.cTextMuted);
-            textView3.setBackground(shape(equals ? this.cPrimary : this.cSurface, 18, this.cBorder, !equals ? 1 : 0));
-            textView3.setPadding(dp(14), dp(8), dp(14), dp(8));
-            LinearLayout.LayoutParams layoutParams2 = new LinearLayout.LayoutParams(-2, -2);
-            layoutParams2.rightMargin = dp(8);
-            textView3.setLayoutParams(layoutParams2);
-            textView3.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda4
-                @Override // android.view.View.OnClickListener
-                public final void onClick(View view) {
-                    MainActivity.this.m15lambda$buildMedsTab$9$commedicarepatientMainActivity(strArr2, view);
+        headerRow.addView(addBtn);
+        linearLayout.addView(headerRow);
+
+        // Separate meds by treatment_type
+        ArrayList<Integer> contIndices = new ArrayList<>();
+        ArrayList<Integer> tempIndices = new ArrayList<>();
+        ArrayList<Integer> sosIndices = new ArrayList<>();
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject m = this.meds.optJSONObject(i);
+            if (m != null && m.optBoolean("ativo", true)) {
+                String t = getMedType(m);
+                if ("temporary".equals(t)) tempIndices.add(i);
+                else if ("sos".equals(t)) sosIndices.add(i);
+                else contIndices.add(i);
+            }
+        }
+
+        // Tabs row: 💊 Contínuos (0) | 📅 Temporários (0) | 🚨 SOS (0)
+        HorizontalScrollView tabScroll = new HorizontalScrollView(this);
+        tabScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout.LayoutParams tsLp = new LinearLayout.LayoutParams(-1, -2);
+        tsLp.bottomMargin = dp(20);
+        tabScroll.setLayoutParams(tsLp);
+
+        LinearLayout tabsRow = new LinearLayout(this);
+        tabsRow.setOrientation(0);
+        Object[][] tabDefs = {
+            {"continuous", "💊 Contínuos", contIndices.size()},
+            {"temporary", "📅 Temporários", tempIndices.size()},
+            {"sos", "🚨 SOS", sosIndices.size()}
+        };
+        for (int tIdx = 0; tIdx < 3; tIdx++) {
+            final String tabId = (String) tabDefs[tIdx][0];
+            String tabLabel = (String) tabDefs[tIdx][1];
+            int tabCount = (Integer) tabDefs[tIdx][2];
+            boolean isActive = tabId.equals(this.medFilter);
+
+            LinearLayout tabPill = new LinearLayout(this);
+            tabPill.setOrientation(0);
+            tabPill.setGravity(16);
+            if (isActive) {
+                tabPill.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 14));
+            } else {
+                tabPill.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+            }
+            tabPill.setPadding(dp(16), dp(12), dp(16), dp(12));
+            LinearLayout.LayoutParams tpLp = new LinearLayout.LayoutParams(-2, -2);
+            tpLp.rightMargin = dp(8);
+            tabPill.setLayoutParams(tpLp);
+
+            TextView lblTv = new TextView(this);
+            lblTv.setText(tabLabel);
+            lblTv.setTextColor(isActive ? -1 : this.cTextMuted);
+            lblTv.setTextSize(sp(14.0f));
+            lblTv.setTypeface(null, isActive ? 1 : 0);
+            lblTv.setPadding(0, 0, dp(8), 0);
+            tabPill.addView(lblTv);
+
+            TextView cntTv = new TextView(this);
+            cntTv.setText(String.valueOf(tabCount));
+            cntTv.setTextColor(isActive ? -1 : this.cTextLight);
+            cntTv.setTextSize(sp(12.0f));
+            cntTv.setTypeface(null, 1);
+            cntTv.setBackground(shape(isActive ? Color.parseColor("#33FFFFFF") : this.cSurfaceHover, 12, 0, 0));
+            cntTv.setPadding(dp(8), dp(2), dp(8), dp(2));
+            tabPill.addView(cntTv);
+
+            tabPill.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.medFilter = tabId;
+                    MainActivity.this.render();
                 }
             });
-            linearLayout3.addView(textView3);
-            i2++;
-            strArr = strArr;
-            c = 0;
-            i = 5;
-            c2 = 1;
-            f = 12.0f;
+            tabsRow.addView(tabPill);
         }
-        horizontalScrollView.addView(linearLayout3);
-        linearLayout.addView(horizontalScrollView);
-        int i3 = 0;
-        while (i3 < this.meds.length()) {
-            final int medIndex = i3;
-            final JSONObject optJSONObject = this.meds.optJSONObject(i3);
-            if (optJSONObject == null) {
-                str = str4;
-                str2 = str3;
-            } else {
-                String optString = optJSONObject.optString("tipo_uso", str3);
-                final int optInt = optJSONObject.optInt("estoque_atual", 0);
-                int optInt2 = optJSONObject.optInt("estoque_minimo", 5);
-                if (str3.equals(this.medFilter) && !str3.equals(optString)) {
-                    str = str4;
-                    str2 = str3;
-                } else if (str4.equals(this.medFilter) && !str4.equals(optString)) {
-                    str = str4;
-                    str2 = str3;
-                } else if ("sos".equals(this.medFilter) && !"sos".equals(optString)) {
-                    str = str4;
-                    str2 = str3;
-                } else if (!"baixo".equals(this.medFilter) || optInt <= optInt2) {
-                    LinearLayout linearLayout4 = new LinearLayout(this);
-                    linearLayout4.setOrientation(1);
-                    linearLayout4.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
-                    str = str4;
-                    linearLayout4.setPadding(dp(16), dp(16), dp(16), dp(16));
-                    LinearLayout.LayoutParams layoutParams3 = new LinearLayout.LayoutParams(-1, -2);
-                    layoutParams3.bottomMargin = dp(12);
-                    linearLayout4.setLayoutParams(layoutParams3);
-                    LinearLayout linearLayout5 = new LinearLayout(this);
-                    linearLayout5.setOrientation(0);
-                    linearLayout5.setGravity(16);
-                    TextView textView4 = new TextView(this);
-                    textView4.setText("💊 " + optJSONObject.optString("nome") + " " + optJSONObject.optString("dosagem"));
-                    textView4.setTextColor(this.cTextMain);
-                    textView4.setTextSize(sp(16.0f));
-                    textView4.setTypeface(null, 1);
-                    str2 = str3;
-                    textView4.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-                    linearLayout5.addView(textView4);
-                    TextView textView5 = new TextView(this);
-                    textView5.setText(optString.toUpperCase(Locale.ROOT));
-                    textView5.setTextSize(sp(10.0f));
-                    textView5.setTypeface(null, 1);
-                    textView5.setTextColor("sos".equals(optString) ? this.cPurple : this.cPrimary);
-                    textView5.setBackground(shape("sos".equals(optString) ? this.cPurpleBg : this.cPrimaryLight, 10, 0, 0));
-                    textView5.setPadding(dp(8), dp(4), dp(8), dp(4));
-                    linearLayout5.addView(textView5);
-                    linearLayout4.addView(linearLayout5);
-                    TextView textView6 = new TextView(this);
-                    textView6.setText(optJSONObject.optString("forma") + " • " + optJSONObject.optString("frequencia") + "\nInstruções: " + optJSONObject.optString("instrucoes"));
-                    textView6.setTextColor(this.cTextMuted);
-                    textView6.setTextSize(sp(12.0f));
-                    textView6.setPadding(0, dp(6), 0, dp(10));
-                    linearLayout4.addView(textView6);
-                    LinearLayout linearLayout6 = new LinearLayout(this);
-                    linearLayout6.setOrientation(0);
-                    linearLayout6.setGravity(16);
-                    linearLayout6.setBackground(shape(optInt <= optInt2 ? this.cWarningBg : this.cSurfaceHover, 12, 0, 0));
-                    linearLayout6.setPadding(dp(12), dp(8), dp(12), dp(8));
-                    TextView textView7 = new TextView(this);
-                    textView7.setText("📦 Estoque: " + optInt + " unid. (Mín: " + optInt2 + ")");
-                    textView7.setTextColor(optInt <= optInt2 ? this.cDanger : this.cTextMain);
-                    textView7.setTextSize(sp(12.0f));
-                    textView7.setTypeface(null, 1);
-                    textView7.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-                    linearLayout6.addView(textView7);
-                    TextView textView8 = new TextView(this);
-                    textView8.setText("+ Repor");
-                    textView8.setTextColor(this.cPrimary);
-                    textView8.setTypeface(null, 1);
-                    textView8.setTextSize(sp(12.0f));
-                    textView8.setPadding(dp(10), dp(4), dp(10), dp(4));
-                    textView8.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda5
-                        @Override // android.view.View.OnClickListener
-                        public final void onClick(View view) {
-                            MainActivity.this.m11lambda$buildMedsTab$10$commedicarepatientMainActivity(optJSONObject, optInt, view);
-                        }
-                    });
-                    linearLayout6.addView(textView8);
-                    linearLayout4.addView(linearLayout6);
-                    LinearLayout linearLayout7 = new LinearLayout(this);
-                    linearLayout7.setOrientation(0);
-                    linearLayout7.setPadding(0, dp(10), 0, 0);
-                    TextView textView9 = new TextView(this);
-                    textView9.setText("✏️ Editar");
-                    textView9.setTextColor(this.cPrimary);
-                    textView9.setTextSize(sp(12.0f));
-                    textView9.setTypeface(null, 1);
-                    textView9.setPadding(dp(8), dp(6), dp(16), dp(6));
-                    textView9.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda6
-                        @Override // android.view.View.OnClickListener
-                        public final void onClick(View view) {
-                            MainActivity.this.m12lambda$buildMedsTab$11$commedicarepatientMainActivity(optJSONObject, medIndex, view);
-                        }
-                    });
-                    linearLayout7.addView(textView9);
-                    TextView textView10 = new TextView(this);
-                    textView10.setText("🗑️ Excluir");
-                    textView10.setTextColor(this.cDanger);
-                    textView10.setTextSize(sp(12.0f));
-                    textView10.setTypeface(null, 1);
-                    textView10.setPadding(dp(8), dp(6), dp(8), dp(6));
-                    textView10.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda7
-                        @Override // android.view.View.OnClickListener
-                        public final void onClick(View view) {
-                            MainActivity.this.m13lambda$buildMedsTab$12$commedicarepatientMainActivity(medIndex, view);
-                        }
-                    });
-                    linearLayout7.addView(textView10);
-                    linearLayout4.addView(linearLayout7);
-                    linearLayout.addView(linearLayout4);
-                } else {
-                    str = str4;
-                    str2 = str3;
+        tabScroll.addView(tabsRow);
+        linearLayout.addView(tabScroll);
+
+        ArrayList<Integer> activeIndices = "temporary".equals(this.medFilter) ? tempIndices : ("sos".equals(this.medFilter) ? sosIndices : contIndices);
+        String emptyIcon = "temporary".equals(this.medFilter) ? "📅" : ("sos".equals(this.medFilter) ? "🚨" : "💊");
+        String emptyTitle = "temporary".equals(this.medFilter) ? "Nenhum medicamento temporário" : ("sos".equals(this.medFilter) ? "Nenhum medicamento SOS" : "Nenhum medicamento contínuo");
+        String emptyDesc = "temporary".equals(this.medFilter) ? "Você não possui tratamentos com data de fim programada." : ("sos".equals(this.medFilter) ? "Você não possui medicamentos para uso eventual cadastrados." : "Você não possui medicamentos de uso contínuo.");
+
+        if (activeIndices.isEmpty()) {
+            LinearLayout emptyCard = new LinearLayout(this);
+            emptyCard.setOrientation(1);
+            emptyCard.setGravity(17);
+            emptyCard.setBackground(shape(this.cSurface, 22, this.cBorder, 1));
+            emptyCard.setPadding(dp(28), dp(44), dp(28), dp(44));
+            LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
+            ecLp.topMargin = dp(8);
+            emptyCard.setLayoutParams(ecLp);
+
+            TextView eIcon = new TextView(this);
+            eIcon.setText(emptyIcon);
+            eIcon.setTextSize(sp(46.0f));
+            eIcon.setGravity(17);
+            eIcon.setPadding(0, 0, 0, dp(12));
+            emptyCard.addView(eIcon);
+
+            TextView eTitle = new TextView(this);
+            eTitle.setText(emptyTitle);
+            eTitle.setTextColor(this.cTextMain);
+            eTitle.setTextSize(sp(18.0f));
+            eTitle.setTypeface(null, 1);
+            eTitle.setGravity(17);
+            eTitle.setPadding(0, 0, 0, dp(8));
+            emptyCard.addView(eTitle);
+
+            TextView eDesc = new TextView(this);
+            eDesc.setText(emptyDesc);
+            eDesc.setTextColor(this.cTextMuted);
+            eDesc.setTextSize(sp(14.0f));
+            eDesc.setGravity(17);
+            eDesc.setPadding(0, 0, 0, dp(22));
+            emptyCard.addView(eDesc);
+
+            TextView eBtn = new TextView(this);
+            eBtn.setText("+ Adicionar medicamento");
+            eBtn.setTextColor(-1);
+            eBtn.setTextSize(sp(15.0f));
+            eBtn.setTypeface(null, 1);
+            eBtn.setGravity(17);
+            eBtn.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
+            eBtn.setPadding(dp(26), dp(14), dp(26), dp(14));
+            eBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMedModal(null, -1);
                 }
+            });
+            emptyCard.addView(eBtn);
+            linearLayout.addView(emptyCard);
+            return;
+        }
+
+        String today = todayIso();
+        for (int idx = 0; idx < activeIndices.size(); idx++) {
+            final int medIndex = activeIndices.get(idx);
+            final JSONObject med = this.meds.optJSONObject(medIndex);
+            if (med == null) continue;
+            String tType = getMedType(med);
+            boolean isSOS = "sos".equals(tType);
+            boolean isTemp = "temporary".equals(tType);
+            int medColor = this.cPrimary;
+            try {
+                medColor = Color.parseColor(med.optString("cor", "#3B82F6"));
+            } catch (Exception ignored) {}
+
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(0);
+            card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+            card.setPadding(dp(16), dp(16), dp(16), dp(16));
+            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-1, -2);
+            cLp.bottomMargin = dp(12);
+            card.setLayoutParams(cLp);
+            card.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMedDetailModal(med);
+                }
+            });
+
+            // Color bar
+            View colorBar = new View(this);
+            colorBar.setBackground(shape(medColor, 4, 0, 0));
+            LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(dp(4), -1);
+            cbLp.rightMargin = dp(12);
+            colorBar.setLayoutParams(cbLp);
+            card.addView(colorBar);
+
+            // Pill icon box
+            TextView pillIcon = new TextView(this);
+            pillIcon.setText("💊");
+            pillIcon.setTextSize(sp(22.0f));
+            pillIcon.setGravity(17);
+            pillIcon.setBackground(shape(Color.argb(35, Color.red(medColor), Color.green(medColor), Color.blue(medColor)), 14, medColor, 1));
+            LinearLayout.LayoutParams piLp = new LinearLayout.LayoutParams(dp(48), dp(48));
+            piLp.rightMargin = dp(12);
+            pillIcon.setLayoutParams(piLp);
+            card.addView(pillIcon);
+
+            // Right content column
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(1);
+            col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+            LinearLayout topRow = new LinearLayout(this);
+            topRow.setOrientation(0);
+            topRow.setGravity(48);
+
+            LinearLayout titleCol = new LinearLayout(this);
+            titleCol.setOrientation(1);
+            titleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+            LinearLayout nameBadgeRow = new LinearLayout(this);
+            nameBadgeRow.setOrientation(0);
+            nameBadgeRow.setGravity(16);
+            TextView mName = new TextView(this);
+            mName.setText(med.optString("nome"));
+            mName.setTextColor(this.cTextMain);
+            mName.setTextSize(sp(16.0f));
+            mName.setTypeface(null, 1);
+            mName.setPadding(0, 0, dp(6), 0);
+            nameBadgeRow.addView(mName);
+
+            TextView tBadge = new TextView(this);
+            tBadge.setText(isSOS ? "🆘 SOS" : (isTemp ? "📅 Temporário" : "🔄 Contínuo"));
+            int tbColor = isSOS ? this.cInfo : (isTemp ? this.cWarning : this.cSuccess);
+            tBadge.setTextColor(tbColor);
+            tBadge.setTextSize(sp(10.0f));
+            tBadge.setTypeface(null, 1);
+            tBadge.setBackground(shape(Color.argb(35, Color.red(tbColor), Color.green(tbColor), Color.blue(tbColor)), 10, 0, 0));
+            tBadge.setPadding(dp(8), dp(2), dp(8), dp(2));
+            nameBadgeRow.addView(tBadge);
+            titleCol.addView(nameBadgeRow);
+
+            String unitStr = med.optString("unidade", med.optString("forma", "comprimido"));
+            TextView doseSub = new TextView(this);
+            doseSub.setText(med.optString("dosagem") + " · " + unitStr);
+            doseSub.setTextColor(this.cTextMuted);
+            doseSub.setTextSize(sp(13.0f));
+            doseSub.setPadding(0, dp(2), 0, 0);
+            titleCol.addView(doseSub);
+            topRow.addView(titleCol);
+
+            // Edit & Delete buttons
+            TextView editBtn = new TextView(this);
+            editBtn.setText("✏️");
+            editBtn.setTextSize(sp(13.0f));
+            editBtn.setGravity(17);
+            editBtn.setBackground(shape(this.cSurfaceHover, 10, this.cBorder, 1));
+            LinearLayout.LayoutParams ebLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+            ebLp.rightMargin = dp(6);
+            editBtn.setLayoutParams(ebLp);
+            editBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMedModal(med, medIndex);
+                }
+            });
+            topRow.addView(editBtn);
+
+            TextView delBtn = new TextView(this);
+            delBtn.setText("🗑");
+            delBtn.setTextSize(sp(13.0f));
+            delBtn.setGravity(17);
+            delBtn.setBackground(shape(Color.parseColor("#1AEF4444"), 10, Color.parseColor("#40EF4444"), 1));
+            delBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+            delBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showConfirmDeleteMedDialog(med, medIndex);
+                }
+            });
+            topRow.addView(delBtn);
+            col.addView(topRow);
+
+            String obs = med.optString("observacoes", med.optString("instrucoes", ""));
+            if (isSOS || !obs.isEmpty()) {
+                TextView obsTv = new TextView(this);
+                obsTv.setText(isSOS && obs.isEmpty() ? "Uso conforme necessidade" : obs);
+                obsTv.setTextColor(this.cTextLight);
+                obsTv.setTextSize(sp(12.0f));
+                obsTv.setPadding(0, dp(6), 0, 0);
+                col.addView(obsTv);
             }
-            i3++;
-            str4 = str;
-            str3 = str2;
+
+            if (isTemp) {
+                int durDays = med.optInt("duration_days", 7);
+                TextView tempInfo = new TextView(this);
+                tempInfo.setText("📅 Tratamento por " + durDays + " dias · Início: " + med.optString("start_date", today));
+                tempInfo.setTextColor(this.cWarning);
+                tempInfo.setTextSize(sp(11.5f));
+                tempInfo.setPadding(0, dp(6), 0, 0);
+                col.addView(tempInfo);
+            }
+
+            // Bottom row: stock pill + today done / SOS button
+            LinearLayout botRow = new LinearLayout(this);
+            botRow.setOrientation(0);
+            botRow.setGravity(16);
+            LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(-1, -2);
+            brLp.topMargin = dp(10);
+            botRow.setLayoutParams(brLp);
+
+            int qty = getMedStock(med);
+            int stColor = qty <= 5 ? this.cDanger : (qty <= 10 ? this.cWarning : this.cSuccess);
+            TextView stockPill = new TextView(this);
+            stockPill.setText("📦 " + qty + " " + unitStr + "s");
+            stockPill.setTextColor(stColor);
+            stockPill.setTextSize(sp(12.0f));
+            stockPill.setTypeface(null, 1);
+            stockPill.setBackground(shape(Color.argb(35, Color.red(stColor), Color.green(stColor), Color.blue(stColor)), 12, 0, 0));
+            stockPill.setPadding(dp(10), dp(4), dp(10), dp(4));
+            botRow.addView(stockPill);
+
+            if (!isSOS) {
+                JSONArray hrs = med.optJSONArray("horarios");
+                int totH = hrs != null ? hrs.length() : 1;
+                int doneH = 0;
+                if (hrs != null) {
+                    for (int hIdx = 0; hIdx < hrs.length(); hIdx++) {
+                        if ("tomado".equals(getDoseStatus(med.optString("id"), today, hrs.optString(hIdx)))) {
+                            doneH++;
+                        }
+                    }
+                }
+                TextView todayStat = new TextView(this);
+                todayStat.setText("Hoje: " + doneH + "/" + totH);
+                todayStat.setTextColor(this.cTextLight);
+                todayStat.setTextSize(sp(12.0f));
+                todayStat.setPadding(dp(10), 0, 0, 0);
+                todayStat.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                botRow.addView(todayStat);
+            } else {
+                View spc = new View(this);
+                spc.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1.0f));
+                botRow.addView(spc);
+
+                TextView sosBtn = new TextView(this);
+                sosBtn.setText("+ Tomar SOS");
+                sosBtn.setTextColor(-1);
+                sosBtn.setTextSize(sp(12.0f));
+                sosBtn.setTypeface(null, 1);
+                sosBtn.setBackground(shape(this.cPrimary, 10, 0, 0));
+                sosBtn.setPadding(dp(14), dp(8), dp(14), dp(8));
+                sosBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showSosQuickLogModal(med);
+                    }
+                });
+                botRow.addView(sosBtn);
+            }
+            col.addView(botRow);
+            card.addView(col);
+            linearLayout.addView(card);
         }
     }
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildMedsTab$8$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m14lambda$buildMedsTab$8$commedicarepatientMainActivity(View view) {
-        showMedModal(null, -1);
+    private void showConfirmDeleteMedDialog(final JSONObject med, final int index) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(1);
+        box.setPadding(dp(22), dp(22), dp(22), dp(16));
+        box.setBackgroundColor(this.cSurface);
+        TextView t = new TextView(this);
+        t.setText("🗑 Excluir medicamento?");
+        t.setTextColor(this.cTextMain);
+        t.setTextSize(sp(18.0f));
+        t.setTypeface(null, 1);
+        box.addView(t);
+        TextView sub = new TextView(this);
+        sub.setText("Tem certeza que deseja excluir " + med.optString("nome") + "? O histórico de doses anteriores será mantido.");
+        sub.setTextColor(this.cTextMuted);
+        sub.setTextSize(sp(14.0f));
+        sub.setPadding(0, dp(10), 0, dp(6));
+        box.addView(sub);
+        b.setView(box);
+        b.setPositiveButton("Excluir", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                MainActivity.this.meds.remove(index);
+                saveAll();
+                render();
+                Toast.makeText(MainActivity.this, "🗑 " + med.optString("nome") + " excluído", 0).show();
+            }
+        });
+        b.setNegativeButton("Cancelar", null);
+        b.show();
     }
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildMedsTab$9$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m15lambda$buildMedsTab$9$commedicarepatientMainActivity(String[] strArr, View view) {
-        this.medFilter = strArr[0];
-        render();
-    }
+    private void showSosQuickLogModal(final JSONObject med) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(1);
+        box.setPadding(dp(20), dp(20), dp(20), dp(16));
+        box.setBackgroundColor(this.cSurface);
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildMedsTab$10$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m11lambda$buildMedsTab$10$commedicarepatientMainActivity(JSONObject jSONObject, int i, View view) {
-        try {
-            jSONObject.put("estoque_atual", i + 30);
-            this.stockMovements.put(new JSONObject().put("id", "sm-" + System.currentTimeMillis()).put("med_nome", jSONObject.optString("nome")).put("tipo", "entrada").put("qtd", 30).put("data", todayIso()).put("motivo", "Reposição manual (+30)"));
-            saveAll();
-            render();
-        } catch (Exception e) {
+        TextView title = new TextView(this);
+        title.setText("🆘 Registrar Uso SOS — " + med.optString("nome"));
+        title.setTextColor(this.cTextMain);
+        title.setTextSize(sp(17.0f));
+        title.setTypeface(null, 1);
+        title.setPadding(0, 0, 0, dp(10));
+        box.addView(title);
+
+        String nowHm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+        final EditText timeInput = createInput("Horário da tomada", nowHm);
+        box.addView(timeInput);
+
+        final EditText reasonInput = createInput("Motivo / Sintoma (ex: Dor de cabeça, Febre, Alergia)", "");
+        box.addView(reasonInput);
+
+        HorizontalScrollView chipScroll = new HorizontalScrollView(this);
+        LinearLayout chipRow = new LinearLayout(this);
+        chipRow.setOrientation(0);
+        chipRow.setPadding(0, 0, 0, dp(12));
+        String[] reasons = {"Dor de cabeça", "Febre", "Dor no corpo", "Alergia", "Enjoo", "Cólica"};
+        for (int i = 0; i < reasons.length; i++) {
+            final String rStr = reasons[i];
+            TextView chip = new TextView(this);
+            chip.setText(rStr);
+            chip.setTextColor(this.cPrimary);
+            chip.setTextSize(sp(12.0f));
+            chip.setBackground(shape(this.cPrimaryLight, 12, 0, 0));
+            chip.setPadding(dp(10), dp(6), dp(10), dp(6));
+            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-2, -2);
+            cLp.rightMargin = dp(6);
+            chip.setLayoutParams(cLp);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    reasonInput.setText(rStr);
+                }
+            });
+            chipRow.addView(chip);
         }
+        chipScroll.addView(chipRow);
+        box.addView(chipScroll);
+
+        final EditText qtyInput = createInput("Quantidade tomada", "1");
+        qtyInput.setInputType(2);
+        box.addView(qtyInput);
+
+        sv.addView(box);
+        b.setView(sv);
+        b.setPositiveButton("Confirmar Uso SOS", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String h = timeInput.getText().toString().trim();
+                    if (h.isEmpty()) h = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+                    String mot = reasonInput.getText().toString().trim();
+                    int qUsed = Integer.parseInt(qtyInput.getText().toString().trim().isEmpty() ? "1" : qtyInput.getText().toString().trim());
+                    String today = todayIso();
+                    JSONObject log = new JSONObject();
+                    log.put("id", "sos-" + System.currentTimeMillis());
+                    log.put("med_id", med.optString("id"));
+                    log.put("med_nome", med.optString("nome") + " " + med.optString("dosagem"));
+                    log.put("data", today);
+                    log.put("created_at", today + "T" + h + ":00.000Z");
+                    log.put("horario", h);
+                    log.put("hora", h);
+                    log.put("status", "confirmed");
+                    log.put("motivo", mot);
+                    log.put("quantidade_usada", qUsed);
+                    MainActivity.this.doseLogs.put(log);
+
+                    int curSt = getMedStock(med);
+                    setMedStock(med, curSt - qUsed);
+                    MainActivity.this.stockMovements.put(new JSONObject()
+                        .put("id", "sm-" + System.currentTimeMillis())
+                        .put("med_id", med.optString("id"))
+                        .put("med_nome", med.optString("nome"))
+                        .put("tipo", "saida")
+                        .put("movement_type", "consumption")
+                        .put("qtd", qUsed)
+                        .put("quantity_change", -qUsed)
+                        .put("previous_quantity", curSt)
+                        .put("new_quantity", Math.max(0, curSt - qUsed))
+                        .put("data", today + " " + h)
+                        .put("created_at", today + "T" + h + ":00.000Z")
+                        .put("motivo", mot.isEmpty() ? "Uso SOS" : "Uso SOS: " + mot));
+                    saveAll();
+                    render();
+                    Toast.makeText(MainActivity.this, "✓ Uso SOS de " + med.optString("nome") + " registrado!", 0).show();
+                } catch (Exception ignored) {}
+            }
+        });
+        b.setNegativeButton("Cancelar", null);
+        b.show();
     }
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildMedsTab$11$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m12lambda$buildMedsTab$11$commedicarepatientMainActivity(JSONObject jSONObject, int i, View view) {
-        showMedModal(jSONObject, i);
+    private void showMedDetailModal(final JSONObject med) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(1);
+        box.setPadding(dp(20), dp(20), dp(20), dp(16));
+        box.setBackgroundColor(this.cSurface);
+
+        TextView title = new TextView(this);
+        title.setText("💊 " + med.optString("nome") + " · " + med.optString("dosagem"));
+        title.setTextColor(this.cTextMain);
+        title.setTextSize(sp(19.0f));
+        title.setTypeface(null, 1);
+        box.addView(title);
+
+        String pa = med.optString("principio_ativo", "");
+        if (!pa.isEmpty()) {
+            TextView paTv = new TextView(this);
+            paTv.setText("Princípio ativo: " + pa);
+            paTv.setTextColor(this.cTextMuted);
+            paTv.setTextSize(sp(13.0f));
+            paTv.setPadding(0, dp(4), 0, 0);
+            box.addView(paTv);
+        }
+
+        int stock = getMedStock(med);
+        String unit = med.optString("unidade", med.optString("forma", "comprimido"));
+        TextView stTv = new TextView(this);
+        stTv.setText("📦 Estoque disponível: " + stock + " " + unit + "s");
+        stTv.setTextColor(stock <= 5 ? this.cDanger : (stock <= 10 ? this.cWarning : this.cSuccess));
+        stTv.setTextSize(sp(14.0f));
+        stTv.setTypeface(null, 1);
+        stTv.setPadding(0, dp(12), 0, dp(8));
+        box.addView(stTv);
+
+        JSONArray hrs = med.optJSONArray("horarios");
+        if (hrs != null && hrs.length() > 0 && !"sos".equals(getMedType(med))) {
+            TextView hTv = new TextView(this);
+            hTv.setText("⏰ Horários: " + joinArray(hrs));
+            hTv.setTextColor(this.cTextMain);
+            hTv.setTextSize(sp(13.0f));
+            hTv.setPadding(0, 0, 0, dp(8));
+            box.addView(hTv);
+        }
+
+        String obs = med.optString("observacoes", med.optString("instrucoes", ""));
+        if (!obs.isEmpty()) {
+            TextView oTv = new TextView(this);
+            oTv.setText("📝 Observações: " + obs);
+            oTv.setTextColor(this.cTextMuted);
+            oTv.setTextSize(sp(13.0f));
+            oTv.setPadding(0, 0, 0, dp(10));
+            box.addView(oTv);
+        }
+
+        TextView histHdr = new TextView(this);
+        histHdr.setText("Histórico recente deste medicamento");
+        histHdr.setTextColor(this.cTextMuted);
+        histHdr.setTextSize(sp(12.0f));
+        histHdr.setTypeface(null, 1);
+        histHdr.setPadding(0, dp(8), 0, dp(6));
+        box.addView(histHdr);
+
+        String medId = med.optString("id");
+        int count = 0;
+        for (int i = this.doseLogs.length() - 1; i >= 0 && count < 8; i--) {
+            JSONObject log = this.doseLogs.optJSONObject(i);
+            if (log != null && medId.equals(log.optString("med_id"))) {
+                TextView row = new TextView(this);
+                String st = log.optString("status", "pendente");
+                boolean ok = "tomado".equals(st) || "confirmed".equals(st);
+                row.setText((ok ? "✓ " : "✕ ") + log.optString("data", "") + " às " + log.optString("horario", log.optString("hora", "")));
+                row.setTextColor(ok ? this.cSuccess : this.cDanger);
+                row.setTextSize(sp(12.5f));
+                row.setPadding(0, dp(3), 0, dp(3));
+                box.addView(row);
+                count++;
+            }
+        }
+        if (count == 0) {
+            TextView none = new TextView(this);
+            none.setText("Nenhum registro de dose ainda.");
+            none.setTextColor(this.cTextLight);
+            none.setTextSize(sp(12.5f));
+            box.addView(none);
+        }
+
+        sv.addView(box);
+        b.setView(sv);
+        b.setPositiveButton("Fechar", null);
+        b.show();
     }
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildMedsTab$12$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m13lambda$buildMedsTab$12$commedicarepatientMainActivity(int i, View view) {
-        this.meds.remove(i);
-        saveAll();
-        render();
+    private void showStockMovementModal(final JSONObject med, final int prevQty, final int newQty) {
+        final int diff = newQty - prevQty;
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(1);
+        box.setPadding(dp(20), dp(20), dp(20), dp(16));
+        box.setBackgroundColor(this.cSurface);
+
+        TextView title = new TextView(this);
+        title.setText("📦 Movimentação de Estoque");
+        title.setTextColor(this.cTextMain);
+        title.setTextSize(sp(18.0f));
+        title.setTypeface(null, 1);
+        box.addView(title);
+
+        TextView sub = new TextView(this);
+        sub.setText(med.optString("nome") + ": " + prevQty + " → " + newQty + " (" + (diff > 0 ? "+" + diff : String.valueOf(diff)) + " unidades)");
+        sub.setTextColor(diff > 0 ? this.cSuccess : this.cWarning);
+        sub.setTextSize(sp(14.0f));
+        sub.setTypeface(null, 1);
+        sub.setPadding(0, dp(6), 0, dp(12));
+        box.addView(sub);
+
+        final EditText typeInput = createInput("Tipo (compra, ajuste, correcao)", diff > 0 ? "compra" : "ajuste");
+        box.addView(typeInput);
+        final EditText pharmInput = createInput("Farmácia / Local (opcional)", "");
+        box.addView(pharmInput);
+        final EditText priceInput = createInput("Valor pago R$ (opcional)", "");
+        box.addView(priceInput);
+        final EditText reasonInput = createInput("Observação / Motivo (ex: Compra mensal, Perda)", diff > 0 ? "Reposição de estoque" : "Ajuste manual");
+        box.addView(reasonInput);
+
+        sv.addView(box);
+        b.setView(sv);
+        b.setPositiveButton("Registrar", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String today = todayIso();
+                    String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+                    String mType = typeInput.getText().toString().trim().toLowerCase(Locale.ROOT);
+                    String movType = mType.contains("compra") ? "purchase" : (mType.contains("corr") ? "correction" : "adjustment");
+                    String motivo = reasonInput.getText().toString().trim();
+                    JSONObject sm = new JSONObject();
+                    sm.put("id", "sm-" + System.currentTimeMillis());
+                    sm.put("med_id", med.optString("id"));
+                    sm.put("med_nome", med.optString("nome"));
+                    sm.put("tipo", diff >= 0 ? "entrada" : "saida");
+                    sm.put("movement_type", movType);
+                    sm.put("qtd", Math.abs(diff));
+                    sm.put("quantity_change", diff);
+                    sm.put("previous_quantity", prevQty);
+                    sm.put("new_quantity", newQty);
+                    sm.put("pharmacy", pharmInput.getText().toString().trim());
+                    sm.put("price_paid", priceInput.getText().toString().trim());
+                    sm.put("data", today + " " + hm);
+                    sm.put("created_at", today + "T" + hm + ":00.000Z");
+                    sm.put("motivo", motivo.isEmpty() ? "Atualização de estoque" : motivo);
+                    MainActivity.this.stockMovements.put(sm);
+
+                    if (diff > 0) {
+                        JSONObject stEv = new JSONObject();
+                        stEv.put("id", "ev-st-" + System.currentTimeMillis());
+                        stEv.put("type", "estoque");
+                        stEv.put("tipo", "estoque");
+                        stEv.put("date", today);
+                        stEv.put("data", today);
+                        stEv.put("time", hm);
+                        stEv.put("hora", hm);
+                        stEv.put("title", "Reposição: " + med.optString("nome") + " (+" + diff + ")");
+                        stEv.put("titulo", "Reposição: " + med.optString("nome") + " (+" + diff + ")");
+                        stEv.put("description", motivo);
+                        stEv.put("notas", motivo);
+                        MainActivity.this.events.put(stEv);
+                    }
+                    saveAll();
+                    render();
+                } catch (Exception ignored) {}
+            }
+        });
+        b.setNegativeButton("Pular detalhe", null);
+        b.show();
     }
 
     private void showMedModal(final JSONObject jSONObject, final int i) {
@@ -1822,83 +2672,120 @@ public class MainActivity extends Activity {
         linearLayout.setOrientation(1);
         linearLayout.setPadding(dp(20), dp(20), dp(20), dp(20));
         linearLayout.setBackgroundColor(this.cSurface);
+
         TextView textView = new TextView(this);
-        textView.setText(jSONObject == null ? "Cadastrar Medicamento" : "Editar Medicamento");
+        textView.setText(jSONObject == null ? "Novo Medicamento" : "Editar Medicamento");
         textView.setTextColor(this.cTextMain);
         textView.setTextSize(sp(18.0f));
         textView.setTypeface(null, 1);
         textView.setPadding(0, 0, 0, dp(12));
         linearLayout.addView(textView);
-        String str = EMBEDDED_API_KEY;
-        final EditText createInput = createInput("Nome do Medicamento", jSONObject != null ? jSONObject.optString("nome") : EMBEDDED_API_KEY);
-        final EditText createInput2 = createInput("Dosagem (ex: 50mg)", jSONObject != null ? jSONObject.optString("dosagem") : EMBEDDED_API_KEY);
-        final EditText createInput3 = createInput("Forma (Comprimido, Cápsula, Gotas)", jSONObject != null ? jSONObject.optString("forma", "Comprimido") : "Comprimido");
-        final EditText createInput4 = createInput("Tipo de uso (continuo, temporario, sos)", jSONObject != null ? jSONObject.optString("tipo_uso", "continuo") : "continuo");
-        final EditText createInput5 = createInput("Horários separados por vírgula (ex: 08:00,20:00)", (jSONObject == null || jSONObject.optJSONArray("horarios") == null) ? "08:00,20:00" : joinArray(jSONObject.optJSONArray("horarios")));
-        final EditText createInput6 = createInput("Estoque Atual", String.valueOf(jSONObject != null ? jSONObject.optInt("estoque_atual", 30) : 30));
-        createInput6.setInputType(2);
-        final EditText createInput7 = createInput("Estoque Mínimo (Alerta)", String.valueOf(jSONObject != null ? jSONObject.optInt("estoque_minimo", 10) : 10));
-        createInput7.setInputType(2);
-        if (jSONObject != null) {
-            str = jSONObject.optString("instrucoes");
-        }
-        final EditText createInput8 = createInput("Instruções / Observações", str);
-        linearLayout.addView(createInput);
-        linearLayout.addView(createInput2);
-        linearLayout.addView(createInput3);
-        linearLayout.addView(createInput4);
-        linearLayout.addView(createInput5);
-        linearLayout.addView(createInput6);
-        linearLayout.addView(createInput7);
-        linearLayout.addView(createInput8);
+
+        final int prevStock = jSONObject != null ? getMedStock(jSONObject) : -1;
+        String initType = jSONObject != null ? getMedType(jSONObject) : ("temporary".equals(this.medFilter) ? "temporary" : ("sos".equals(this.medFilter) ? "sos" : "continuous"));
+
+        final EditText nameIn = createInput("Nome do Medicamento *", jSONObject != null ? jSONObject.optString("nome") : "");
+        final EditText activeIn = createInput("Princípio Ativo (opcional)", jSONObject != null ? jSONObject.optString("principio_ativo") : "");
+        final EditText doseIn = createInput("Dosagem * (ex: 50mg, 500mg)", jSONObject != null ? jSONObject.optString("dosagem") : "");
+        final EditText unitIn = createInput("Unidade (comprimido, cápsula, ml, gota)", jSONObject != null ? jSONObject.optString("unidade", jSONObject.optString("forma", "comprimido")) : "comprimido");
+        final EditText typeIn = createInput("Tipo de tratamento (continuous, temporary, sos)", initType);
+        final EditText durIn = createInput("Duração em dias (para Temporário, ex: 7)", jSONObject != null ? String.valueOf(jSONObject.optInt("duration_days", 7)) : "7");
+        durIn.setInputType(2);
+        final EditText schedIn = createInput("Horários separados por vírgula (ex: 08:00,20:00)", (jSONObject == null || jSONObject.optJSONArray("horarios") == null) ? "08:00" : joinArray(jSONObject.optJSONArray("horarios")));
+        final EditText stockIn = createInput("Quantidade em Estoque *", String.valueOf(jSONObject != null ? getMedStock(jSONObject) : 30));
+        stockIn.setInputType(2);
+        final EditText manufIn = createInput("Fabricante / Laboratório (opcional)", jSONObject != null ? jSONObject.optString("fabricante") : "");
+        final EditText obsIn = createInput("Observações (ex: Tomar após o café)", jSONObject != null ? jSONObject.optString("observacoes", jSONObject.optString("instrucoes", "")) : "");
+        final EditText colorIn = createInput("Cor (#3B82F6, #22C55E, #F59E0B, #EF4444, #A855F7)", jSONObject != null ? jSONObject.optString("cor", "#3B82F6") : "#3B82F6");
+
+        final CheckBox emergCheck = new CheckBox(this);
+        emergCheck.setText(" Destacar no Cartão de Emergência");
+        emergCheck.setTextColor(this.cTextMain);
+        emergCheck.setChecked(jSONObject == null || jSONObject.optBoolean("important_for_emergency", true));
+
+        linearLayout.addView(nameIn);
+        linearLayout.addView(activeIn);
+        linearLayout.addView(doseIn);
+        linearLayout.addView(unitIn);
+        linearLayout.addView(typeIn);
+        linearLayout.addView(durIn);
+        linearLayout.addView(schedIn);
+        linearLayout.addView(stockIn);
+        linearLayout.addView(manufIn);
+        linearLayout.addView(obsIn);
+        linearLayout.addView(colorIn);
+        linearLayout.addView(emergCheck);
+
         scrollView.addView(linearLayout);
         builder.setView(scrollView);
-        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda11
-            @Override // android.content.DialogInterface.OnClickListener
+        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+            @Override
             public final void onClick(DialogInterface dialogInterface, int i2) {
-                MainActivity.this.m20lambda$showMedModal$13$commedicarepatientMainActivity(jSONObject, createInput, createInput2, createInput3, createInput4, createInput5, createInput6, createInput7, createInput8, i, dialogInterface, i2);
+                try {
+                    String nomeVal = nameIn.getText().toString().trim();
+                    if (nomeVal.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Informe o nome do medicamento", 0).show();
+                        return;
+                    }
+                    JSONObject mObj = jSONObject != null ? jSONObject : new JSONObject();
+                    if (jSONObject == null) {
+                        mObj.put("id", "med-" + System.currentTimeMillis());
+                    }
+                    mObj.put("ativo", true);
+                    mObj.put("nome", nomeVal);
+                    mObj.put("principio_ativo", activeIn.getText().toString().trim());
+                    mObj.put("dosagem", doseIn.getText().toString().trim());
+                    String uVal = unitIn.getText().toString().trim();
+                    if (uVal.isEmpty()) uVal = "comprimido";
+                    mObj.put("unidade", uVal);
+                    mObj.put("forma", uVal);
+
+                    String rawT = typeIn.getText().toString().trim().toLowerCase(Locale.ROOT);
+                    String normT = rawT.contains("temp") ? "temporary" : (rawT.contains("sos") ? "sos" : "continuous");
+                    mObj.put("treatment_type", normT);
+                    mObj.put("tipo_uso", "temporary".equals(normT) ? "temporario" : ("sos".equals(normT) ? "sos" : "continuo"));
+                    if ("temporary".equals(normT)) {
+                        int dDays = Integer.parseInt(durIn.getText().toString().trim().isEmpty() ? "7" : durIn.getText().toString().trim());
+                        mObj.put("duration_days", dDays);
+                        if (!mObj.has("start_date")) mObj.put("start_date", todayIso());
+                    }
+
+                    JSONArray hrsArr = new JSONArray();
+                    if (!"sos".equals(normT)) {
+                        for (String hPart : schedIn.getText().toString().split(",")) {
+                            if (!hPart.trim().isEmpty()) hrsArr.put(hPart.trim());
+                        }
+                        if (hrsArr.length() == 0) hrsArr.put("08:00");
+                    }
+                    mObj.put("horarios", hrsArr);
+                    mObj.put("frequencia", hrsArr.length() + "x ao dia");
+
+                    int newStock = Integer.parseInt(stockIn.getText().toString().trim().isEmpty() ? "0" : stockIn.getText().toString().trim());
+                    setMedStock(mObj, newStock);
+                    mObj.put("estoque_minimo", 5);
+                    mObj.put("fabricante", manufIn.getText().toString().trim());
+                    String obsVal = obsIn.getText().toString().trim();
+                    mObj.put("observacoes", obsVal);
+                    mObj.put("instrucoes", obsVal);
+                    mObj.put("cor", colorIn.getText().toString().trim().isEmpty() ? "#3B82F6" : colorIn.getText().toString().trim());
+                    mObj.put("important_for_emergency", emergCheck.isChecked());
+
+                    if (i >= 0) {
+                        MainActivity.this.meds.put(i, mObj);
+                    } else {
+                        MainActivity.this.meds.put(mObj);
+                    }
+                    MainActivity.this.medFilter = normT;
+                    saveAll();
+                    render();
+                    if (jSONObject != null && prevStock >= 0 && prevStock != newStock) {
+                        showStockMovementModal(mObj, prevStock, newStock);
+                    }
+                } catch (Exception ignored) {}
             }
         });
-        builder.setNegativeButton("Cancelar", (DialogInterface.OnClickListener) null);
+        builder.setNegativeButton("Cancelar", null);
         builder.show();
-    }
-
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$showMedModal$13$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m20lambda$showMedModal$13$commedicarepatientMainActivity(JSONObject jSONObject, EditText editText, EditText editText2, EditText editText3, EditText editText4, EditText editText5, EditText editText6, EditText editText7, EditText editText8, int i, DialogInterface dialogInterface, int i2) {
-        try {
-            JSONObject jSONObject2;
-            if (jSONObject != null) {
-                jSONObject2 = jSONObject;
-            } else {
-                jSONObject2 = new JSONObject();
-            }
-            if (jSONObject == null) {
-                jSONObject2.put("id", "med-" + System.currentTimeMillis());
-            }
-            jSONObject2.put("nome", editText.getText().toString().trim());
-            jSONObject2.put("dosagem", editText2.getText().toString().trim());
-            jSONObject2.put("forma", editText3.getText().toString().trim());
-            jSONObject2.put("tipo_uso", editText4.getText().toString().trim().toLowerCase(Locale.ROOT));
-            JSONArray jSONArray = new JSONArray();
-            for (String str : editText5.getText().toString().split(",")) {
-                if (!str.trim().isEmpty()) {
-                    jSONArray.put(str.trim());
-                }
-            }
-            jSONObject2.put("horarios", jSONArray);
-            jSONObject2.put("frequencia", jSONArray.length() + "x ao dia");
-            jSONObject2.put("estoque_atual", Integer.parseInt(editText6.getText().toString().trim().isEmpty() ? "0" : editText6.getText().toString().trim()));
-            jSONObject2.put("estoque_minimo", Integer.parseInt(editText7.getText().toString().trim().isEmpty() ? "5" : editText7.getText().toString().trim()));
-            jSONObject2.put("instrucoes", editText8.getText().toString().trim());
-            if (i >= 0) {
-                this.meds.put(i, jSONObject2);
-            } else {
-                this.meds.put(jSONObject2);
-            }
-            saveAll();
-            render();
-        } catch (Exception e) {}
     }
 
     private String joinArray(JSONArray jSONArray) {
@@ -1912,147 +2799,1425 @@ public class MainActivity extends Activity {
         return sb.toString();
     }
 
+    private static final String[] MONTHS_PT = {
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+    };
+    private static final String[] WEEKDAYS_SHORT_PT = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"};
+
     private void buildCalendarTab(LinearLayout linearLayout) {
-        linearLayout.addView(sectionHeader("Agenda de Saúde & Histórico", "Consultas, exames, doses e diário do dia"));
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        linearLayout2.setOrientation(0);
-        int i = 16;
-        linearLayout2.setGravity(16);
-        linearLayout2.setPadding(0, 0, 0, dp(14));
-        TextView textView = new TextView(this);
-        textView.setText("📅 Data Selecionada: " + this.selectedCalDate + " (Alterar)");
-        textView.setTextColor(this.cPrimary);
-        textView.setTypeface(null, 1);
-        textView.setTextSize(sp(13.0f));
-        textView.setBackground(shape(this.cPrimaryLight, 12, 0, 0));
-        textView.setPadding(dp(14), dp(10), dp(14), dp(10));
-        textView.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-        textView.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda13
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m2lambda$buildCalendarTab$15$commedicarepatientMainActivity(view);
+        if (this.calYear <= 0) {
+            Calendar now = Calendar.getInstance();
+            this.calYear = now.get(Calendar.YEAR);
+            this.calMonth = now.get(Calendar.MONTH);
+        }
+
+        // Top Header: "Calendário" on left + "🔍" button on right
+        LinearLayout topHeader = new LinearLayout(this);
+        topHeader.setOrientation(0);
+        topHeader.setGravity(16);
+        LinearLayout.LayoutParams thLp = new LinearLayout.LayoutParams(-1, -2);
+        thLp.bottomMargin = dp(14);
+        topHeader.setLayoutParams(thLp);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Calendário");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(22.0f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        topHeader.addView(tvTitle);
+
+        TextView btnSearch = new TextView(this);
+        btnSearch.setText("🔍");
+        btnSearch.setTextSize(sp(17.0f));
+        btnSearch.setGravity(17);
+        btnSearch.setBackground(shape(this.showCalSearch ? this.cPrimary : this.cSurface, 12, this.showCalSearch ? this.cPrimary : this.cBorder, 1));
+        btnSearch.setLayoutParams(new LinearLayout.LayoutParams(dp(40), dp(40)));
+        btnSearch.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.showCalSearch = !MainActivity.this.showCalSearch;
+                if (!MainActivity.this.showCalSearch) {
+                    MainActivity.this.calSearchQuery = "";
+                }
+                render();
             }
         });
-        linearLayout2.addView(textView);
-        linearLayout.addView(linearLayout2);
-        int i2 = 0;
-        while (i2 < this.events.length()) {
-            JSONObject optJSONObject = this.events.optJSONObject(i2);
-            if (optJSONObject != null) {
-                LinearLayout linearLayout3 = new LinearLayout(this);
-                linearLayout3.setOrientation(1);
-                linearLayout3.setBackground(shape(this.cSurface, i, this.cBorder, 1));
-                linearLayout3.setPadding(dp(14), dp(14), dp(14), dp(14));
-                LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
-                layoutParams.bottomMargin = dp(10);
-                linearLayout3.setLayoutParams(layoutParams);
-                TextView textView2 = new TextView(this);
-                textView2.setText("🏥 " + optJSONObject.optString("titulo"));
-                textView2.setTextColor(this.cTextMain);
-                textView2.setTextSize(sp(15.0f));
-                textView2.setTypeface(null, 1);
-                linearLayout3.addView(textView2);
-                TextView textView3 = new TextView(this);
-                textView3.setText(optJSONObject.optString("data") + " às " + optJSONObject.optString("hora") + " • " + optJSONObject.optString("local") + "\n" + optJSONObject.optString("notas"));
-                textView3.setTextColor(this.cTextMuted);
-                textView3.setTextSize(sp(12.0f));
-                textView3.setPadding(0, dp(4), 0, 0);
-                linearLayout3.addView(textView3);
-                linearLayout.addView(linearLayout3);
+        topHeader.addView(btnSearch);
+        linearLayout.addView(topHeader);
+
+        // Optional Search Input + Results
+        if (this.showCalSearch) {
+            LinearLayout searchRow = new LinearLayout(this);
+            searchRow.setOrientation(0);
+            searchRow.setGravity(16);
+            LinearLayout.LayoutParams srLp = new LinearLayout.LayoutParams(-1, -2);
+            srLp.bottomMargin = dp(12);
+            searchRow.setLayoutParams(srLp);
+
+            final EditText etSearch = new EditText(this);
+            etSearch.setHint("Buscar notas, eventos, medicamentos…");
+            etSearch.setText(this.calSearchQuery);
+            etSearch.setTextColor(this.cTextMain);
+            etSearch.setHintTextColor(this.cTextLight);
+            etSearch.setTextSize(sp(14.0f));
+            etSearch.setSingleLine(true);
+            etSearch.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+            etSearch.setPadding(dp(14), dp(11), dp(14), dp(11));
+            LinearLayout.LayoutParams etSLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            etSLp.rightMargin = dp(8);
+            etSearch.setLayoutParams(etSLp);
+            searchRow.addView(etSearch);
+
+            TextView btnGoSearch = createButton("Ir", this.cPrimary, Color.WHITE);
+            btnGoSearch.setPadding(dp(14), dp(11), dp(14), dp(11));
+            btnGoSearch.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.calSearchQuery = etSearch.getText().toString().trim();
+                    render();
+                }
+            });
+            searchRow.addView(btnGoSearch);
+            linearLayout.addView(searchRow);
+
+            String q = this.calSearchQuery.trim().toLowerCase(Locale.ROOT);
+            if (!q.isEmpty()) {
+                LinearLayout resCard = new LinearLayout(this);
+                resCard.setOrientation(1);
+                resCard.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
+                resCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+                LinearLayout.LayoutParams rcLp = new LinearLayout.LayoutParams(-1, -2);
+                rcLp.bottomMargin = dp(14);
+                resCard.setLayoutParams(rcLp);
+
+                int matchCount = 0;
+                for (int i = 0; i < this.calNotesList.length(); i++) {
+                    final JSONObject nObj = this.calNotesList.optJSONObject(i);
+                    if (nObj != null && (nObj.optString("text", "").toLowerCase(Locale.ROOT).contains(q) || nObj.optString("category", "").toLowerCase(Locale.ROOT).contains(q))) {
+                        matchCount++;
+                        final String dStr = nObj.optString("date", todayIso());
+                        resCard.addView(buildSearchResultItem("📝", nObj.optString("text"), dStr + " · Nota", dStr));
+                    }
+                }
+                for (int i = 0; i < this.events.length(); i++) {
+                    final JSONObject ev = this.events.optJSONObject(i);
+                    if (ev != null) {
+                        String title = ev.optString("title", ev.optString("titulo", ""));
+                        String notes = ev.optString("notes", ev.optString("notas", ""));
+                        if (title.toLowerCase(Locale.ROOT).contains(q) || notes.toLowerCase(Locale.ROOT).contains(q)) {
+                            matchCount++;
+                            final String dStr = ev.optString("date", ev.optString("data", todayIso()));
+                            resCard.addView(buildSearchResultItem("📅", title, dStr + " · Evento", dStr));
+                        }
+                    }
+                }
+                for (int i = 0; i < this.meds.length(); i++) {
+                    final JSONObject m = this.meds.optJSONObject(i);
+                    if (m != null && m.optString("nome", "").toLowerCase(Locale.ROOT).contains(q)) {
+                        matchCount++;
+                        resCard.addView(buildSearchResultItem("💊", m.optString("nome") + " " + m.optString("dosagem"), "Medicamento cadastrado", todayIso()));
+                    }
+                }
+                if (matchCount == 0) {
+                    TextView tvNoRes = new TextView(this);
+                    tvNoRes.setText("Nenhum resultado para \"" + this.calSearchQuery + "\"");
+                    tvNoRes.setTextColor(this.cTextMuted);
+                    tvNoRes.setTextSize(sp(13.0f));
+                    tvNoRes.setGravity(17);
+                    tvNoRes.setPadding(0, dp(8), 0, dp(8));
+                    resCard.addView(tvNoRes);
+                }
+                linearLayout.addView(resCard);
             }
-            i2++;
-            i = 16;
         }
-        linearLayout.addView(sectionHeader("Diário Clínico (" + this.selectedCalDate + ")", "Anotações de pressão, glicemia ou sintomas"));
-        final EditText createInput = createInput("Escreva observações do dia...", this.calNotes.optString(this.selectedCalDate, EMBEDDED_API_KEY));
-        linearLayout.addView(createInput);
-        TextView createButton = createButton("Salvar Anotação do Dia", this.cPrimary, -1);
-        createButton.setOnClickListener(new View.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda14
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                MainActivity.this.m3lambda$buildCalendarTab$16$commedicarepatientMainActivity(createInput, view);
+
+        // Interactive Month Calendar Card (borderRadius: 22dp)
+        LinearLayout calCard = new LinearLayout(this);
+        calCard.setOrientation(1);
+        calCard.setBackground(shape(this.cSurface, 22, this.cBorder, 1));
+        calCard.setPadding(dp(14), dp(16), dp(14), dp(16));
+        LinearLayout.LayoutParams calCardLp = new LinearLayout.LayoutParams(-1, -2);
+        calCardLp.bottomMargin = dp(14);
+        calCard.setLayoutParams(calCardLp);
+
+        // Month navigation row: [ ‹ ]  Outubro \n 2026  [ › ]
+        LinearLayout monthNav = new LinearLayout(this);
+        monthNav.setOrientation(0);
+        monthNav.setGravity(16);
+        LinearLayout.LayoutParams mnLp = new LinearLayout.LayoutParams(-1, -2);
+        mnLp.bottomMargin = dp(16);
+        monthNav.setLayoutParams(mnLp);
+
+        TextView btnPrevM = new TextView(this);
+        btnPrevM.setText("‹");
+        btnPrevM.setTextColor(this.cTextMain);
+        btnPrevM.setTextSize(sp(20.0f));
+        btnPrevM.setGravity(17);
+        btnPrevM.setBackground(shape(this.cBgMain, 10, this.cBorder, 1));
+        btnPrevM.setLayoutParams(new LinearLayout.LayoutParams(dp(38), dp(38)));
+        btnPrevM.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (MainActivity.this.calMonth == 0) {
+                    MainActivity.this.calMonth = 11;
+                    MainActivity.this.calYear--;
+                } else {
+                    MainActivity.this.calMonth--;
+                }
+                render();
             }
         });
-        linearLayout.addView(createButton);
-    }
+        monthNav.addView(btnPrevM);
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildCalendarTab$15$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m2lambda$buildCalendarTab$15$commedicarepatientMainActivity(View view) {
-        Calendar calendar = Calendar.getInstance();
-        new DatePickerDialog(this, new DatePickerDialog.OnDateSetListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda16
-            @Override // android.app.DatePickerDialog.OnDateSetListener
-            public final void onDateSet(DatePicker datePicker, int i, int i2, int i3) {
-                MainActivity.this.m1lambda$buildCalendarTab$14$commedicarepatientMainActivity(datePicker, i, i2, i3);
+        LinearLayout monthTitleCol = new LinearLayout(this);
+        monthTitleCol.setOrientation(1);
+        monthTitleCol.setGravity(17);
+        monthTitleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvMonthName = new TextView(this);
+        tvMonthName.setText(MONTHS_PT[this.calMonth]);
+        tvMonthName.setTextColor(this.cTextMain);
+        tvMonthName.setTextSize(sp(17.0f));
+        tvMonthName.setTypeface(null, 1);
+        tvMonthName.setGravity(17);
+        monthTitleCol.addView(tvMonthName);
+
+        TextView tvYearNum = new TextView(this);
+        tvYearNum.setText(String.valueOf(this.calYear));
+        tvYearNum.setTextColor(this.cTextMuted);
+        tvYearNum.setTextSize(sp(12.0f));
+        tvYearNum.setGravity(17);
+        monthTitleCol.addView(tvYearNum);
+
+        monthNav.addView(monthTitleCol);
+
+        TextView btnNextM = new TextView(this);
+        btnNextM.setText("›");
+        btnNextM.setTextColor(this.cTextMain);
+        btnNextM.setTextSize(sp(20.0f));
+        btnNextM.setGravity(17);
+        btnNextM.setBackground(shape(this.cBgMain, 10, this.cBorder, 1));
+        btnNextM.setLayoutParams(new LinearLayout.LayoutParams(dp(38), dp(38)));
+        btnNextM.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (MainActivity.this.calMonth == 11) {
+                    MainActivity.this.calMonth = 0;
+                    MainActivity.this.calYear++;
+                } else {
+                    MainActivity.this.calMonth++;
+                }
+                render();
             }
-        }, calendar.get(1), calendar.get(2), calendar.get(5)).show();
-    }
+        });
+        monthNav.addView(btnNextM);
+        calCard.addView(monthNav);
 
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildCalendarTab$14$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m1lambda$buildCalendarTab$14$commedicarepatientMainActivity(DatePicker datePicker, int i, int i2, int i3) {
-        this.selectedCalDate = String.format(Locale.US, "%04d-%02d-%02d", Integer.valueOf(i), Integer.valueOf(i2 + 1), Integer.valueOf(i3));
-        render();
-    }
-
-    /* JADX INFO: Access modifiers changed from: package-private */
-    /* renamed from: lambda$buildCalendarTab$16$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m3lambda$buildCalendarTab$16$commedicarepatientMainActivity(EditText editText, View view) {
-        try {
-            this.calNotes.put(this.selectedCalDate, editText.getText().toString().trim());
-            saveAll();
-            Toast.makeText(this, "Anotação salva!", 0).show();
-        } catch (Exception e) {
+        // Weekday headers: Dom Seg Ter Qua Qui Sex Sáb
+        LinearLayout wdRow = new LinearLayout(this);
+        wdRow.setOrientation(0);
+        LinearLayout.LayoutParams wdLp = new LinearLayout.LayoutParams(-1, -2);
+        wdLp.bottomMargin = dp(8);
+        wdRow.setLayoutParams(wdLp);
+        for (String wd : WEEKDAYS_SHORT_PT) {
+            TextView tvWd = new TextView(this);
+            tvWd.setText(wd);
+            tvWd.setTextColor(this.cTextLight);
+            tvWd.setTextSize(sp(11.0f));
+            tvWd.setTypeface(null, 1);
+            tvWd.setGravity(17);
+            tvWd.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            wdRow.addView(tvWd);
         }
+        calCard.addView(wdRow);
+
+        // Compute calendar cells
+        Calendar calInst = Calendar.getInstance();
+        calInst.set(this.calYear, this.calMonth, 1);
+        int firstDow = calInst.get(Calendar.DAY_OF_WEEK) - 1; // 0 = Sunday
+        int daysInMonth = calInst.getActualMaximum(Calendar.DAY_OF_MONTH);
+        int totalCells = firstDow + daysInMonth;
+        int numRows = (totalCells + 6) / 7;
+        String todayStr = todayIso();
+
+        for (int r = 0; r < numRows; r++) {
+            LinearLayout weekRow = new LinearLayout(this);
+            weekRow.setOrientation(0);
+            LinearLayout.LayoutParams wrLp = new LinearLayout.LayoutParams(-1, -2);
+            wrLp.bottomMargin = dp(4);
+            weekRow.setLayoutParams(wrLp);
+
+            for (int c = 0; c < 7; c++) {
+                int cellIdx = r * 7 + c;
+                final int dayNum = cellIdx - firstDow + 1;
+                LinearLayout cell = new LinearLayout(this);
+                cell.setOrientation(1);
+                cell.setGravity(17);
+                LinearLayout.LayoutParams cellLp = new LinearLayout.LayoutParams(0, dp(48), 1.0f);
+                cellLp.leftMargin = dp(2);
+                cellLp.rightMargin = dp(2);
+                cell.setLayoutParams(cellLp);
+
+                if (dayNum >= 1 && dayNum <= daysInMonth) {
+                    final String dateStr = String.format(Locale.US, "%04d-%02d-%02d", this.calYear, this.calMonth + 1, dayNum);
+                    boolean isToday = dateStr.equals(todayStr);
+                    boolean isFuture = dateStr.compareTo(todayStr) > 0;
+                    String dayDoseStat = getDayDoseSummaryStatus(dateStr);
+                    boolean hasNote = hasNoteOnDate(dateStr);
+                    boolean hasEv = hasEventOnDate(dateStr);
+                    boolean hasSt = hasStockMoveOnDate(dateStr);
+
+                    if (isToday) {
+                        cell.setBackground(shape(this.cPrimary, 12, this.cPrimary, 2));
+                    } else if ("partial".equals(dayDoseStat) || "missed".equals(dayDoseStat)) {
+                        cell.setBackground(shape(Color.parseColor("#1AEF4444"), 12, Color.TRANSPARENT, 0));
+                    } else {
+                        cell.setBackground(shape(Color.TRANSPARENT, 12, Color.TRANSPARENT, 0));
+                    }
+
+                    TextView tvDay = new TextView(this);
+                    tvDay.setText(String.valueOf(dayNum));
+                    tvDay.setTextSize(sp(13.0f));
+                    tvDay.setTypeface(null, isToday ? 1 : 0);
+                    tvDay.setTextColor(isToday ? Color.WHITE : (isFuture ? this.cTextLight : this.cTextMain));
+                    tvDay.setGravity(17);
+                    cell.addView(tvDay);
+
+                    // Dots row
+                    LinearLayout dotsRow = new LinearLayout(this);
+                    dotsRow.setOrientation(0);
+                    dotsRow.setGravity(17);
+                    LinearLayout.LayoutParams drLp = new LinearLayout.LayoutParams(-2, dp(8));
+                    drLp.topMargin = dp(2);
+                    dotsRow.setLayoutParams(drLp);
+
+                    if (dayDoseStat != null) {
+                        int dCol = "all_taken".equals(dayDoseStat) ? (isToday ? Color.parseColor("#86EFAC") : Color.parseColor("#22C55E"))
+                                : ("partial".equals(dayDoseStat) ? Color.parseColor("#F59E0B") : Color.parseColor("#EF4444"));
+                        dotsRow.addView(makeCalDot(dCol));
+                    }
+                    if (hasNote) {
+                        dotsRow.addView(makeCalDot(isToday ? Color.parseColor("#93C5FD") : Color.parseColor("#60A5FA")));
+                    }
+                    if (hasEv) {
+                        dotsRow.addView(makeCalDot(isToday ? Color.parseColor("#C4B5FD") : Color.parseColor("#A78BFA")));
+                    }
+                    if (hasSt) {
+                        dotsRow.addView(makeCalDot(Color.parseColor("#34D399")));
+                    }
+                    cell.addView(dotsRow);
+
+                    cell.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            MainActivity.this.selectedCalDate = dateStr;
+                            showDayPanelDialog(dateStr);
+                        }
+                    });
+                }
+                weekRow.addView(cell);
+            }
+            calCard.addView(weekRow);
+        }
+
+        // Divider + Legend inside Calendar card
+        View legDiv = new View(this);
+        legDiv.setBackgroundColor(this.cBorder);
+        LinearLayout.LayoutParams ldLp = new LinearLayout.LayoutParams(-1, dp(1));
+        ldLp.topMargin = dp(10);
+        ldLp.bottomMargin = dp(10);
+        legDiv.setLayoutParams(ldLp);
+        calCard.addView(legDiv);
+
+        LinearLayout legRow1 = new LinearLayout(this);
+        legRow1.setOrientation(0);
+        legRow1.setGravity(16);
+        legRow1.addView(makeLegendItem("●", Color.parseColor("#22C55E"), "Tomado"));
+        legRow1.addView(makeLegendItem("◐", Color.parseColor("#F59E0B"), "Parcial"));
+        legRow1.addView(makeLegendItem("●", Color.parseColor("#EF4444"), "Perdido"));
+        legRow1.addView(makeLegendItem("●", Color.parseColor("#60A5FA"), "Nota"));
+        legRow1.addView(makeLegendItem("●", Color.parseColor("#A78BFA"), "Evento"));
+        legRow1.addView(makeLegendItem("●", Color.parseColor("#34D399"), "Estoque"));
+        calCard.addView(legRow1);
+
+        linearLayout.addView(calCard);
+
+        // Two side-by-side quick action buttons: [ 📝 Nova anotação ]  [ 📅 Novo evento ]
+        LinearLayout quickRow = new LinearLayout(this);
+        quickRow.setOrientation(0);
+        LinearLayout.LayoutParams qrLp = new LinearLayout.LayoutParams(-1, -2);
+        qrLp.bottomMargin = dp(16);
+        quickRow.setLayoutParams(qrLp);
+
+        TextView btnNewNote = new TextView(this);
+        btnNewNote.setText("📝  Nova anotação");
+        btnNewNote.setTextColor(this.cTextMain);
+        btnNewNote.setTextSize(sp(13.0f));
+        btnNewNote.setTypeface(null, 1);
+        btnNewNote.setGravity(17);
+        btnNewNote.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+        btnNewNote.setPadding(dp(12), dp(13), dp(12), dp(13));
+        LinearLayout.LayoutParams nnLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        nnLp.rightMargin = dp(5);
+        btnNewNote.setLayoutParams(nnLp);
+        btnNewNote.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showNoteModal(todayIso(), null, -1);
+            }
+        });
+        quickRow.addView(btnNewNote);
+
+        TextView btnNewEvent = new TextView(this);
+        btnNewEvent.setText("📅  Novo evento");
+        btnNewEvent.setTextColor(this.cTextMain);
+        btnNewEvent.setTextSize(sp(13.0f));
+        btnNewEvent.setTypeface(null, 1);
+        btnNewEvent.setGravity(17);
+        btnNewEvent.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+        btnNewEvent.setPadding(dp(12), dp(13), dp(12), dp(13));
+        LinearLayout.LayoutParams neLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        neLp.leftMargin = dp(5);
+        btnNewEvent.setLayoutParams(neLp);
+        btnNewEvent.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showEventModal(todayIso(), null, -1);
+            }
+        });
+        quickRow.addView(btnNewEvent);
+        linearLayout.addView(quickRow);
+
+        // Monthly Summary Card: 📊 Resumo — Outubro 2026
+        LinearLayout sumCard = new LinearLayout(this);
+        sumCard.setOrientation(1);
+        sumCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        sumCard.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(-1, -2);
+        scLp.bottomMargin = dp(16);
+        sumCard.setLayoutParams(scLp);
+
+        TextView tvSumTitle = new TextView(this);
+        tvSumTitle.setText("📊 Resumo — " + MONTHS_PT[this.calMonth] + " " + this.calYear);
+        tvSumTitle.setTextColor(this.cTextMain);
+        tvSumTitle.setTextSize(sp(15.0f));
+        tvSumTitle.setTypeface(null, 1);
+        tvSumTitle.setPadding(0, 0, 0, dp(14));
+        sumCard.addView(tvSumTitle);
+
+        // Compute monthly stats
+        String monthPrefix = String.format(Locale.US, "%04d-%02d-", this.calYear, this.calMonth + 1);
+        int mTotalDoses = 0;
+        int mTakenDoses = 0;
+        int mLateDoses = 0;
+        int mMissedDoses = 0;
+        int mSosCount = 0;
+        for (int d = 1; d <= daysInMonth; d++) {
+            String dIso = String.format(Locale.US, "%04d-%02d-%02d", this.calYear, this.calMonth + 1, d);
+            if (dIso.compareTo(todayStr) > 0) continue;
+            for (int m = 0; m < this.meds.length(); m++) {
+                JSONObject med = this.meds.optJSONObject(m);
+                if (med == null || !med.optBoolean("ativo", true) || "sos".equals(getMedType(med))) continue;
+                JSONArray hrs = med.optJSONArray("horarios");
+                if (hrs == null) continue;
+                String mId = med.optString("id");
+                for (int h = 0; h < hrs.length(); h++) {
+                    String hStr = hrs.optString(h);
+                    mTotalDoses++;
+                    JSONObject logObj = getDoseLogObject(mId, dIso, hStr);
+                    if (logObj != null && ("tomado".equals(logObj.optString("status")) || "taken".equals(logObj.optString("status")))) {
+                        mTakenDoses++;
+                        if (logObj.optBoolean("late", false)) mLateDoses++;
+                    } else if (dIso.compareTo(todayStr) < 0 || "perdida".equals(getDoseStatus(mId, dIso, hStr))) {
+                        mMissedDoses++;
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < this.doseLogs.length(); i++) {
+            JSONObject dl = this.doseLogs.optJSONObject(i);
+            if (dl != null && dl.optString("data", "").startsWith(monthPrefix) && "SOS".equals(dl.optString("horario_programado"))) {
+                mSosCount++;
+            }
+        }
+        int mNotesCount = 0;
+        for (int i = 0; i < this.calNotesList.length(); i++) {
+            JSONObject n = this.calNotesList.optJSONObject(i);
+            if (n != null && n.optString("date", "").startsWith(monthPrefix)) mNotesCount++;
+        }
+        int mEventsCount = 0;
+        for (int i = 0; i < this.events.length(); i++) {
+            JSONObject ev = this.events.optJSONObject(i);
+            if (ev != null && ev.optString("date", ev.optString("data", "")).startsWith(monthPrefix)) mEventsCount++;
+        }
+        int mRestockCount = 0;
+        for (int i = 0; i < this.stockMovements.length(); i++) {
+            JSONObject sm = this.stockMovements.optJSONObject(i);
+            if (sm != null && sm.optString("date", sm.optString("data_hora", "")).startsWith(monthPrefix) && sm.optInt("delta", 0) > 0) {
+                mRestockCount++;
+            }
+        }
+        String adhStr = mTotalDoses > 0 ? ((mTakenDoses * 100 / mTotalDoses) + "%") : "—";
+        int adhCol = mTotalDoses == 0 ? this.cTextLight : ((mTakenDoses * 100 / mTotalDoses) >= 80 ? Color.parseColor("#22C55E") : ((mTakenDoses * 100 / mTotalDoses) >= 50 ? Color.parseColor("#F59E0B") : Color.parseColor("#EF4444")));
+
+        // Row 1 of stats (3 cols)
+        LinearLayout sRow1 = new LinearLayout(this);
+        sRow1.setOrientation(0);
+        LinearLayout.LayoutParams sr1Lp = new LinearLayout.LayoutParams(-1, -2);
+        sr1Lp.bottomMargin = dp(10);
+        sRow1.setLayoutParams(sr1Lp);
+        sRow1.addView(makeMonthStatBox("Adesão", adhStr, adhCol));
+        sRow1.addView(makeMonthStatBox("Tomadas", String.valueOf(mTakenDoses), Color.parseColor("#22C55E")));
+        sRow1.addView(makeMonthStatBox("Atrasos", String.valueOf(mLateDoses), Color.parseColor("#F59E0B")));
+        sumCard.addView(sRow1);
+
+        // Row 2 of stats (3 cols)
+        LinearLayout sRow2 = new LinearLayout(this);
+        sRow2.setOrientation(0);
+        LinearLayout.LayoutParams sr2Lp = new LinearLayout.LayoutParams(-1, -2);
+        sr2Lp.bottomMargin = dp(10);
+        sRow2.setLayoutParams(sr2Lp);
+        sRow2.addView(makeMonthStatBox("Perdidas", String.valueOf(mMissedDoses), Color.parseColor("#EF4444")));
+        sRow2.addView(makeMonthStatBox("Anotações", String.valueOf(mNotesCount), Color.parseColor("#60A5FA")));
+        sRow2.addView(makeMonthStatBox("Consultas", String.valueOf(mEventsCount), Color.parseColor("#A78BFA")));
+        sumCard.addView(sRow2);
+
+        // Row 3 of stats (2 cols + 1 spacer)
+        LinearLayout sRow3 = new LinearLayout(this);
+        sRow3.setOrientation(0);
+        sRow3.addView(makeMonthStatBox("Uso SOS", String.valueOf(mSosCount), Color.parseColor("#FB923C")));
+        sRow3.addView(makeMonthStatBox("Reposições", String.valueOf(mRestockCount), Color.parseColor("#34D399")));
+        View emptyCol = new View(this);
+        LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(0, dp(1), 1.0f);
+        ecLp.leftMargin = dp(4);
+        ecLp.rightMargin = dp(4);
+        emptyCol.setLayoutParams(ecLp);
+        sRow3.addView(emptyCol);
+        sumCard.addView(sRow3);
+
+        linearLayout.addView(sumCard);
+    }
+
+    private View makeCalDot(int color) {
+        View dot = new View(this);
+        dot.setBackground(shape(color, 4, 0, 0));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(5), dp(5));
+        lp.leftMargin = dp(1);
+        lp.rightMargin = dp(1);
+        dot.setLayoutParams(lp);
+        return dot;
+    }
+
+    private View makeLegendItem(String symbol, int color, String label) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(0);
+        item.setGravity(16);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        item.setLayoutParams(lp);
+
+        TextView tvSym = new TextView(this);
+        tvSym.setText(symbol + " ");
+        tvSym.setTextColor(color);
+        tvSym.setTextSize(sp(10.0f));
+        item.addView(tvSym);
+
+        TextView tvLbl = new TextView(this);
+        tvLbl.setText(label);
+        tvLbl.setTextColor(this.cTextMuted);
+        tvLbl.setTextSize(sp(10.0f));
+        item.addView(tvLbl);
+        return item;
+    }
+
+    private View makeMonthStatBox(String label, String val, int valColor) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(1);
+        box.setGravity(17);
+        box.setBackground(shape(this.cBgMain, 14, 0, 0));
+        box.setPadding(dp(8), dp(12), dp(8), dp(12));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lp.leftMargin = dp(4);
+        lp.rightMargin = dp(4);
+        box.setLayoutParams(lp);
+
+        TextView tvV = new TextView(this);
+        tvV.setText(val);
+        tvV.setTextColor(valColor);
+        tvV.setTextSize(sp(20.0f));
+        tvV.setTypeface(null, 1);
+        tvV.setGravity(17);
+        box.addView(tvV);
+
+        TextView tvL = new TextView(this);
+        tvL.setText(label);
+        tvL.setTextColor(this.cTextMuted);
+        tvL.setTextSize(sp(11.0f));
+        tvL.setGravity(17);
+        tvL.setPadding(0, dp(3), 0, 0);
+        box.addView(tvL);
+        return box;
+    }
+
+    private View buildSearchResultItem(String icon, String text, String sub, final String dateStr) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(0);
+        row.setGravity(16);
+        row.setPadding(dp(8), dp(8), dp(8), dp(8));
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.selectedCalDate = dateStr;
+                showDayPanelDialog(dateStr);
+            }
+        });
+
+        TextView tvI = new TextView(this);
+        tvI.setText(icon);
+        tvI.setTextSize(sp(18.0f));
+        tvI.setPadding(0, 0, dp(10), 0);
+        row.addView(tvI);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(1);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvT = new TextView(this);
+        tvT.setText(text);
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(13.0f));
+        tvT.setTypeface(null, 1);
+        col.addView(tvT);
+
+        TextView tvS = new TextView(this);
+        tvS.setText(sub);
+        tvS.setTextColor(this.cTextMuted);
+        tvS.setTextSize(sp(11.0f));
+        col.addView(tvS);
+
+        row.addView(col);
+        return row;
+    }
+
+    private String getDayDoseSummaryStatus(String dateStr) {
+        String todayStr = todayIso();
+        if (dateStr.compareTo(todayStr) > 0) return null;
+        int total = 0;
+        int taken = 0;
+        int missed = 0;
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject m = this.meds.optJSONObject(i);
+            if (m == null || !m.optBoolean("ativo", true) || "sos".equals(getMedType(m))) continue;
+            JSONArray hrs = m.optJSONArray("horarios");
+            if (hrs == null) continue;
+            String mId = m.optString("id");
+            for (int h = 0; h < hrs.length(); h++) {
+                total++;
+                String st = getDoseStatus(mId, dateStr, hrs.optString(h));
+                if ("tomado".equals(st)) taken++;
+                else if (dateStr.compareTo(todayStr) < 0 || "perdida".equals(st)) missed++;
+            }
+        }
+        if (total == 0) return null;
+        if (taken == total) return "all_taken";
+        if (taken > 0) return "partial";
+        if (missed > 0) return "missed";
+        return null;
+    }
+
+    private boolean hasNoteOnDate(String dateStr) {
+        if (!this.calNotes.optString(dateStr, "").trim().isEmpty()) return true;
+        for (int i = 0; i < this.calNotesList.length(); i++) {
+            JSONObject n = this.calNotesList.optJSONObject(i);
+            if (n != null && dateStr.equals(n.optString("date"))) return true;
+        }
+        return false;
+    }
+
+    private boolean hasEventOnDate(String dateStr) {
+        for (int i = 0; i < this.events.length(); i++) {
+            JSONObject ev = this.events.optJSONObject(i);
+            if (ev != null && dateStr.equals(ev.optString("date", ev.optString("data")))) return true;
+        }
+        return false;
+    }
+
+    private boolean hasStockMoveOnDate(String dateStr) {
+        for (int i = 0; i < this.stockMovements.length(); i++) {
+            JSONObject sm = this.stockMovements.optJSONObject(i);
+            if (sm != null && sm.optString("date", sm.optString("data_hora", "")).startsWith(dateStr)) return true;
+        }
+        return false;
+    }
+
+    private void showDayPanelDialog(final String dateStr) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setPadding(dp(20), dp(20), dp(20), dp(20));
+        root.setBackgroundColor(this.cSurface);
+
+        boolean isToday = dateStr.equals(todayIso());
+        boolean isPast = dateStr.compareTo(todayIso()) < 0;
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText(isToday ? "✨ Hoje" : (isPast ? "📅 Dia anterior" : "🔮 Dia futuro"));
+        tvSub.setTextColor(this.cPrimary);
+        tvSub.setTextSize(sp(11.0f));
+        tvSub.setTypeface(null, 1);
+        root.addView(tvSub);
+
+        TextView tvDate = new TextView(this);
+        tvDate.setText(dateStr);
+        tvDate.setTextColor(this.cTextMain);
+        tvDate.setTextSize(sp(18.0f));
+        tvDate.setTypeface(null, 1);
+        tvDate.setPadding(0, dp(2), 0, dp(12));
+        root.addView(tvDate);
+
+        // Quick Add buttons inside DayPanel
+        LinearLayout addRow = new LinearLayout(this);
+        addRow.setOrientation(0);
+        LinearLayout.LayoutParams arLp = new LinearLayout.LayoutParams(-1, -2);
+        arLp.bottomMargin = dp(14);
+        addRow.setLayoutParams(arLp);
+
+        TextView btnAddN = createButton("📝 + Anotação", this.cBgMain, this.cTextMain);
+        btnAddN.setPadding(dp(10), dp(8), dp(10), dp(8));
+        LinearLayout.LayoutParams anLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        anLp.rightMargin = dp(6);
+        btnAddN.setLayoutParams(anLp);
+        addRow.addView(btnAddN);
+
+        TextView btnAddE = createButton("📅 + Evento", this.cBgMain, this.cTextMain);
+        btnAddE.setPadding(dp(10), dp(8), dp(10), dp(8));
+        LinearLayout.LayoutParams aeLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        aeLp.leftMargin = dp(6);
+        btnAddE.setLayoutParams(aeLp);
+        addRow.addView(btnAddE);
+        root.addView(addRow);
+
+        // Doses section
+        TextView tvDosesHdr = new TextView(this);
+        tvDosesHdr.setText("💊 MEDICAMENTOS DO DIA");
+        tvDosesHdr.setTextColor(this.cTextLight);
+        tvDosesHdr.setTextSize(sp(11.0f));
+        tvDosesHdr.setTypeface(null, 1);
+        tvDosesHdr.setPadding(0, 0, 0, dp(8));
+        root.addView(tvDosesHdr);
+
+        int doseItems = 0;
+        for (int i = 0; i < this.meds.length(); i++) {
+            final JSONObject m = this.meds.optJSONObject(i);
+            if (m == null || !m.optBoolean("ativo", true) || "sos".equals(getMedType(m))) continue;
+            JSONArray hrs = m.optJSONArray("horarios");
+            if (hrs == null) continue;
+            final String mId = m.optString("id");
+            for (int h = 0; h < hrs.length(); h++) {
+                final String hStr = hrs.optString(h);
+                doseItems++;
+                String st = getDoseStatus(mId, dateStr, hStr);
+                boolean isTaken = "tomado".equals(st);
+
+                LinearLayout dCard = new LinearLayout(this);
+                dCard.setOrientation(1);
+                dCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                dCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams dcLp = new LinearLayout.LayoutParams(-1, -2);
+                dcLp.bottomMargin = dp(8);
+                dCard.setLayoutParams(dcLp);
+
+                TextView tvM = new TextView(this);
+                tvM.setText((isTaken ? "✓ " : "⏰ ") + hStr + " — " + m.optString("nome") + " (" + m.optString("dosagem") + ")");
+                tvM.setTextColor(isTaken ? this.cSuccess : this.cTextMain);
+                tvM.setTextSize(sp(13.0f));
+                tvM.setTypeface(null, 1);
+                dCard.addView(tvM);
+
+                if (!isTaken && (isToday || isPast)) {
+                    TextView btnRetro = new TextView(this);
+                    btnRetro.setText(isPast ? "🕐 Confirmar retroativamente" : "✓ Confirmar dose");
+                    btnRetro.setTextColor(this.cWarning);
+                    btnRetro.setTextSize(sp(12.0f));
+                    btnRetro.setTypeface(null, 1);
+                    btnRetro.setPadding(0, dp(6), 0, 0);
+                    btnRetro.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            registerDose(m, dateStr, hStr, "tomado");
+                            Toast.makeText(MainActivity.this, "Dose confirmada!", 0).show();
+                        }
+                    });
+                    dCard.addView(btnRetro);
+                }
+                root.addView(dCard);
+            }
+        }
+        if (doseItems == 0) {
+            TextView tvEmptyD = new TextView(this);
+            tvEmptyD.setText("Nenhuma dose programada.");
+            tvEmptyD.setTextColor(this.cTextMuted);
+            tvEmptyD.setTextSize(sp(12.0f));
+            tvEmptyD.setPadding(0, 0, 0, dp(10));
+            root.addView(tvEmptyD);
+        }
+
+        // Notes section
+        TextView tvNotesHdr = new TextView(this);
+        tvNotesHdr.setText("📝 ANOTAÇÕES");
+        tvNotesHdr.setTextColor(this.cTextLight);
+        tvNotesHdr.setTextSize(sp(11.0f));
+        tvNotesHdr.setTypeface(null, 1);
+        tvNotesHdr.setPadding(0, dp(6), 0, dp(8));
+        root.addView(tvNotesHdr);
+
+        int noteItems = 0;
+        for (int i = 0; i < this.calNotesList.length(); i++) {
+            final int nIdx = i;
+            final JSONObject nObj = this.calNotesList.optJSONObject(i);
+            if (nObj != null && dateStr.equals(nObj.optString("date"))) {
+                noteItems++;
+                LinearLayout nCard = new LinearLayout(this);
+                nCard.setOrientation(0);
+                nCard.setGravity(16);
+                nCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                nCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams ncLp = new LinearLayout.LayoutParams(-1, -2);
+                ncLp.bottomMargin = dp(8);
+                nCard.setLayoutParams(ncLp);
+
+                TextView tvNT = new TextView(this);
+                tvNT.setText("[" + nObj.optString("category", "Geral") + "] " + nObj.optString("text"));
+                tvNT.setTextColor(this.cTextMain);
+                tvNT.setTextSize(sp(13.0f));
+                tvNT.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                nCard.addView(tvNT);
+
+                TextView btnDelN = new TextView(this);
+                btnDelN.setText("🗑");
+                btnDelN.setPadding(dp(8), dp(4), dp(4), dp(4));
+                btnDelN.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.calNotesList.remove(nIdx);
+                        saveAll();
+                        render();
+                    }
+                });
+                nCard.addView(btnDelN);
+                root.addView(nCard);
+            }
+        }
+        if (noteItems == 0) {
+            TextView tvEmptyN = new TextView(this);
+            tvEmptyN.setText("Nenhuma anotação neste dia.");
+            tvEmptyN.setTextColor(this.cTextMuted);
+            tvEmptyN.setTextSize(sp(12.0f));
+            tvEmptyN.setPadding(0, 0, 0, dp(10));
+            root.addView(tvEmptyN);
+        }
+
+        // Events section
+        TextView tvEvHdr = new TextView(this);
+        tvEvHdr.setText("📅 CONSULTAS & EVENTOS");
+        tvEvHdr.setTextColor(this.cTextLight);
+        tvEvHdr.setTextSize(sp(11.0f));
+        tvEvHdr.setTypeface(null, 1);
+        tvEvHdr.setPadding(0, dp(6), 0, dp(8));
+        root.addView(tvEvHdr);
+
+        int evItems = 0;
+        for (int i = 0; i < this.events.length(); i++) {
+            final int eIdx = i;
+            final JSONObject ev = this.events.optJSONObject(i);
+            if (ev != null && dateStr.equals(ev.optString("date", ev.optString("data")))) {
+                evItems++;
+                LinearLayout eCard = new LinearLayout(this);
+                eCard.setOrientation(0);
+                eCard.setGravity(16);
+                eCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                eCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
+                ecLp.bottomMargin = dp(8);
+                eCard.setLayoutParams(ecLp);
+
+                TextView tvET = new TextView(this);
+                String t = ev.optString("title", ev.optString("titulo", "Evento"));
+                String tm = ev.optString("time", ev.optString("hora", ""));
+                String loc = ev.optString("location", ev.optString("local", ""));
+                tvET.setText("📅 " + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
+                tvET.setTextColor(this.cTextMain);
+                tvET.setTextSize(sp(13.0f));
+                tvET.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                eCard.addView(tvET);
+
+                TextView btnDelE = new TextView(this);
+                btnDelE.setText("🗑");
+                btnDelE.setPadding(dp(8), dp(4), dp(4), dp(4));
+                btnDelE.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.events.remove(eIdx);
+                        saveAll();
+                        render();
+                    }
+                });
+                eCard.addView(btnDelE);
+                root.addView(eCard);
+            }
+        }
+        if (evItems == 0) {
+            TextView tvEmptyE = new TextView(this);
+            tvEmptyE.setText("Nenhum evento neste dia.");
+            tvEmptyE.setTextColor(this.cTextMuted);
+            tvEmptyE.setTextSize(sp(12.0f));
+            root.addView(tvEmptyE);
+        }
+
+        sv.addView(root);
+        b.setView(sv);
+        b.setNegativeButton("Fechar", null);
+        final AlertDialog dlg = b.create();
+
+        btnAddN.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dlg.dismiss();
+                showNoteModal(dateStr, null, -1);
+            }
+        });
+        btnAddE.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dlg.dismiss();
+                showEventModal(dateStr, null, -1);
+            }
+        });
+
+        dlg.show();
+    }
+
+    private void showNoteModal(final String defaultDate, final JSONObject existing, final int editIdx) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(1);
+        l.setPadding(dp(20), dp(20), dp(20), dp(12));
+        l.setBackgroundColor(this.cSurface);
+
+        TextView tvT = new TextView(this);
+        tvT.setText(existing == null ? "📝 Nova anotação" : "📝 Editar anotação");
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(18.0f));
+        tvT.setTypeface(null, 1);
+        tvT.setPadding(0, 0, 0, dp(12));
+        l.addView(tvT);
+
+        final EditText inDate = createInput("Data (AAAA-MM-DD)", existing != null ? existing.optString("date", defaultDate) : defaultDate);
+        final EditText inCat = createInput("Categoria (Sintoma, Dúvida médica, Efeito colateral, Geral)", existing != null ? existing.optString("category", "Geral") : "Sintoma");
+        final EditText inText = createInput("Anotação * (Ex: Tontura leve pela manhã)", existing != null ? existing.optString("text", "") : "");
+
+        l.addView(inDate);
+        l.addView(inCat);
+        l.addView(inText);
+        b.setView(l);
+        b.setPositiveButton("Salvar anotação", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String txt = inText.getText().toString().trim();
+                    if (txt.isEmpty()) return;
+                    String dt = inDate.getText().toString().trim();
+                    if (dt.isEmpty()) dt = defaultDate;
+                    JSONObject obj = existing != null ? existing : new JSONObject();
+                    if (existing == null) obj.put("id", "note-" + System.currentTimeMillis());
+                    obj.put("date", dt);
+                    obj.put("category", inCat.getText().toString().trim());
+                    obj.put("text", txt);
+                    if (editIdx >= 0) {
+                        MainActivity.this.calNotesList.put(editIdx, obj);
+                    } else {
+                        MainActivity.this.calNotesList.put(obj);
+                    }
+                    MainActivity.this.calNotes.put(dt, txt);
+                    saveAll();
+                    render();
+                    Toast.makeText(MainActivity.this, "Anotação salva!", 0).show();
+                } catch (Exception ignored) {}
+            }
+        });
+        b.setNegativeButton("Cancelar", null);
+        b.show();
+    }
+
+    private void showEventModal(final String defaultDate, final JSONObject existing, final int editIdx) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(1);
+        l.setPadding(dp(20), dp(20), dp(20), dp(12));
+        l.setBackgroundColor(this.cSurface);
+
+        TextView tvT = new TextView(this);
+        tvT.setText(existing == null ? "📅 Novo evento de saúde" : "📅 Editar evento");
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(18.0f));
+        tvT.setTypeface(null, 1);
+        tvT.setPadding(0, 0, 0, dp(12));
+        l.addView(tvT);
+
+        final EditText inType = createInput("Tipo (Consulta médica, Exame, Retorno, Receita, Lembrete)", existing != null ? existing.optString("type", "Consulta médica") : "Consulta médica");
+        final EditText inTitle = createInput("Título * (Ex: Cardiologista Dr. Silva)", existing != null ? existing.optString("title", existing.optString("titulo", "")) : "");
+        final EditText inDate = createInput("Data (AAAA-MM-DD)", existing != null ? existing.optString("date", existing.optString("data", defaultDate)) : defaultDate);
+        final EditText inTime = createInput("Horário (Ex: 14:00)", existing != null ? existing.optString("time", existing.optString("hora", "09:00")) : "09:00");
+        final EditText inLoc = createInput("Local / Profissional (opcional)", existing != null ? existing.optString("location", existing.optString("local", "")) : "");
+        final EditText inNotes = createInput("Observações (Ex: Levar exames anteriores)", existing != null ? existing.optString("notes", existing.optString("notas", "")) : "");
+
+        l.addView(inType);
+        l.addView(inTitle);
+        l.addView(inDate);
+        l.addView(inTime);
+        l.addView(inLoc);
+        l.addView(inNotes);
+        sv.addView(l);
+        b.setView(sv);
+        b.setPositiveButton("Salvar evento", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                try {
+                    String title = inTitle.getText().toString().trim();
+                    if (title.isEmpty()) return;
+                    String dt = inDate.getText().toString().trim();
+                    if (dt.isEmpty()) dt = defaultDate;
+                    String tm = inTime.getText().toString().trim();
+                    String loc = inLoc.getText().toString().trim();
+                    String nts = inNotes.getText().toString().trim();
+                    JSONObject obj = existing != null ? existing : new JSONObject();
+                    if (existing == null) obj.put("id", "ev-" + System.currentTimeMillis());
+                    obj.put("type", inType.getText().toString().trim());
+                    obj.put("title", title);
+                    obj.put("titulo", title);
+                    obj.put("date", dt);
+                    obj.put("data", dt);
+                    obj.put("time", tm);
+                    obj.put("hora", tm);
+                    obj.put("location", loc);
+                    obj.put("local", loc);
+                    obj.put("notes", nts);
+                    obj.put("notas", nts);
+                    if (editIdx >= 0) {
+                        MainActivity.this.events.put(editIdx, obj);
+                    } else {
+                        MainActivity.this.events.put(obj);
+                    }
+                    saveAll();
+                    render();
+                    Toast.makeText(MainActivity.this, "Evento salvo!", 0).show();
+                } catch (Exception ignored) {}
+            }
+        });
+        b.setNegativeButton("Cancelar", null);
+        b.show();
     }
 
     private void buildAiTab(LinearLayout linearLayout) {
-        if (!"main".equals(this.aiSubView)) {
-            this.aiSubView = "main";
+        if ("meds".equals(this.aiSubView) || "attention".equals(this.aiSubView) || "stock".equals(this.aiSubView) || "consult".equals(this.aiSubView)) {
+            buildAiStructuredSubView(linearLayout, this.aiSubView);
+            return;
         }
-        linearLayout.addView(sectionHeader("🤖 Assistente Farmacêutico MediCare", "Inteligência Artificial para dúvidas sobre seus remédios e interações"));
+        if ("chat".equals(this.aiSubView)) {
+            buildAiChatSubView(linearLayout);
+            return;
+        }
 
-        HorizontalScrollView hsv = new HorizontalScrollView(this);
-        hsv.setHorizontalScrollBarEnabled(false);
-        LinearLayout chipContainer = new LinearLayout(this);
-        chipContainer.setOrientation(0);
-        chipContainer.setPadding(0, 0, 0, dp(12));
+        // 1. Header: [ 🩺 ]  Assistente de Saúde \n Ajudo você a acompanhar seu tratamento.
+        LinearLayout hdrRow = new LinearLayout(this);
+        hdrRow.setOrientation(0);
+        hdrRow.setGravity(16);
+        LinearLayout.LayoutParams hrLp = new LinearLayout.LayoutParams(-1, -2);
+        hrLp.bottomMargin = dp(20);
+        hdrRow.setLayoutParams(hrLp);
 
-        String[] quickPrompts = {
-            "💊 Explicar meus remédios",
-            "📊 Resumo de adesão",
-            "📦 Análise de estoque",
-            "🩺 Preparação para consulta"
+        TextView tvAvatar = new TextView(this);
+        tvAvatar.setText("🩺");
+        tvAvatar.setTextSize(sp(24.0f));
+        tvAvatar.setGravity(17);
+        GradientDrawable avGrad = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{Color.parseColor("#3B82F6"), Color.parseColor("#6366F1")}
+        );
+        avGrad.setCornerRadius(dp(18));
+        tvAvatar.setBackground(avGrad);
+        LinearLayout.LayoutParams avLp = new LinearLayout.LayoutParams(dp(56), dp(56));
+        avLp.rightMargin = dp(14);
+        tvAvatar.setLayoutParams(avLp);
+        hdrRow.addView(tvAvatar);
+
+        LinearLayout hdrCol = new LinearLayout(this);
+        hdrCol.setOrientation(1);
+        hdrCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Assistente de Saúde");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(22.0f));
+        tvTitle.setTypeface(null, 1);
+        hdrCol.addView(tvTitle);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Ajudo você a acompanhar seu tratamento.");
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(14.0f));
+        tvSub.setPadding(0, dp(2), 0, 0);
+        hdrCol.addView(tvSub);
+
+        hdrRow.addView(hdrCol);
+        linearLayout.addView(hdrRow);
+
+        // 2. Status Card: COMO ESTOU HOJE?
+        String todayStr = todayIso();
+        int pendingCount = 0;
+        JSONObject nextPendingMed = null;
+        String nextPendingTime = null;
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject m = this.meds.optJSONObject(i);
+            if (m == null || !m.optBoolean("ativo", true) || "sos".equals(getMedType(m))) continue;
+            JSONArray hrs = m.optJSONArray("horarios");
+            if (hrs == null) continue;
+            String mId = m.optString("id");
+            for (int h = 0; h < hrs.length(); h++) {
+                String hStr = hrs.optString(h);
+                if (!"tomado".equals(getDoseStatus(mId, todayStr, hStr))) {
+                    pendingCount++;
+                    if (nextPendingMed == null || (nextPendingTime != null && hStr.compareTo(nextPendingTime) < 0)) {
+                        nextPendingMed = m;
+                        nextPendingTime = hStr;
+                    }
+                }
+            }
+        }
+
+        LinearLayout statusCard = new LinearLayout(this);
+        statusCard.setOrientation(1);
+        statusCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        statusCard.setPadding(dp(20), dp(20), dp(20), dp(20));
+        LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(-1, -2);
+        scLp.bottomMargin = dp(20);
+        statusCard.setLayoutParams(scLp);
+
+        TextView tvHowLabel = new TextView(this);
+        tvHowLabel.setText("COMO ESTOU HOJE?");
+        tvHowLabel.setTextColor(this.cPrimary);
+        tvHowLabel.setTextSize(sp(12.0f));
+        tvHowLabel.setTypeface(null, 1);
+        tvHowLabel.setPadding(0, 0, 0, dp(8));
+        statusCard.addView(tvHowLabel);
+
+        TextView tvHowVal = new TextView(this);
+        tvHowVal.setText(pendingCount == 0 ? "Tudo ótimo por aqui!" : ("Você ainda tem " + pendingCount + " dose(s) para tomar hoje."));
+        tvHowVal.setTextColor(this.cTextMain);
+        tvHowVal.setTextSize(sp(18.0f));
+        tvHowVal.setTypeface(null, 1);
+        statusCard.addView(tvHowVal);
+
+        if (nextPendingMed != null && nextPendingTime != null) {
+            LinearLayout nextBox = new LinearLayout(this);
+            nextBox.setOrientation(0);
+            nextBox.setGravity(16);
+            nextBox.setBackground(shape(this.cBgMain, 12, 0, 0));
+            nextBox.setPadding(dp(12), dp(10), dp(12), dp(10));
+            LinearLayout.LayoutParams nbLp = new LinearLayout.LayoutParams(-1, -2);
+            nbLp.topMargin = dp(12);
+            nextBox.setLayoutParams(nbLp);
+
+            TextView tvNextTxt = new TextView(this);
+            tvNextTxt.setText("⏰ Próximo: " + nextPendingMed.optString("nome") + " às " + nextPendingTime);
+            tvNextTxt.setTextColor(this.cTextMain);
+            tvNextTxt.setTextSize(sp(14.0f));
+            tvNextTxt.setTypeface(null, 1);
+            nextBox.addView(tvNextTxt);
+            statusCard.addView(nextBox);
+        }
+        linearLayout.addView(statusCard);
+
+        // 3. Section: "O que você precisa?" + 2x2 Grid
+        TextView tvNeedTitle = new TextView(this);
+        tvNeedTitle.setText("O que você precisa?");
+        tvNeedTitle.setTextColor(this.cTextMain);
+        tvNeedTitle.setTextSize(sp(16.0f));
+        tvNeedTitle.setTypeface(null, 1);
+        tvNeedTitle.setPadding(dp(4), 0, 0, dp(12));
+        linearLayout.addView(tvNeedTitle);
+
+        LinearLayout gridRow1 = new LinearLayout(this);
+        gridRow1.setOrientation(0);
+        LinearLayout.LayoutParams gr1Lp = new LinearLayout.LayoutParams(-1, -2);
+        gr1Lp.bottomMargin = dp(12);
+        gridRow1.setLayoutParams(gr1Lp);
+        gridRow1.addView(makeAiGridCard("💊", "Explicar meus medicamentos", "meds", true));
+        gridRow1.addView(makeAiGridCard("⚠️", "O que merece atenção?", "attention", false));
+        linearLayout.addView(gridRow1);
+
+        LinearLayout gridRow2 = new LinearLayout(this);
+        gridRow2.setOrientation(0);
+        LinearLayout.LayoutParams gr2Lp = new LinearLayout.LayoutParams(-1, -2);
+        gr2Lp.bottomMargin = dp(20);
+        gridRow2.setLayoutParams(gr2Lp);
+        gridRow2.addView(makeAiGridCard("📦", "Meu estoque", "stock", true));
+        gridRow2.addView(makeAiGridCard("🩺", "Preparar consulta", "consult", false));
+        linearLayout.addView(gridRow2);
+
+        // 4. Full-width Gradient Button: [ 💬 Falar com o Assistente ]
+        TextView btnChatHero = new TextView(this);
+        btnChatHero.setText("💬   Falar com o Assistente");
+        btnChatHero.setTextColor(Color.WHITE);
+        btnChatHero.setTextSize(sp(16.0f));
+        btnChatHero.setTypeface(null, 1);
+        btnChatHero.setGravity(17);
+        GradientDrawable chatBtnGrad = new GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            new int[]{Color.parseColor("#3B82F6"), Color.parseColor("#6366F1")}
+        );
+        chatBtnGrad.setCornerRadius(dp(18));
+        btnChatHero.setBackground(chatBtnGrad);
+        btnChatHero.setPadding(dp(18), dp(16), dp(18), dp(16));
+        LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(-1, -2);
+        chLp.bottomMargin = dp(20);
+        btnChatHero.setLayoutParams(chLp);
+        btnChatHero.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.aiSubView = "chat";
+                render();
+            }
+        });
+        linearLayout.addView(btnChatHero);
+
+        // 5. Card: "Pergunte ao Assistente" with 3 quick questions
+        LinearLayout askCard = new LinearLayout(this);
+        askCard.setOrientation(1);
+        askCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        askCard.setPadding(dp(20), dp(20), dp(20), dp(20));
+        LinearLayout.LayoutParams acLp = new LinearLayout.LayoutParams(-1, -2);
+        acLp.bottomMargin = dp(16);
+        askCard.setLayoutParams(acLp);
+
+        TextView tvAskTitle = new TextView(this);
+        tvAskTitle.setText("Pergunte ao Assistente");
+        tvAskTitle.setTextColor(this.cTextMain);
+        tvAskTitle.setTextSize(sp(16.0f));
+        tvAskTitle.setTypeface(null, 1);
+        tvAskTitle.setPadding(0, 0, 0, dp(14));
+        askCard.addView(tvAskTitle);
+
+        String[] quickQuestions = {
+            "Quais remédios tomo hoje?",
+            "Como está minha adesão?",
+            "Tenho algum remédio acabando?"
         };
+        for (int i = 0; i < quickQuestions.length; i++) {
+            final String qText = quickQuestions[i];
+            LinearLayout qBtn = new LinearLayout(this);
+            qBtn.setOrientation(0);
+            qBtn.setGravity(16);
+            qBtn.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+            qBtn.setPadding(dp(16), dp(14), dp(16), dp(14));
+            LinearLayout.LayoutParams qbLp = new LinearLayout.LayoutParams(-1, -2);
+            if (i < quickQuestions.length - 1) qbLp.bottomMargin = dp(10);
+            qBtn.setLayoutParams(qbLp);
 
-        for (final String qp : quickPrompts) {
-            TextView chip = new TextView(this);
-            chip.setText(qp);
-            chip.setTextSize(sp(12.0f));
-            chip.setTextColor(this.cPrimary);
-            chip.setBackground(shape(this.cPrimaryLight, 16, this.cPrimary, 1));
-            chip.setPadding(dp(12), dp(6), dp(12), dp(6));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.rightMargin = dp(8);
-            chip.setLayoutParams(lp);
-            chip.setOnClickListener(new View.OnClickListener() {
+            TextView tvQT = new TextView(this);
+            tvQT.setText(qText);
+            tvQT.setTextColor(this.cTextMain);
+            tvQT.setTextSize(sp(14.0f));
+            tvQT.setTypeface(null, 1);
+            tvQT.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            qBtn.addView(tvQT);
+
+            TextView tvQA = new TextView(this);
+            tvQA.setText("›");
+            tvQA.setTextColor(this.cPrimary);
+            tvQA.setTextSize(sp(18.0f));
+            tvQA.setTypeface(null, 1);
+            qBtn.addView(tvQA);
+
+            qBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    sendAiMessage(qp);
+                    MainActivity.this.aiSubView = "chat";
+                    sendAiMessage(qText);
                 }
             });
-            chipContainer.addView(chip);
+            askCard.addView(qBtn);
         }
-        hsv.addView(chipContainer);
-        linearLayout.addView(hsv);
+
+        linearLayout.addView(askCard);
+    }
+
+    private View makeAiGridCard(String emoji, String label, final String targetSubView, boolean isLeft) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
+        card.setPadding(dp(16), dp(18), dp(16), dp(18));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(115), 1.0f);
+        if (isLeft) lp.rightMargin = dp(6);
+        else lp.leftMargin = dp(6);
+        card.setLayoutParams(lp);
+
+        TextView tvE = new TextView(this);
+        tvE.setText(emoji);
+        tvE.setTextSize(sp(24.0f));
+        LinearLayout.LayoutParams eLp = new LinearLayout.LayoutParams(-2, 0, 1.0f);
+        tvE.setLayoutParams(eLp);
+        card.addView(tvE);
+
+        TextView tvL = new TextView(this);
+        tvL.setText(label);
+        tvL.setTextColor(this.cTextMain);
+        tvL.setTextSize(sp(14.0f));
+        tvL.setTypeface(null, 1);
+        card.addView(tvL);
+
+        card.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.aiSubView = targetSubView;
+                render();
+            }
+        });
+        return card;
+    }
+
+    private void buildAiStructuredSubView(LinearLayout linearLayout, String viewType) {
+        TextView btnBack = new TextView(this);
+        btnBack.setText("‹ Voltar");
+        btnBack.setTextColor(this.cPrimary);
+        btnBack.setTextSize(sp(15.0f));
+        btnBack.setTypeface(null, 1);
+        btnBack.setPadding(0, dp(4), dp(16), dp(16));
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.aiSubView = "main";
+                render();
+            }
+        });
+        linearLayout.addView(btnBack);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        String title = "";
+        String body = "";
+        if ("meds".equals(viewType)) {
+            title = "💊 Seus Medicamentos";
+            body = generateLocalAiFallbackResponse("explicar medicamentos");
+        } else if ("attention".equals(viewType)) {
+            title = "⚠️ Pontos de Atenção";
+            body = generateLocalAiFallbackResponse("resumo adesão e estoque");
+        } else if ("stock".equals(viewType)) {
+            title = "📦 Situação do Estoque";
+            body = generateLocalAiFallbackResponse("estoque");
+        } else if ("consult".equals(viewType)) {
+            title = "🩺 Resumo para Consulta";
+            body = generateLocalAiFallbackResponse("consulta médica");
+        }
+
+        TextView tvT = new TextView(this);
+        tvT.setText(title);
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(20.0f));
+        tvT.setTypeface(null, 1);
+        tvT.setPadding(0, 0, 0, dp(14));
+        card.addView(tvT);
+
+        final String finalBody = body;
+        TextView tvB = new TextView(this);
+        tvB.setText(body);
+        tvB.setTextColor(this.cTextMain);
+        tvB.setTextSize(sp(15.0f));
+        tvB.setLineSpacing(dp(4), 1.0f);
+        card.addView(tvB);
+
+        if ("consult".equals(viewType)) {
+            TextView btnShare = createButton("📤 Compartilhar Resumo", this.cPrimary, Color.WHITE);
+            LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(-1, -2);
+            shLp.topMargin = dp(20);
+            btnShare.setLayoutParams(shLp);
+            btnShare.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                        sendIntent.putExtra(Intent.EXTRA_TITLE, "Resumo MediCare para Consulta");
+                        sendIntent.putExtra(Intent.EXTRA_TEXT, finalBody);
+                        sendIntent.setType("text/plain");
+                        startActivity(Intent.createChooser(sendIntent, "Compartilhar Resumo"));
+                    } catch (Exception ignored) {}
+                }
+            });
+            card.addView(btnShare);
+        }
+
+        linearLayout.addView(card);
+    }
+
+    private void buildAiChatSubView(LinearLayout linearLayout) {
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(0);
+        topRow.setGravity(16);
+        LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(-1, -2);
+        trLp.bottomMargin = dp(12);
+        topRow.setLayoutParams(trLp);
+
+        TextView btnBack = new TextView(this);
+        btnBack.setText("‹");
+        btnBack.setTextColor(this.cTextMain);
+        btnBack.setTextSize(sp(22.0f));
+        btnBack.setGravity(17);
+        btnBack.setBackground(shape(this.cSurface, 12, this.cBorder, 1));
+        LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        bkLp.rightMargin = dp(12);
+        btnBack.setLayoutParams(bkLp);
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.aiSubView = "main";
+                render();
+            }
+        });
+        topRow.addView(btnBack);
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(1);
+        titleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvT = new TextView(this);
+        tvT.setText("Assistente de Saúde");
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(16.0f));
+        tvT.setTypeface(null, 1);
+        titleCol.addView(tvT);
+
+        TextView tvS = new TextView(this);
+        tvS.setText("Online • Respostas baseadas nos seus dados");
+        tvS.setTextColor(this.cSuccess);
+        tvS.setTextSize(sp(12.0f));
+        titleCol.addView(tvS);
+
+        topRow.addView(titleCol);
+        linearLayout.addView(topRow);
 
         LinearLayout chatCard = new LinearLayout(this);
         chatCard.setOrientation(1);
-        chatCard.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
+        chatCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
         chatCard.setPadding(dp(14), dp(14), dp(14), dp(14));
 
         ScrollView msgsScroll = new ScrollView(this);
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, dp(320));
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, dp(360));
         msgsScroll.setLayoutParams(scrollLp);
 
         LinearLayout msgsLayout = new LinearLayout(this);
@@ -2062,9 +4227,9 @@ public class MainActivity extends Activity {
             try {
                 JSONObject welcomeMsg = new JSONObject();
                 welcomeMsg.put("role", "assistant");
-                welcomeMsg.put("text", "Olá, " + this.profile.optString("nome", "paciente") + "! Sou seu Assistente Farmacêutico MediCare. Posso analisar interações entre seus medicamentos cadastrados, sugerir dicas de adesão e preparar resumos para suas consultas médicas. Como posso ajudar você hoje?");
+                welcomeMsg.put("text", "Olá, " + this.profile.optString("nome", "paciente") + "! Sou seu Assistente de Saúde. Como posso ajudar você hoje?");
                 this.aiMessages.put(welcomeMsg);
-            } catch (Exception e) {}
+            } catch (Exception ignored) {}
         }
 
         for (int i = 0; i < this.aiMessages.length(); i++) {
@@ -2076,13 +4241,13 @@ public class MainActivity extends Activity {
             LinearLayout msgRow = new LinearLayout(this);
             msgRow.setOrientation(0);
             LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
-            rowLp.bottomMargin = dp(8);
+            rowLp.bottomMargin = dp(10);
             msgRow.setLayoutParams(rowLp);
 
             TextView bubble = new TextView(this);
             bubble.setText(text);
-            bubble.setTextSize(sp(13.0f));
-            bubble.setPadding(dp(12), dp(10), dp(12), dp(10));
+            bubble.setTextSize(sp(14.0f));
+            bubble.setPadding(dp(14), dp(12), dp(14), dp(12));
 
             if ("user".equals(role)) {
                 msgRow.setGravity(5);
@@ -2112,19 +4277,19 @@ public class MainActivity extends Activity {
         inputRow.setPadding(0, dp(10), 0, 0);
 
         final EditText etInput = new EditText(this);
-        etInput.setHint("Pergunte algo sobre seus remédios...");
+        etInput.setHint("Digite sua dúvida aqui...");
         etInput.setHintTextColor(this.cTextLight);
         etInput.setTextColor(this.cTextMain);
         etInput.setTextSize(sp(14.0f));
-        etInput.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
-        etInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        etInput.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+        etInput.setPadding(dp(14), dp(11), dp(14), dp(11));
         LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
         etLp.rightMargin = dp(8);
         etInput.setLayoutParams(etLp);
         inputRow.addView(etInput);
 
         TextView btnSend = createButton("Enviar", this.cPrimary, Color.WHITE);
-        btnSend.setPadding(dp(14), dp(10), dp(14), dp(10));
+        btnSend.setPadding(dp(16), dp(11), dp(16), dp(11));
         btnSend.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -2135,24 +4300,7 @@ public class MainActivity extends Activity {
             }
         });
         inputRow.addView(btnSend);
-
         chatCard.addView(inputRow);
-
-        TextView btnClear = new TextView(this);
-        btnClear.setText("🗑️ Limpar Conversa");
-        btnClear.setTextColor(this.cTextMuted);
-        btnClear.setTextSize(sp(11.0f));
-        btnClear.setGravity(17);
-        btnClear.setPadding(0, dp(8), 0, 0);
-        btnClear.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                MainActivity.this.aiMessages = new JSONArray();
-                saveAll();
-                render();
-            }
-        });
-        chatCard.addView(btnClear);
 
         linearLayout.addView(chatCard);
     }
@@ -2209,7 +4357,7 @@ public class MainActivity extends Activity {
                         JSONObject respObj = new JSONObject(sb.toString());
                         responseText = respObj.optString("text", respObj.optString("resposta", ""));
                     }
-                } catch (Exception e) {}
+                } catch (Exception ignored) {}
 
                 if (responseText.isEmpty()) {
                     responseText = generateLocalAiFallbackResponse(prompt);
@@ -2226,7 +4374,7 @@ public class MainActivity extends Activity {
                             MainActivity.this.aiMessages.put(aiMsg);
                             saveAll();
                             render();
-                        } catch (Exception e) {}
+                        } catch (Exception ignored) {}
                     }
                 });
             }
@@ -2234,32 +4382,27 @@ public class MainActivity extends Activity {
     }
 
     private String generateLocalAiFallbackResponse(String prompt) {
-        String pLower = prompt.toLowerCase();
+        String pLower = prompt.toLowerCase(Locale.ROOT);
         int medCount = this.meds.length();
         int algCount = this.allergies.length();
 
-        if (pLower.contains("explicar") || pLower.contains("remédio") || pLower.contains("medica")) {
+        if (pLower.contains("explicar") || pLower.contains("hoje") || pLower.contains("remédio") || pLower.contains("medica")) {
             if (medCount == 0) {
-                return "Você ainda não possui nenhum medicamento cadastrado em seu perfil. Acesse a aba 'Medicamentos' para cadastrar suas prescrições e receber análises detalhadas sobre cada uma.";
+                return "Você ainda não cadastrou nenhum medicamento. Vá na aba Medicamentos para adicionar.";
             }
-            StringBuilder sb = new StringBuilder("Análise das suas prescrições ativas (" + medCount + " medicamento(s)):\n\n");
+            StringBuilder sb = new StringBuilder("Aqui está um resumo simples dos seus medicamentos:\n\n");
             for (int i = 0; i < medCount; i++) {
                 JSONObject m = this.meds.optJSONObject(i);
                 if (m != null) {
-                    sb.append("• ").append(m.optString("nome")).append(" ").append(m.optString("dosagem"))
-                      .append(": Tomar ").append(m.optString("frequencia")).append(". Estoque atual: ")
-                      .append(m.optInt("estoque_atual", 0)).append(" comprimido(s).\n");
+                    String tType = getMedType(m);
+                    String typeText = "continuous".equals(tType) ? "Uso contínuo" : ("temporary".equals(tType) ? "Tratamento temporário" : "Apenas se necessário (SOS)");
+                    sb.append("💊 ").append(m.optString("nome")).append(" (").append(m.optString("dosagem")).append(")\n")
+                      .append("• Tipo: ").append(typeText).append("\n")
+                      .append("• Horários: ").append(m.optJSONArray("horarios") != null && m.optJSONArray("horarios").length() > 0 ? joinArray(m.optJSONArray("horarios")) : "Livre").append("\n")
+                      .append("• Estoque: ").append(getMedStock(m)).append(" unid.\n\n");
                 }
             }
-            if (algCount > 0) {
-                sb.append("\n⚠️ Alergias registradas: ");
-                for (int j = 0; j < algCount; j++) {
-                    JSONObject a = this.allergies.optJSONObject(j);
-                    if (a != null) sb.append(a.optString("nome")).append(" ");
-                }
-                sb.append("— fique atento ao princípio ativo de novas prescrições!");
-            }
-            return sb.toString();
+            return sb.toString().trim();
         } else if (pLower.contains("adesão") || pLower.contains("adesao") || pLower.contains("resumo")) {
             int taken = 0;
             int total = this.doseLogs.length();
@@ -2268,175 +4411,299 @@ public class MainActivity extends Activity {
                 if (d != null && "tomado".equals(d.optString("status"))) taken++;
             }
             int pct = total > 0 ? (taken * 100 / total) : 100;
-            return "📊 Resumo de Adesão ao Tratamento:\n- Total de doses registradas: " + total + "\n- Doses tomadas no horário: " + taken + "\n- Índice de adesão: " + pct + "%\n\nContinue assim! A pontualidade garante a eficácia do seu tratamento.";
-        } else if (pLower.contains("estoque")) {
-            StringBuilder sb = new StringBuilder("📦 Diagnóstico de Estoque:\n");
-            int lowStock = 0;
+            return "📊 Resumo de Adesão ao Tratamento:\n• Doses registradas: " + total + "\n• Doses tomadas: " + taken + "\n• Índice de adesão: " + pct + "%\n\nContinue acompanhando seus horários diariamente!";
+        } else if (pLower.contains("estoque") || pLower.contains("acabando")) {
+            if (medCount == 0) return "Você não possui medicamentos cadastrados para controlar o estoque.";
+            StringBuilder sb = new StringBuilder("📦 Situação do seu estoque:\n\n");
             for (int i = 0; i < medCount; i++) {
                 JSONObject m = this.meds.optJSONObject(i);
                 if (m != null) {
-                    int current = m.optInt("estoque_atual", 0);
-                    int min = m.optInt("estoque_minimo", 5);
-                    sb.append("• ").append(m.optString("nome")).append(": ").append(current).append(" unid.");
-                    if (current <= min) {
-                        sb.append(" ⚠️ Reposição recomendada!");
-                        lowStock++;
-                    }
+                    int current = getMedStock(m);
+                    sb.append(current <= 5 ? "🚨 " : "✅ ").append(m.optString("nome")).append(": ").append(current).append(" unidades restantes");
+                    if (current <= 5) sb.append(" (Precisa repor em breve!)");
                     sb.append("\n");
                 }
             }
-            if (medCount == 0) sb.append("Nenhum medicamento cadastrado.");
-            else if (lowStock == 0) sb.append("\n✅ Todos os seus estoques estão em níveis seguros.");
-            return sb.toString();
+            return sb.toString().trim();
         } else if (pLower.contains("consulta") || pLower.contains("médico") || pLower.contains("medico")) {
-            return "🩺 Preparação para Consulta Médica:\n1. Leve a lista de remédios que você toma atualmente (" + medCount + " cadastrados).\n2. Relate qualquer sintoma atípico registrado no seu diário de saúde.\n3. Informe sobre alergias registradas (" + algCount + " cadastradas).\n4. Solicite renovação das receitas dos medicamentos com estoque baixo.";
+            return "🩺 Resumo para Consulta Médica\nPaciente: " + this.profile.optString("nome", "Não informado")
+                + "\nMedicamentos cadastrados: " + medCount
+                + "\nAlergias registradas: " + algCount
+                + "\n\nLeve este resumo para seu médico avaliar a evolução do seu tratamento.";
         } else {
-            return "Compreendi sua dúvida sobre '" + prompt + "'. Lembre-se sempre de consultar seu médico ou farmacêutico para orientações específicas de dosagem ou sintomas severos.";
+            return "Compreendi sua dúvida sobre \"" + prompt + "\". Caso sinta algum sintoma diferente ou tenha dúvidas sobre mudar horários, converse sempre com seu médico.";
         }
     }
 
     private void buildProfileTab(LinearLayout linearLayout) {
-        if ("personal".equals(this.profileSubView)) {
-            buildPersonalDataSubScreen(linearLayout);
-            return;
-        } else if ("emergency_card".equals(this.profileSubView)) {
-            buildEmergencyCardSubScreen(linearLayout);
-            return;
-        } else if ("health".equals(this.profileSubView)) {
-            buildHealthSubScreen(linearLayout);
-            return;
-        } else if ("contacts".equals(this.profileSubView)) {
-            buildContactsSubScreen(linearLayout);
-            return;
-        } else if ("professionals".equals(this.profileSubView)) {
-            buildProfessionalsSubScreen(linearLayout);
-            return;
-        } else if ("caregivers".equals(this.profileSubView)) {
-            buildCaregiversSubScreen(linearLayout);
-            return;
-        } else if ("stock_history".equals(this.profileSubView)) {
-            buildStockHistorySubScreen(linearLayout);
+        if (!"main".equals(this.profileSubView)) {
+            if (!"show_card".equals(this.profileSubView)) {
+                LinearLayout subHdr = new LinearLayout(this);
+                subHdr.setOrientation(0);
+                subHdr.setGravity(16);
+                LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(-1, -2);
+                shLp.bottomMargin = dp(18);
+                subHdr.setLayoutParams(shLp);
+
+                TextView btnBack = new TextView(this);
+                btnBack.setText("‹");
+                btnBack.setTextColor(this.cTextMain);
+                btnBack.setTextSize(sp(24.0f));
+                btnBack.setGravity(17);
+                btnBack.setBackground(shape(this.cSurface, 12, this.cBorder, 1));
+                LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+                bkLp.rightMargin = dp(14);
+                btnBack.setLayoutParams(bkLp);
+                btnBack.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.profileSubView = "main";
+                        render();
+                    }
+                });
+                subHdr.addView(btnBack);
+
+                TextView tvSubTitle = new TextView(this);
+                tvSubTitle.setText(getProfileSubViewTitle(this.profileSubView));
+                tvSubTitle.setTextColor(this.cTextMain);
+                tvSubTitle.setTextSize(sp(20.0f));
+                tvSubTitle.setTypeface(null, 1);
+                subHdr.addView(tvSubTitle);
+                linearLayout.addView(subHdr);
+            }
+
+            if ("personal".equals(this.profileSubView)) {
+                buildPersonalDataSubScreen(linearLayout);
+            } else if ("emergency_card".equals(this.profileSubView) || "show_card".equals(this.profileSubView)) {
+                buildEmergencyCardSubScreen(linearLayout);
+            } else if ("config_card".equals(this.profileSubView)) {
+                buildConfigCardSubScreen(linearLayout);
+            } else if ("health".equals(this.profileSubView)) {
+                buildHealthSubScreen(linearLayout);
+            } else if ("important_meds".equals(this.profileSubView)) {
+                buildImportantMedsSubScreen(linearLayout);
+            } else if ("contacts".equals(this.profileSubView)) {
+                buildContactsSubScreen(linearLayout);
+            } else if ("professionals".equals(this.profileSubView)) {
+                buildProfessionalsSubScreen(linearLayout);
+            } else if ("caregivers".equals(this.profileSubView)) {
+                buildCaregiversSubScreen(linearLayout);
+            } else if ("stock_history".equals(this.profileSubView) || "stock".equals(this.profileSubView)) {
+                buildStockHistorySubScreen(linearLayout);
+            } else if ("role_swap".equals(this.profileSubView)) {
+                buildRoleSwapSubScreen(linearLayout);
+            } else if ("privacy".equals(this.profileSubView)) {
+                buildPrivacySubScreen(linearLayout);
+            } else if ("prefs".equals(this.profileSubView)) {
+                buildPrefsSubScreen(linearLayout);
+            }
             return;
         }
 
-        linearLayout.addView(sectionHeader("Meu Perfil de Saúde", "Gerencie suas informações, segurança e contatos"));
+        // 1. Title: "Meu Perfil" (28sp bold)
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Meu Perfil");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(28.0f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setPadding(dp(4), 0, 0, dp(20));
+        linearLayout.addView(tvTitle);
 
-        LinearLayout headerCard = new LinearLayout(this);
-        headerCard.setOrientation(1);
-        headerCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
-        headerCard.setPadding(dp(18), dp(18), dp(18), dp(18));
-        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(-1, -2);
-        hLp.bottomMargin = dp(16);
-        headerCard.setLayoutParams(hLp);
+        // 2. Centered Avatar + Camera badge + Name + Age + Role Pill
+        LinearLayout heroCenter = new LinearLayout(this);
+        heroCenter.setOrientation(1);
+        heroCenter.setGravity(17);
+        LinearLayout.LayoutParams hcLp = new LinearLayout.LayoutParams(-1, -2);
+        hcLp.bottomMargin = dp(24);
+        heroCenter.setLayoutParams(hcLp);
 
-        TextView tvName = new TextView(this);
-        tvName.setText(this.profile.optString("nome", "Paciente"));
-        tvName.setTextColor(this.cTextMain);
-        tvName.setTextSize(sp(20.0f));
-        tvName.setTypeface(null, 1);
-        headerCard.addView(tvName);
+        FrameLayout avatarFrame = new FrameLayout(this);
+        LinearLayout.LayoutParams afLp = new LinearLayout.LayoutParams(dp(104), dp(104));
+        afLp.bottomMargin = dp(14);
+        avatarFrame.setLayoutParams(afLp);
 
-        TextView tvDetails = new TextView(this);
-        String sang = this.profile.optString("tipo_sanguineo", "-");
-        String peso = this.profile.optString("peso", "-");
-        String alt = this.profile.optString("altura", "-");
-        String cpf = this.profile.optString("cpf", "-");
-        String tel = this.profile.optString("telefone", "-");
-        tvDetails.setText("Tipo Sanguíneo: " + sang + " • Peso: " + peso + "kg • Altura: " + alt + "cm\nCPF: " + cpf + " • Tel: " + tel);
-        tvDetails.setTextColor(this.cTextMuted);
-        tvDetails.setTextSize(sp(12.0f));
-        tvDetails.setPadding(0, dp(6), 0, 0);
-        headerCard.addView(tvDetails);
+        String nomeStr = this.profile.optString("nome", "Seu Nome");
+        String initial = nomeStr.trim().isEmpty() ? "👤" : nomeStr.trim().substring(0, 1).toUpperCase(Locale.ROOT);
+        TextView tvAvatarCircle = new TextView(this);
+        tvAvatarCircle.setText(initial);
+        tvAvatarCircle.setTextColor(this.cTextMain);
+        tvAvatarCircle.setTextSize(sp(36.0f));
+        tvAvatarCircle.setTypeface(null, 1);
+        tvAvatarCircle.setGravity(17);
+        tvAvatarCircle.setBackground(shape(this.cSurface, 50, this.cPrimary, 2));
+        FrameLayout.LayoutParams acLp = new FrameLayout.LayoutParams(dp(100), dp(100), 17);
+        tvAvatarCircle.setLayoutParams(acLp);
+        avatarFrame.addView(tvAvatarCircle);
 
-        TextView btnEditPersonal = createButton("✏️ Editar Dados Pessoais", this.cPrimaryLight, this.cPrimary);
-        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(-1, -2);
-        editLp.topMargin = dp(12);
-        btnEditPersonal.setLayoutParams(editLp);
-        btnEditPersonal.setOnClickListener(new View.OnClickListener() {
+        TextView tvCamBadge = new TextView(this);
+        tvCamBadge.setText("📷");
+        tvCamBadge.setTextSize(sp(14.0f));
+        tvCamBadge.setGravity(17);
+        tvCamBadge.setBackground(shape(this.cPrimary, 16, this.cBgMain, 2));
+        FrameLayout.LayoutParams cbLp = new FrameLayout.LayoutParams(dp(32), dp(32), 85); // Gravity.BOTTOM | Gravity.RIGHT
+        tvCamBadge.setLayoutParams(cbLp);
+        avatarFrame.addView(tvCamBadge);
+
+        avatarFrame.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 MainActivity.this.profileSubView = "personal";
                 render();
             }
         });
-        headerCard.addView(btnEditPersonal);
+        heroCenter.addView(avatarFrame);
 
-        linearLayout.addView(headerCard);
+        TextView tvName = new TextView(this);
+        tvName.setText(nomeStr);
+        tvName.setTextColor(this.cTextMain);
+        tvName.setTextSize(sp(22.0f));
+        tvName.setTypeface(null, 1);
+        tvName.setGravity(17);
+        heroCenter.addView(tvName);
 
-        TextView tvMenuTitle = new TextView(this);
-        tvMenuTitle.setText("📋 Módulos de Saúde & Segurança");
-        tvMenuTitle.setTextColor(this.cTextMain);
-        tvMenuTitle.setTextSize(sp(15.0f));
-        tvMenuTitle.setTypeface(null, 1);
-        tvMenuTitle.setPadding(0, 0, 0, dp(10));
-        linearLayout.addView(tvMenuTitle);
+        int age = calculateProfileAge(this.profile.optString("data_nascimento", ""));
+        if (age > 0) {
+            TextView tvAge = new TextView(this);
+            tvAge.setText(age + " anos");
+            tvAge.setTextColor(this.cTextMuted);
+            tvAge.setTextSize(sp(15.0f));
+            tvAge.setGravity(17);
+            tvAge.setPadding(0, dp(4), 0, 0);
+            heroCenter.addView(tvAge);
+        }
 
-        linearLayout.addView(createProfileMenuItem("🚨 Cartão de Emergência (ICE)", "Alerta médico urgente com contatos, tipo sanguíneo e alergias", this.cDangerBg, this.cDanger, "emergency_card"));
-        linearLayout.addView(createProfileMenuItem("🩺 Alergias e Condições de Saúde", this.allergies.length() + " alergias, " + this.conditions.length() + " condições registradas", this.cSurface, this.cTextMain, "health"));
-        linearLayout.addView(createProfileMenuItem("📞 Contatos de Emergência", this.contacts.length() + " contatos cadastrados", this.cSurface, this.cTextMain, "contacts"));
-        linearLayout.addView(createProfileMenuItem("👨‍⚕️ Profissionais de Saúde", this.professionals.length() + " médicos/farmacêuticos cadastrados", this.cSurface, this.cTextMain, "professionals"));
-        linearLayout.addView(createProfileMenuItem("🤝 Cuidadores Vinculados", this.caregivers.length() + " cuidadores com acesso ao acompanhamento", this.cSurface, this.cTextMain, "caregivers"));
-        linearLayout.addView(createProfileMenuItem("📦 Histórico do Estoque", this.stockMovements.length() + " movimentações registradas", this.cSurface, this.cTextMain, "stock_history"));
+        String roleVal = this.profile.optString("user_role", "independent");
+        String roleLabel = "caregiver".equals(roleVal) ? "🤝 Cuidador" : ("patient".equals(roleVal) ? "🧑 Paciente" : "⚙️ Independente");
+        TextView tvRolePill = new TextView(this);
+        tvRolePill.setText(roleLabel);
+        tvRolePill.setTextColor(this.cTextMain);
+        tvRolePill.setTextSize(sp(12.0f));
+        tvRolePill.setTypeface(null, 1);
+        tvRolePill.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        tvRolePill.setPadding(dp(14), dp(5), dp(14), dp(5));
+        LinearLayout.LayoutParams rpLp = new LinearLayout.LayoutParams(-2, -2);
+        rpLp.topMargin = dp(8);
+        tvRolePill.setLayoutParams(rpLp);
+        heroCenter.addView(tvRolePill);
 
-        LinearLayout syncCard = new LinearLayout(this);
-        syncCard.setOrientation(1);
-        syncCard.setBackground(shape(this.cPrimaryLight, 18, this.cPrimary, 1));
-        syncCard.setPadding(dp(16), dp(16), dp(16), dp(16));
-        LinearLayout.LayoutParams syncLp = new LinearLayout.LayoutParams(-1, -2);
-        syncLp.topMargin = dp(10);
-        syncLp.bottomMargin = dp(14);
-        syncCard.setLayoutParams(syncLp);
+        linearLayout.addView(heroCenter);
 
-        TextView tvSyncTitle = new TextView(this);
-        tvSyncTitle.setText("☁️ Sincronização em Nuvem (PostgreSQL)");
-        tvSyncTitle.setTextColor(this.cPrimaryHover);
-        tvSyncTitle.setTextSize(sp(14.0f));
-        tvSyncTitle.setTypeface(null, 1);
-        syncCard.addView(tvSyncTitle);
+        // 3. Red Emergency Card (#EF4444) with [ Abrir Cartão ] and [ Configurar ]
+        LinearLayout emergCard = new LinearLayout(this);
+        emergCard.setOrientation(1);
+        emergCard.setBackground(shape(Color.parseColor("#EF4444"), 24, 0, 0));
+        emergCard.setPadding(dp(22), dp(22), dp(22), dp(22));
+        LinearLayout.LayoutParams emLp = new LinearLayout.LayoutParams(-1, -2);
+        emLp.bottomMargin = dp(24);
+        emergCard.setLayoutParams(emLp);
 
-        TextView tvSyncStatus = new TextView(this);
-        tvSyncStatus.setText("Status: " + this.lastSyncTimestamp + "\nToque para sincronizar seus registros com a nuvem agora.");
-        tvSyncStatus.setTextColor(this.cTextMain);
-        tvSyncStatus.setTextSize(sp(12.0f));
-        tvSyncStatus.setPadding(0, dp(4), 0, 0);
-        syncCard.addView(tvSyncStatus);
+        TextView tvEmTitle = new TextView(this);
+        tvEmTitle.setText("🚨  Cartão de Emergência");
+        tvEmTitle.setTextColor(Color.WHITE);
+        tvEmTitle.setTextSize(sp(18.0f));
+        tvEmTitle.setTypeface(null, 1);
+        emergCard.addView(tvEmTitle);
 
-        syncCard.setOnClickListener(new View.OnClickListener() {
+        TextView tvEmSub = new TextView(this);
+        tvEmSub.setText("Informações vitais para um momento de necessidade.");
+        tvEmSub.setTextColor(Color.parseColor("#E6FFFFFF"));
+        tvEmSub.setTextSize(sp(14.0f));
+        tvEmSub.setPadding(0, dp(8), 0, dp(18));
+        emergCard.addView(tvEmSub);
+
+        LinearLayout emBtnRow = new LinearLayout(this);
+        emBtnRow.setOrientation(0);
+
+        TextView btnOpenCard = new TextView(this);
+        btnOpenCard.setText("Abrir Cartão");
+        btnOpenCard.setTextColor(Color.parseColor("#EF4444"));
+        btnOpenCard.setTextSize(sp(15.0f));
+        btnOpenCard.setTypeface(null, 1);
+        btnOpenCard.setGravity(17);
+        btnOpenCard.setBackground(shape(Color.WHITE, 14, 0, 0));
+        btnOpenCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+        LinearLayout.LayoutParams ocLp = new LinearLayout.LayoutParams(0, -2, 1.3f);
+        ocLp.rightMargin = dp(10);
+        btnOpenCard.setLayoutParams(ocLp);
+        btnOpenCard.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                syncWithBackendSilently(true);
-            }
-        });
-        linearLayout.addView(syncCard);
-
-        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
-        btnLp.bottomMargin = dp(10);
-
-        TextView btnTheme = createButton(this.isDarkMode ? "☀️ Mudar para Tema Claro" : "🌙 Mudar para Tema Escuro", this.cSurface, this.cTextMain);
-        btnTheme.setLayoutParams(btnLp);
-        btnTheme.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                MainActivity.this.isDarkMode = !MainActivity.this.isDarkMode;
-                saveAll();
+                MainActivity.this.profileSubView = "show_card";
                 render();
             }
         });
-        linearLayout.addView(btnTheme);
+        emBtnRow.addView(btnOpenCard);
 
-        TextView btnAccess = createButton(this.isAccessibilityMode ? "🔤 Modo Acessibilidade: ATIVO (Fontes Grandes)" : "🔤 Ativar Modo Acessibilidade (Idosos)", this.cSurface, this.cTextMain);
-        btnAccess.setLayoutParams(btnLp);
-        btnAccess.setOnClickListener(new View.OnClickListener() {
+        TextView btnConfigCard = new TextView(this);
+        btnConfigCard.setText("Configurar");
+        btnConfigCard.setTextColor(Color.WHITE);
+        btnConfigCard.setTextSize(sp(14.0f));
+        btnConfigCard.setTypeface(null, 1);
+        btnConfigCard.setGravity(17);
+        btnConfigCard.setBackground(shape(Color.parseColor("#33FFFFFF"), 14, 0, 0));
+        btnConfigCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+        LinearLayout.LayoutParams ccLp = new LinearLayout.LayoutParams(0, -2, 0.9f);
+        btnConfigCard.setLayoutParams(ccLp);
+        btnConfigCard.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                MainActivity.this.isAccessibilityMode = !MainActivity.this.isAccessibilityMode;
-                saveAll();
+                MainActivity.this.profileSubView = "config_card";
                 render();
             }
         });
-        linearLayout.addView(btnAccess);
+        emBtnRow.addView(btnConfigCard);
 
-        TextView btnLogout = createButton("🚪 Sair da Conta", this.cDangerBg, this.cDanger);
+        emergCard.addView(emBtnRow);
+        linearLayout.addView(emergCard);
+
+        // 4. Grouped Navigation Menu Card (borderRadius: 24dp) with 10 rows
+        LinearLayout menuCard = new LinearLayout(this);
+        menuCard.setOrientation(1);
+        menuCard.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        menuCard.setPadding(dp(8), dp(8), dp(8), dp(8));
+        LinearLayout.LayoutParams mcLp = new LinearLayout.LayoutParams(-1, -2);
+        mcLp.bottomMargin = dp(24);
+        menuCard.setLayoutParams(mcLp);
+
+        String[][] navItems = {
+            {"👤", "Dados pessoais", "Nome, nascimento, peso, altura...", "personal"},
+            {"❤️", "Saúde", "Alergias e condições importantes...", "health"},
+            {"💊", "Tratamento", "Medicamentos para emergência...", "important_meds"},
+            {"👨‍⚕️", "Profissionais", "Médicos e especialistas...", "professionals"},
+            {"👨‍👩‍👧", "Contatos", "Emergência e familiares...", "contacts"},
+            {"🤝", "Cuidadores", "Quem acompanha seu tratamento...", "caregivers"},
+            {"📦", "Estoque", "Histórico e previsões...", "stock"},
+            {"🔄", "Mudar Perfil", "Alterar tipo de conta...", "role_swap"},
+            {"🔐", "Privacidade", "Controle dos seus dados...", "privacy"},
+            {"⚙️", "Preferências", "Acessibilidade e notificações...", "prefs"}
+        };
+
+        for (int i = 0; i < navItems.length; i++) {
+            menuCard.addView(createProfileNavRow(navItems[i][0], navItems[i][1], navItems[i][2], navItems[i][3]));
+            if (i < navItems.length - 1) {
+                View div = new View(this);
+                div.setBackgroundColor(this.cBorder);
+                LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(-1, dp(1));
+                dLp.leftMargin = dp(12);
+                dLp.rightMargin = dp(12);
+                div.setLayoutParams(dLp);
+                menuCard.addView(div);
+            }
+        }
+        linearLayout.addView(menuCard);
+
+        // 5. Logout Button: [ 🚪 Sair da conta ]
+        TextView btnLogout = new TextView(this);
+        btnLogout.setText("🚪  Sair da conta");
+        btnLogout.setTextColor(Color.parseColor("#EF4444"));
+        btnLogout.setTextSize(sp(16.0f));
+        btnLogout.setTypeface(null, 1);
+        btnLogout.setGravity(17);
+        btnLogout.setBackground(shape(Color.parseColor("#1AEF4444"), 18, Color.parseColor("#33EF4444"), 1));
+        btnLogout.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout.LayoutParams loLp = new LinearLayout.LayoutParams(-1, -2);
+        loLp.bottomMargin = dp(20);
+        btnLogout.setLayoutParams(loLp);
         btnLogout.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -2448,40 +4715,321 @@ public class MainActivity extends Activity {
         linearLayout.addView(btnLogout);
     }
 
-    private View createProfileMenuItem(String title, String subtitle, int bgColor, int textColor, final String subViewTarget) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(1);
-        card.setBackground(shape(bgColor, 16, this.cBorder, 1));
-        card.setPadding(dp(14), dp(12), dp(14), dp(12));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.bottomMargin = dp(10);
-        card.setLayoutParams(lp);
+    private View createProfileNavRow(String icon, String title, String subtitle, final String subViewTarget) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(0);
+        row.setGravity(16);
+        row.setPadding(dp(14), dp(16), dp(14), dp(16));
+
+        TextView tvI = new TextView(this);
+        tvI.setText(icon);
+        tvI.setTextSize(sp(22.0f));
+        tvI.setGravity(17);
+        LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(36), -2);
+        iLp.rightMargin = dp(14);
+        tvI.setLayoutParams(iLp);
+        row.addView(tvI);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(1);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
         TextView tvT = new TextView(this);
         tvT.setText(title);
-        tvT.setTextColor(textColor);
-        tvT.setTextSize(sp(14.0f));
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(16.0f));
         tvT.setTypeface(null, 1);
-        card.addView(tvT);
+        col.addView(tvT);
 
-        if (subtitle != null && !subtitle.isEmpty()) {
-            TextView tvS = new TextView(this);
-            tvS.setText(subtitle);
-            tvS.setTextColor(textColor == this.cDanger ? this.cDanger : this.cTextMuted);
-            tvS.setTextSize(sp(12.0f));
-            tvS.setPadding(0, dp(2), 0, 0);
-            card.addView(tvS);
-        }
+        TextView tvS = new TextView(this);
+        tvS.setText(subtitle);
+        tvS.setTextColor(this.cTextMuted);
+        tvS.setTextSize(sp(13.0f));
+        tvS.setPadding(0, dp(2), 0, 0);
+        col.addView(tvS);
 
-        card.setOnClickListener(new View.OnClickListener() {
+        row.addView(col);
+
+        TextView tvChev = new TextView(this);
+        tvChev.setText("›");
+        tvChev.setTextColor(this.cTextMuted);
+        tvChev.setTextSize(sp(20.0f));
+        row.addView(tvChev);
+
+        row.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 MainActivity.this.profileSubView = subViewTarget;
                 render();
             }
         });
+        return row;
+    }
 
-        return card;
+    private String getProfileSubViewTitle(String sub) {
+        if ("personal".equals(sub)) return "Dados Pessoais";
+        if ("health".equals(sub)) return "Saúde";
+        if ("important_meds".equals(sub)) return "Tratamento";
+        if ("professionals".equals(sub)) return "Profissionais";
+        if ("contacts".equals(sub)) return "Contatos";
+        if ("caregivers".equals(sub)) return "Cuidadores";
+        if ("stock".equals(sub) || "stock_history".equals(sub)) return "Estoque";
+        if ("role_swap".equals(sub)) return "Mudar Perfil";
+        if ("privacy".equals(sub)) return "Privacidade";
+        if ("prefs".equals(sub)) return "Preferências";
+        if ("config_card".equals(sub)) return "Configurar Cartão";
+        return "Meu Perfil";
+    }
+
+    private int calculateProfileAge(String dob) {
+        if (dob == null || dob.trim().isEmpty()) return 0;
+        try {
+            String s = dob.trim();
+            int year = 0;
+            if (s.contains("-")) {
+                year = Integer.parseInt(s.split("-")[0]);
+            } else if (s.contains("/")) {
+                String[] parts = s.split("/");
+                year = Integer.parseInt(parts[parts.length - 1]);
+            }
+            if (year > 1900) {
+                int curYear = Calendar.getInstance().get(Calendar.YEAR);
+                return Math.max(0, curYear - year);
+            }
+        } catch (Exception ignored) {}
+        return 0;
+    }
+
+    private void buildConfigCardSubScreen(LinearLayout linearLayout) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Escolha quais informações aparecerão no seu Cartão de Emergência:");
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(14.0f));
+        tvSub.setPadding(0, 0, 0, dp(14));
+        card.addView(tvSub);
+
+        String[][] toggles = {
+            {"ec_show_allergies", "Exibir alergias"},
+            {"ec_show_conditions", "Exibir condições médicas"},
+            {"ec_show_meds", "Exibir medicamentos importantes"},
+            {"ec_show_contacts", "Exibir contatos de emergência"},
+            {"ec_show_doctors", "Exibir médico responsável"},
+            {"ec_show_notes", "Exibir observações importantes"}
+        };
+        for (final String[] tg : toggles) {
+            final CheckBox cb = new CheckBox(this);
+            cb.setText("  " + tg[1]);
+            cb.setTextColor(this.cTextMain);
+            cb.setTextSize(sp(15.0f));
+            cb.setChecked(this.profile.optBoolean(tg[0], true));
+            cb.setPadding(0, dp(10), 0, dp(10));
+            cb.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        MainActivity.this.profile.put(tg[0], cb.isChecked());
+                        saveAll();
+                    } catch (Exception ignored) {}
+                }
+            });
+            card.addView(cb);
+        }
+        linearLayout.addView(card);
+    }
+
+    private void buildImportantMedsSubScreen(LinearLayout linearLayout) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Selecione quais medicamentos devem aparecer em destaque no seu Cartão de Emergência:");
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(14.0f));
+        tvSub.setPadding(0, 0, 0, dp(14));
+        card.addView(tvSub);
+
+        if (this.meds.length() == 0) {
+            TextView tvEmpty = new TextView(this);
+            tvEmpty.setText("Nenhum medicamento cadastrado.");
+            tvEmpty.setTextColor(this.cTextMuted);
+            tvEmpty.setTextSize(sp(14.0f));
+            card.addView(tvEmpty);
+        } else {
+            for (int i = 0; i < this.meds.length(); i++) {
+                final JSONObject m = this.meds.optJSONObject(i);
+                if (m == null) continue;
+                final CheckBox cb = new CheckBox(this);
+                cb.setText("  💊 " + m.optString("nome") + " (" + m.optString("dosagem") + ")");
+                cb.setTextColor(this.cTextMain);
+                cb.setTextSize(sp(15.0f));
+                cb.setChecked(m.optBoolean("important_for_emergency", true));
+                cb.setPadding(0, dp(10), 0, dp(10));
+                cb.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        try {
+                            m.put("important_for_emergency", cb.isChecked());
+                            saveAll();
+                        } catch (Exception ignored) {}
+                    }
+                });
+                card.addView(cb);
+            }
+        }
+        linearLayout.addView(card);
+    }
+
+    private void buildRoleSwapSubScreen(LinearLayout linearLayout) {
+        String curRole = this.profile.optString("user_role", "independent");
+        String[][] roles = {
+            {"patient", "🧑", "Sou Paciente", "Tenho alguém que me ajuda a controlar meus remédios."},
+            {"caregiver", "🤝", "Sou Cuidador", "Ajudo outra pessoa (familiar ou paciente) com o tratamento."},
+            {"independent", "⚙️", "Uso Independente", "Cuido do meu próprio tratamento sozinho."}
+        };
+        for (final String[] r : roles) {
+            boolean active = r[0].equals(curRole);
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(0);
+            card.setGravity(16);
+            card.setBackground(shape(active ? Color.parseColor("#1A3B82F6") : this.cSurface, 18, active ? this.cPrimary : this.cBorder, active ? 2 : 1));
+            card.setPadding(dp(18), dp(18), dp(18), dp(18));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(12);
+            card.setLayoutParams(lp);
+
+            TextView tvI = new TextView(this);
+            tvI.setText(r[1]);
+            tvI.setTextSize(sp(28.0f));
+            tvI.setPadding(0, 0, dp(14), 0);
+            card.addView(tvI);
+
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(1);
+            col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+            TextView tvT = new TextView(this);
+            tvT.setText(r[2] + (active ? "  [Atual]" : ""));
+            tvT.setTextColor(active ? this.cPrimary : this.cTextMain);
+            tvT.setTextSize(sp(16.0f));
+            tvT.setTypeface(null, 1);
+            col.addView(tvT);
+
+            TextView tvD = new TextView(this);
+            tvD.setText(r[3]);
+            tvD.setTextColor(this.cTextMuted);
+            tvD.setTextSize(sp(13.0f));
+            tvD.setPadding(0, dp(4), 0, 0);
+            col.addView(tvD);
+
+            card.addView(col);
+            card.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        MainActivity.this.profile.put("user_role", r[0]);
+                        saveAll();
+                        render();
+                        Toast.makeText(MainActivity.this, "Perfil alterado para " + r[2], 0).show();
+                    } catch (Exception ignored) {}
+                }
+            });
+            linearLayout.addView(card);
+        }
+    }
+
+    private void buildPrivacySubScreen(LinearLayout linearLayout) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        TextView tvInfo = new TextView(this);
+        tvInfo.setText("Seus dados de saúde são armazenados com segurança no dispositivo e sincronizados com o servidor MediCare.");
+        tvInfo.setTextColor(this.cTextMuted);
+        tvInfo.setTextSize(sp(14.0f));
+        tvInfo.setPadding(0, 0, 0, dp(16));
+        card.addView(tvInfo);
+
+        TextView btnSync = createButton("☁️ Sincronizar dados agora", this.cPrimary, Color.WHITE);
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(-1, -2);
+        sLp.bottomMargin = dp(12);
+        btnSync.setLayoutParams(sLp);
+        btnSync.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                syncWithBackendSilently(true);
+            }
+        });
+        card.addView(btnSync);
+
+        TextView btnExport = createButton("📤 Exportar meus dados (JSON)", this.cBgMain, this.cTextMain);
+        btnExport.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                    sendIntent.putExtra(Intent.EXTRA_TEXT, MainActivity.this.profile.toString(2));
+                    sendIntent.setType("text/plain");
+                    startActivity(Intent.createChooser(sendIntent, "Exportar Dados"));
+                } catch (Exception ignored) {}
+            }
+        });
+        card.addView(btnExport);
+        linearLayout.addView(card);
+    }
+
+    private void buildPrefsSubScreen(LinearLayout linearLayout) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(1);
+        card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        card.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
+        btnLp.bottomMargin = dp(12);
+
+        TextView btnTheme = createButton(this.isDarkMode ? "☀️ Mudar para Tema Claro" : "🌙 Mudar para Tema Escuro", this.cBgMain, this.cTextMain);
+        btnTheme.setLayoutParams(btnLp);
+        btnTheme.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.isDarkMode = !MainActivity.this.isDarkMode;
+                saveAll();
+                render();
+            }
+        });
+        card.addView(btnTheme);
+
+        TextView btnAccess = createButton(this.isAccessibilityMode ? "🔤 Fonte Ampliada (Idosos): ATIVA" : "🔤 Ativar Fonte Ampliada (Idosos)", this.cBgMain, this.cTextMain);
+        btnAccess.setLayoutParams(btnLp);
+        btnAccess.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.isAccessibilityMode = !MainActivity.this.isAccessibilityMode;
+                saveAll();
+                render();
+            }
+        });
+        card.addView(btnAccess);
+
+        TextView btnContrast = createButton(this.isHighContrast ? "👁 Alto Contraste: ATIVO" : "👁 Ativar Alto Contraste", this.cBgMain, this.cTextMain);
+        btnContrast.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.isHighContrast = !MainActivity.this.isHighContrast;
+                saveAll();
+                render();
+            }
+        });
+        card.addView(btnContrast);
+
+        linearLayout.addView(card);
     }
 
     private void buildPersonalDataSubScreen(LinearLayout linearLayout) {
@@ -2535,6 +5083,19 @@ public class MainActivity extends Activity {
     }
 
     private void buildEmergencyCardSubScreen(LinearLayout linearLayout) {
+        TextView btnCloseCard = createButton("✕ Fechar Cartão", this.cSurface, this.cTextMain);
+        LinearLayout.LayoutParams ccLp = new LinearLayout.LayoutParams(-1, -2);
+        ccLp.bottomMargin = dp(14);
+        btnCloseCard.setLayoutParams(ccLp);
+        btnCloseCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.profileSubView = "main";
+                render();
+            }
+        });
+        linearLayout.addView(btnCloseCard);
+
         LinearLayout banner = new LinearLayout(this);
         banner.setOrientation(1);
         banner.setBackground(shape(this.cDanger, 18, 0, 0));
