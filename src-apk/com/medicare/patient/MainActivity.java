@@ -7,14 +7,24 @@ import android.app.TimePickerDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.BitmapShader;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Shader;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.util.Base64;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.CheckBox;
@@ -29,6 +39,8 @@ import android.widget.TextView;
 import android.widget.TimePicker;
 import android.widget.Toast;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -50,6 +62,8 @@ import org.json.JSONObject;
 public class MainActivity extends Activity {
     private static final String EMBEDDED_API_KEY = "";
     private static final String EMBEDDED_BACKEND_URL = "http://144.22.160.191:3009";
+    private static final int REQ_PICK_PROFILE_PHOTO = 1001;
+    private static final int REQ_CAPTURE_PROFILE_PHOTO = 1002;
     private JSONArray allergies;
     private JSONObject calNotes;
     private JSONArray calNotesList = new JSONArray();
@@ -123,6 +137,607 @@ public class MainActivity extends Activity {
         setContentView(frameLayout);
         render();
         syncWithBackendSilently(false);
+    }
+
+    @Override // android.app.Activity
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if ((requestCode == REQ_PICK_PROFILE_PHOTO || requestCode == REQ_CAPTURE_PROFILE_PHOTO) && resultCode == RESULT_OK && data != null) {
+            try {
+                Bitmap rawBmp = null;
+                if (data.getData() != null) {
+                    Uri imgUri = data.getData();
+                    InputStream is = getContentResolver().openInputStream(imgUri);
+                    if (is != null) {
+                        BitmapFactory.Options opts = new BitmapFactory.Options();
+                        opts.inSampleSize = 2;
+                        rawBmp = BitmapFactory.decodeStream(is, null, opts);
+                        is.close();
+                        if (rawBmp == null) {
+                            InputStream is2 = getContentResolver().openInputStream(imgUri);
+                            if (is2 != null) {
+                                rawBmp = BitmapFactory.decodeStream(is2);
+                                is2.close();
+                            }
+                        }
+                    }
+                } else if (data.getExtras() != null && data.getExtras().get("data") instanceof Bitmap) {
+                    rawBmp = (Bitmap) data.getExtras().get("data");
+                }
+                if (rawBmp != null) {
+                    int w = rawBmp.getWidth();
+                    int h = rawBmp.getHeight();
+                    int side = Math.min(w, h);
+                    int xOff = (w - side) / 2;
+                    int yOff = (h - side) / 2;
+                    Bitmap squareBmp = Bitmap.createBitmap(rawBmp, xOff, yOff, side, side);
+                    Bitmap scaledBmp = Bitmap.createScaledBitmap(squareBmp, 240, 240, true);
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    scaledBmp.compress(Bitmap.CompressFormat.JPEG, 82, baos);
+                    String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+                    this.profile.put("foto_base64", b64);
+                    this.profile.put("foto_url", "data:image/jpeg;base64," + b64);
+                    saveAll();
+                    render();
+                    Toast.makeText(this, "✓ Foto de perfil atualizada!", 0).show();
+                } else {
+                    Toast.makeText(this, "Não foi possível carregar a imagem selecionada", 0).show();
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Erro ao processar foto: " + e.getMessage(), 0).show();
+            }
+        }
+    }
+
+    private void styleDialogWindow(AlertDialog dialog) {
+        if (dialog != null && dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+    }
+
+    private void showStyledConfirmDialog(String titleText, String messageText, String confirmText, String cancelText, int confirmColor, final Runnable onConfirm) {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 22, this.cBorder, 1));
+        root.setPadding(dp(22), dp(22), dp(22), dp(20));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(titleText);
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(18.0f));
+        tvTitle.setTypeface(null, 1);
+        root.addView(tvTitle);
+
+        TextView tvDesc = new TextView(this);
+        tvDesc.setText(messageText);
+        tvDesc.setTextColor(this.cTextMuted);
+        tvDesc.setTextSize(sp(14.5f));
+        tvDesc.setLineSpacing(dp(2), 1.05f);
+        tvDesc.setPadding(0, dp(10), 0, dp(20));
+        root.addView(tvDesc);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(0);
+        btnRow.setGravity(16);
+
+        if (cancelText != null && !cancelText.isEmpty()) {
+            TextView btnCancel = new TextView(this);
+            btnCancel.setText(cancelText);
+            btnCancel.setTextColor(this.cTextMain);
+            btnCancel.setTextSize(sp(14.0f));
+            btnCancel.setTypeface(null, 1);
+            btnCancel.setGravity(17);
+            btnCancel.setBackground(shape(this.cSurfaceHover, 13, this.cBorder, 1));
+            btnCancel.setPadding(dp(14), dp(13), dp(14), dp(13));
+            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            cLp.rightMargin = dp(10);
+            btnCancel.setLayoutParams(cLp);
+            btnCancel.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                }
+            });
+            btnRow.addView(btnCancel);
+        }
+
+        TextView btnOk = new TextView(this);
+        btnOk.setText(confirmText);
+        btnOk.setTextColor(Color.WHITE);
+        btnOk.setTextSize(sp(14.0f));
+        btnOk.setTypeface(null, 1);
+        btnOk.setGravity(17);
+        btnOk.setBackground(shape(confirmColor, 13, 0, 0));
+        btnOk.setPadding(dp(14), dp(13), dp(14), dp(13));
+        btnOk.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.15f));
+        btnOk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (onConfirm != null) {
+                    onConfirm.run();
+                }
+            }
+        });
+        btnRow.addView(btnOk);
+
+        root.addView(btnRow);
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    private void showStyledSelectDialog(String titleText, final String[] options, int selectedIdx, final DialogInterface.OnClickListener onSelect) {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 22, this.cBorder, 1));
+        root.setPadding(dp(20), dp(20), dp(20), dp(16));
+
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(0, 0, 0, dp(12));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(titleText);
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(17.5f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hdr.addView(tvTitle);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(14.0f));
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 16, 0, 0));
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(32), dp(32)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(1);
+        for (int i = 0; i < options.length; i++) {
+            final int idx = i;
+            boolean isSel = (i == selectedIdx);
+            LinearLayout itemRow = new LinearLayout(this);
+            itemRow.setOrientation(0);
+            itemRow.setGravity(16);
+            int rowBg = isSel ? Color.argb(30, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)) : this.cBgMain;
+            int rowBorder = isSel ? this.cPrimary : this.cBorder;
+            itemRow.setBackground(shape(rowBg, 12, rowBorder, 1));
+            itemRow.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(-1, -2);
+            if (i < options.length - 1) rLp.bottomMargin = dp(8);
+            itemRow.setLayoutParams(rLp);
+
+            TextView tvOpt = new TextView(this);
+            tvOpt.setText(options[i]);
+            tvOpt.setTextColor(isSel ? this.cPrimary : this.cTextMain);
+            tvOpt.setTextSize(sp(14.5f));
+            if (isSel) tvOpt.setTypeface(null, 1);
+            tvOpt.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            itemRow.addView(tvOpt);
+
+            if (isSel) {
+                TextView tvChk = new TextView(this);
+                tvChk.setText("✓");
+                tvChk.setTextColor(this.cPrimary);
+                tvChk.setTextSize(sp(15.0f));
+                tvChk.setTypeface(null, 1);
+                itemRow.addView(tvChk);
+            }
+
+            itemRow.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                    if (onSelect != null) {
+                        onSelect.onClick(dialog, idx);
+                    }
+                }
+            });
+            list.addView(itemRow);
+        }
+        sv.addView(list);
+        root.addView(sv);
+
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    private void showStyledFormModal(String titleText, View bodyContent, String confirmText, String cancelText, int confirmColor, final Runnable onConfirm) {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        root.setPadding(dp(20), dp(20), dp(20), dp(18));
+
+        if (titleText != null && !titleText.isEmpty()) {
+            LinearLayout hdr = new LinearLayout(this);
+            hdr.setOrientation(0);
+            hdr.setGravity(16);
+            hdr.setPadding(0, 0, 0, dp(14));
+
+            TextView tvTitle = new TextView(this);
+            tvTitle.setText(titleText);
+            tvTitle.setTextColor(this.cTextMain);
+            tvTitle.setTextSize(sp(17.5f));
+            tvTitle.setTypeface(null, 1);
+            tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            hdr.addView(tvTitle);
+
+            TextView btnClose = new TextView(this);
+            btnClose.setText("✕");
+            btnClose.setTextColor(this.cTextMuted);
+            btnClose.setTextSize(sp(14.0f));
+            btnClose.setGravity(17);
+            btnClose.setBackground(shape(this.cSurfaceHover, 16, 0, 0));
+            btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(32), dp(32)));
+            btnClose.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                }
+            });
+            hdr.addView(btnClose);
+            root.addView(hdr);
+        }
+
+        if (bodyContent != null) {
+            root.addView(bodyContent);
+        }
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(0);
+        btnRow.setGravity(16);
+        LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(-1, -2);
+        brLp.topMargin = dp(12);
+        btnRow.setLayoutParams(brLp);
+
+        if (cancelText != null && !cancelText.isEmpty()) {
+            TextView btnCancel = new TextView(this);
+            btnCancel.setText(cancelText);
+            btnCancel.setTextColor(this.cTextMain);
+            btnCancel.setTextSize(sp(14.0f));
+            btnCancel.setTypeface(null, 1);
+            btnCancel.setGravity(17);
+            btnCancel.setBackground(shape(this.cBgMain, 13, this.cBorder, 1));
+            btnCancel.setPadding(dp(14), dp(13), dp(14), dp(13));
+            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            cLp.rightMargin = dp(10);
+            btnCancel.setLayoutParams(cLp);
+            btnCancel.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                }
+            });
+            btnRow.addView(btnCancel);
+        }
+
+        TextView btnOk = new TextView(this);
+        btnOk.setText(confirmText);
+        btnOk.setTextColor(Color.WHITE);
+        btnOk.setTextSize(sp(14.0f));
+        btnOk.setTypeface(null, 1);
+        btnOk.setGravity(17);
+        btnOk.setBackground(shape(confirmColor, 13, 0, 0));
+        btnOk.setPadding(dp(14), dp(13), dp(14), dp(13));
+        btnOk.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.2f));
+        btnOk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (onConfirm != null) {
+                    onConfirm.run();
+                }
+            }
+        });
+        btnRow.addView(btnOk);
+
+        root.addView(btnRow);
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    private Bitmap getProfileCircularBitmap(int diameterPx, int ringColor) {
+        try {
+            String b64 = this.profile.optString("foto_base64", "").trim();
+            if (b64.isEmpty()) {
+                String fotoUrl = this.profile.optString("foto_url", "").trim();
+                if (fotoUrl.startsWith("data:image") && fotoUrl.contains(",")) {
+                    b64 = fotoUrl.substring(fotoUrl.indexOf(",") + 1).trim();
+                }
+            }
+            if (b64.isEmpty()) return null;
+            byte[] decoded = Base64.decode(b64, Base64.DEFAULT);
+            if (decoded == null || decoded.length == 0) return null;
+            Bitmap src = BitmapFactory.decodeByteArray(decoded, 0, decoded.length);
+            if (src == null) return null;
+
+            Bitmap output = Bitmap.createBitmap(diameterPx, diameterPx, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(output);
+
+            Bitmap scaled = Bitmap.createScaledBitmap(src, diameterPx, diameterPx, true);
+            BitmapShader shader = new BitmapShader(scaled, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            paint.setShader(shader);
+
+            float radius = diameterPx / 2.0f;
+            float strokeW = dp(2);
+            canvas.drawCircle(radius, radius, radius - strokeW, paint);
+
+            Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            borderPaint.setStyle(Paint.Style.STROKE);
+            borderPaint.setColor(ringColor);
+            borderPaint.setStrokeWidth(strokeW);
+            canvas.drawCircle(radius, radius, radius - (strokeW / 2.0f), borderPaint);
+
+            return output;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int getProfileAvatarAccentColor() {
+        String hex = this.profile.optString("avatar_color", "#3B82F6").trim();
+        try {
+            return Color.parseColor(hex);
+        } catch (Exception e) {
+            return this.cPrimary;
+        }
+    }
+
+    private View buildProfileAvatarView(int sizeDp, boolean showCameraBadge, final Runnable onClickAction) {
+        FrameLayout avatarFrame = new FrameLayout(this);
+        int outerSize = dp(sizeDp + (showCameraBadge ? 6 : 0));
+        int circlePx = dp(sizeDp);
+        avatarFrame.setLayoutParams(new LinearLayout.LayoutParams(outerSize, outerSize));
+
+        int accentCol = getProfileAvatarAccentColor();
+        Bitmap circBmp = getProfileCircularBitmap(circlePx, accentCol);
+        if (circBmp != null) {
+            ImageView iv = new ImageView(this);
+            iv.setImageBitmap(circBmp);
+            iv.setScaleType(ImageView.ScaleType.FIT_XY);
+            FrameLayout.LayoutParams ivLp = new FrameLayout.LayoutParams(circlePx, circlePx, 17);
+            iv.setLayoutParams(ivLp);
+            avatarFrame.addView(iv);
+        } else {
+            String socialName = this.profile.optString("social_name", "").trim();
+            String fullName = this.profile.optString("nome", "Seu Nome").trim();
+            String displayName = !socialName.isEmpty() ? socialName : (!fullName.isEmpty() ? fullName : "Seu Nome");
+            String initial = displayName.isEmpty() ? "👤" : displayName.substring(0, 1).toUpperCase(Locale.ROOT);
+            int circleBg = Color.argb(this.isDarkMode ? 45 : 28, Color.red(accentCol), Color.green(accentCol), Color.blue(accentCol));
+
+            TextView tvAvatarCircle = new TextView(this);
+            tvAvatarCircle.setText(initial);
+            tvAvatarCircle.setTextColor(this.cTextMain);
+            tvAvatarCircle.setTextSize(sp(sizeDp * 0.35f));
+            tvAvatarCircle.setTypeface(null, 1);
+            tvAvatarCircle.setGravity(17);
+            tvAvatarCircle.setBackground(shape(circleBg, sizeDp / 2 + 4, accentCol, 2));
+            FrameLayout.LayoutParams acLp = new FrameLayout.LayoutParams(circlePx, circlePx, 17);
+            tvAvatarCircle.setLayoutParams(acLp);
+            avatarFrame.addView(tvAvatarCircle);
+        }
+
+        if (showCameraBadge) {
+            TextView tvCamBadge = new TextView(this);
+            tvCamBadge.setText("📷");
+            tvCamBadge.setTextSize(sp(14.0f));
+            tvCamBadge.setGravity(17);
+            tvCamBadge.setBackground(shape(accentCol, 18, this.cBgMain, 2));
+            int badgePx = dp(34);
+            FrameLayout.LayoutParams cbLp = new FrameLayout.LayoutParams(badgePx, badgePx, 85);
+            tvCamBadge.setLayoutParams(cbLp);
+            tvCamBadge.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (onClickAction != null) onClickAction.run();
+                }
+            });
+            avatarFrame.addView(tvCamBadge);
+        }
+
+        avatarFrame.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (onClickAction != null) onClickAction.run();
+            }
+        });
+        return avatarFrame;
+    }
+
+    private void showPhotoOptionsDialog() {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        root.setPadding(dp(22), dp(22), dp(22), dp(20));
+
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(0, 0, 0, dp(14));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("📷 Foto do Perfil");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(18.5f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hdr.addView(tvTitle);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(15.0f));
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 18, 0, 0));
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Escolha uma foto da sua galeria, tire uma foto agora ou personalize a cor do seu avatar.");
+        tvSub.setTextColor(this.cTextMuted);
+        tvSub.setTextSize(sp(13.0f));
+        tvSub.setPadding(0, 0, 0, dp(16));
+        root.addView(tvSub);
+
+        // Option 1: Pick from Gallery
+        TextView btnGallery = new TextView(this);
+        btnGallery.setText("🖼️  Escolher foto da Galeria");
+        btnGallery.setTextColor(Color.WHITE);
+        btnGallery.setTextSize(sp(14.5f));
+        btnGallery.setTypeface(null, 1);
+        btnGallery.setGravity(17);
+        btnGallery.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 14));
+        btnGallery.setPadding(dp(16), dp(14), dp(16), dp(14));
+        LinearLayout.LayoutParams gLp = new LinearLayout.LayoutParams(-1, -2);
+        gLp.bottomMargin = dp(10);
+        btnGallery.setLayoutParams(gLp);
+        btnGallery.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                try {
+                    Intent pickIntent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                    pickIntent.setType("image/*");
+                    startActivityForResult(pickIntent, REQ_PICK_PROFILE_PHOTO);
+                } catch (Exception e1) {
+                    try {
+                        Intent getIntent = new Intent(Intent.ACTION_GET_CONTENT);
+                        getIntent.setType("image/*");
+                        getIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                        startActivityForResult(Intent.createChooser(getIntent, "Selecionar foto"), REQ_PICK_PROFILE_PHOTO);
+                    } catch (Exception e2) {
+                        Toast.makeText(MainActivity.this, "Galeria indisponível neste dispositivo", 0).show();
+                    }
+                }
+            }
+        });
+        root.addView(btnGallery);
+
+        // Option 2: Take photo with Camera
+        TextView btnCamera = new TextView(this);
+        btnCamera.setText("📸  Tirar foto com a Câmera");
+        btnCamera.setTextColor(this.cTextMain);
+        btnCamera.setTextSize(sp(14.0f));
+        btnCamera.setTypeface(null, 1);
+        btnCamera.setGravity(17);
+        btnCamera.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+        btnCamera.setPadding(dp(16), dp(13), dp(16), dp(13));
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-1, -2);
+        cLp.bottomMargin = dp(16);
+        btnCamera.setLayoutParams(cLp);
+        btnCamera.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                try {
+                    Intent camIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                    startActivityForResult(camIntent, REQ_CAPTURE_PROFILE_PHOTO);
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Câmera indisponível", 0).show();
+                }
+            }
+        });
+        root.addView(btnCamera);
+
+        // Option 3: Avatar Color Picker
+        TextView tvColorLbl = new TextView(this);
+        tvColorLbl.setText("COR DO AVATAR / BORDA");
+        tvColorLbl.setTextColor(this.cTextLight);
+        tvColorLbl.setTextSize(sp(11.0f));
+        tvColorLbl.setTypeface(null, 1);
+        tvColorLbl.setPadding(0, 0, 0, dp(8));
+        root.addView(tvColorLbl);
+
+        final String[] avatarColors = {"#3B82F6", "#10B981", "#8B5CF6", "#EC4899", "#F59E0B", "#06B6D4", "#EF4444"};
+        String curCol = this.profile.optString("avatar_color", "#3B82F6");
+        LinearLayout colorRow = new LinearLayout(this);
+        colorRow.setOrientation(0);
+        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(-1, -2);
+        crLp.bottomMargin = dp(12);
+        colorRow.setLayoutParams(crLp);
+
+        for (int i = 0; i < avatarColors.length; i++) {
+            final String cHex = avatarColors[i];
+            boolean isSel = cHex.equalsIgnoreCase(curCol);
+            View sw = new View(this);
+            sw.setBackground(shape(Color.parseColor(cHex), 10, isSel ? Color.WHITE : Color.TRANSPARENT, isSel ? 3 : 0));
+            LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(0, dp(36), 1.0f);
+            if (i < avatarColors.length - 1) swLp.rightMargin = dp(6);
+            sw.setLayoutParams(swLp);
+            sw.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        MainActivity.this.profile.put("avatar_color", cHex);
+                        saveAll();
+                        dialog.dismiss();
+                        render();
+                        Toast.makeText(MainActivity.this, "✓ Cor do avatar atualizada!", 0).show();
+                    } catch (Exception ignored) {}
+                }
+            });
+            colorRow.addView(sw);
+        }
+        root.addView(colorRow);
+
+        // Option 4: Remove current photo (if present)
+        boolean hasPhoto = !this.profile.optString("foto_base64", "").isEmpty()
+                || this.profile.optString("foto_url", "").startsWith("data:image");
+        if (hasPhoto) {
+            TextView btnRemove = new TextView(this);
+            btnRemove.setText("🗑️  Remover foto atual");
+            btnRemove.setTextColor(this.cDanger);
+            btnRemove.setTextSize(sp(13.5f));
+            btnRemove.setTypeface(null, 1);
+            btnRemove.setGravity(17);
+            btnRemove.setBackground(shape(Color.parseColor("#1AEF4444"), 12, Color.parseColor("#40EF4444"), 1));
+            btnRemove.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout.LayoutParams rmLp = new LinearLayout.LayoutParams(-1, -2);
+            rmLp.topMargin = dp(4);
+            btnRemove.setLayoutParams(rmLp);
+            btnRemove.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.profile.remove("foto_base64");
+                    MainActivity.this.profile.remove("foto_url");
+                    saveAll();
+                    dialog.dismiss();
+                    render();
+                    Toast.makeText(MainActivity.this, "Foto de perfil removida", 0).show();
+                }
+            });
+            root.addView(btnRemove);
+        }
+
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
     }
 
     @Override // android.app.Activity
@@ -1393,35 +2008,17 @@ public class MainActivity extends Activity {
             int nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
             int diffMin = schedMin - nowMin;
             if (Math.abs(diffMin) > 60 && !isSnooze) {
-                AlertDialog.Builder b = new AlertDialog.Builder(this);
-                LinearLayout box = new LinearLayout(this);
-                box.setOrientation(1);
-                box.setPadding(dp(22), dp(22), dp(22), dp(18));
-                box.setBackgroundColor(this.cSurface);
-                TextView title = new TextView(this);
-                title.setText(diffMin > 0 ? "⏰ Confirmar adiantado?" : "⚠️ Confirmar com atraso?");
-                title.setTextColor(this.cTextMain);
-                title.setTextSize(sp(18.0f));
-                title.setTypeface(null, 1);
-                box.addView(title);
-                TextView desc = new TextView(this);
                 int hrs = Math.abs(diffMin) / 60;
                 int mins = Math.abs(diffMin) % 60;
                 String timeStr = (hrs > 0 ? hrs + "h " : "") + mins + "min";
-                desc.setText("Esta dose de " + med.optString("nome") + " (" + horaStr + ") está " + timeStr + (diffMin > 0 ? " adiantada" : " atrasada") + " em relação ao horário programado. Deseja confirmar mesmo assim?");
-                desc.setTextColor(this.cTextMuted);
-                desc.setTextSize(sp(14.0f));
-                desc.setPadding(0, dp(10), 0, dp(6));
-                box.addView(desc);
-                b.setView(box);
-                b.setPositiveButton("Sim, confirmar", new DialogInterface.OnClickListener() {
+                String dlgTitle = diffMin > 0 ? "⏰ Confirmar adiantado?" : "⚠️ Confirmar com atraso?";
+                String dlgMsg = "Esta dose de " + med.optString("nome") + " (" + horaStr + ") está " + timeStr + (diffMin > 0 ? " adiantada" : " atrasada") + " em relação ao horário programado. Deseja confirmar mesmo assim?";
+                showStyledConfirmDialog(dlgTitle, dlgMsg, "Sim, confirmar", "Cancelar", this.cSuccess, new Runnable() {
                     @Override
-                    public void onClick(DialogInterface d, int w) {
+                    public void run() {
                         registerDose(med, dateStr, horaStr, "tomado");
                     }
                 });
-                b.setNegativeButton("Cancelar", null);
-                b.show();
                 return;
             }
             if (isSnooze) {
@@ -1435,32 +2032,13 @@ public class MainActivity extends Activity {
     }
 
     private void showUndoConfirmDialog(final JSONObject med, final String dateStr, final String horaStr) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(1);
-        box.setPadding(dp(22), dp(22), dp(22), dp(16));
-        box.setBackgroundColor(this.cSurface);
-        TextView t = new TextView(this);
-        t.setText("↩ Desfazer confirmação?");
-        t.setTextColor(this.cTextMain);
-        t.setTextSize(sp(18.0f));
-        t.setTypeface(null, 1);
-        box.addView(t);
-        TextView sub = new TextView(this);
-        sub.setText("A dose de " + med.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque.");
-        sub.setTextColor(this.cTextMuted);
-        sub.setTextSize(sp(14.0f));
-        sub.setPadding(0, dp(10), 0, dp(6));
-        box.addView(sub);
-        b.setView(box);
-        b.setPositiveButton("Desfazer", new DialogInterface.OnClickListener() {
+        String msg = "A dose de " + med.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque.";
+        showStyledConfirmDialog("↩ Desfazer confirmação?", msg, "Desfazer", "Cancelar", this.cWarning, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 registerDose(med, dateStr, horaStr, "pendente");
             }
         });
-        b.setNegativeButton("Cancelar", null);
-        b.show();
     }
 
     private String getGreetingText() {
@@ -2370,52 +2948,22 @@ public class MainActivity extends Activity {
     }
 
     private void showConfirmDeleteMedDialog(final JSONObject med, final int index) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(1);
-        box.setPadding(dp(22), dp(22), dp(22), dp(16));
-        box.setBackgroundColor(this.cSurface);
-        TextView t = new TextView(this);
-        t.setText("🗑 Excluir medicamento?");
-        t.setTextColor(this.cTextMain);
-        t.setTextSize(sp(18.0f));
-        t.setTypeface(null, 1);
-        box.addView(t);
-        TextView sub = new TextView(this);
-        sub.setText("Tem certeza que deseja excluir " + med.optString("nome") + "? O histórico de doses anteriores será mantido.");
-        sub.setTextColor(this.cTextMuted);
-        sub.setTextSize(sp(14.0f));
-        sub.setPadding(0, dp(10), 0, dp(6));
-        box.addView(sub);
-        b.setView(box);
-        b.setPositiveButton("Excluir", new DialogInterface.OnClickListener() {
+        String msg = "Tem certeza que deseja excluir " + med.optString("nome") + "? O histórico de doses anteriores será mantido.";
+        showStyledConfirmDialog("🗑 Excluir medicamento?", msg, "Excluir", "Cancelar", this.cDanger, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 MainActivity.this.meds.remove(index);
                 saveAll();
                 render();
                 Toast.makeText(MainActivity.this, "🗑 " + med.optString("nome") + " excluído", 0).show();
             }
         });
-        b.setNegativeButton("Cancelar", null);
-        b.show();
     }
 
     private void showSosQuickLogModal(final JSONObject med) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
         ScrollView sv = new ScrollView(this);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(1);
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-        box.setBackgroundColor(this.cSurface);
-
-        TextView title = new TextView(this);
-        title.setText("🆘 Registrar Uso SOS — " + med.optString("nome"));
-        title.setTextColor(this.cTextMain);
-        title.setTextSize(sp(17.0f));
-        title.setTypeface(null, 1);
-        title.setPadding(0, 0, 0, dp(10));
-        box.addView(title);
 
         String nowHm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
         final EditText timeInput = createInput("Horário da tomada", nowHm);
@@ -2456,10 +3004,9 @@ public class MainActivity extends Activity {
         box.addView(qtyInput);
 
         sv.addView(box);
-        b.setView(sv);
-        b.setPositiveButton("Confirmar Uso SOS", new DialogInterface.OnClickListener() {
+        showStyledFormModal("🆘 Registrar Uso SOS — " + med.optString("nome"), sv, "Confirmar Uso SOS", "Cancelar", this.cPrimary, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 try {
                     String h = timeInput.getText().toString().trim();
                     if (h.isEmpty()) h = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
@@ -2500,24 +3047,12 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
             }
         });
-        b.setNegativeButton("Cancelar", null);
-        b.show();
     }
 
     private void showMedDetailModal(final JSONObject med) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
         ScrollView sv = new ScrollView(this);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(1);
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-        box.setBackgroundColor(this.cSurface);
-
-        TextView title = new TextView(this);
-        title.setText("💊 " + med.optString("nome") + " · " + med.optString("dosagem"));
-        title.setTextColor(this.cTextMain);
-        title.setTextSize(sp(19.0f));
-        title.setTypeface(null, 1);
-        box.addView(title);
 
         String pa = med.optString("principio_ativo", "");
         if (!pa.isEmpty()) {
@@ -2525,7 +3060,7 @@ public class MainActivity extends Activity {
             paTv.setText("Princípio ativo: " + pa);
             paTv.setTextColor(this.cTextMuted);
             paTv.setTextSize(sp(13.0f));
-            paTv.setPadding(0, dp(4), 0, 0);
+            paTv.setPadding(0, 0, 0, dp(4));
             box.addView(paTv);
         }
 
@@ -2536,7 +3071,7 @@ public class MainActivity extends Activity {
         stTv.setTextColor(stock <= 5 ? this.cDanger : (stock <= 10 ? this.cWarning : this.cSuccess));
         stTv.setTextSize(sp(14.0f));
         stTv.setTypeface(null, 1);
-        stTv.setPadding(0, dp(12), 0, dp(8));
+        stTv.setPadding(0, dp(8), 0, dp(8));
         box.addView(stTv);
 
         JSONArray hrs = med.optJSONArray("horarios");
@@ -2592,33 +3127,21 @@ public class MainActivity extends Activity {
         }
 
         sv.addView(box);
-        b.setView(sv);
-        b.setPositiveButton("Fechar", null);
-        b.show();
+        showStyledFormModal("💊 " + med.optString("nome") + " · " + med.optString("dosagem"), sv, "Fechar", null, this.cPrimary, null);
     }
 
     private void showStockMovementModal(final JSONObject med, final int prevQty, final int newQty) {
         final int diff = newQty - prevQty;
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
         ScrollView sv = new ScrollView(this);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(1);
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-        box.setBackgroundColor(this.cSurface);
-
-        TextView title = new TextView(this);
-        title.setText("📦 Movimentação de Estoque");
-        title.setTextColor(this.cTextMain);
-        title.setTextSize(sp(18.0f));
-        title.setTypeface(null, 1);
-        box.addView(title);
 
         TextView sub = new TextView(this);
         sub.setText(med.optString("nome") + ": " + prevQty + " → " + newQty + " (" + (diff > 0 ? "+" + diff : String.valueOf(diff)) + " unidades)");
         sub.setTextColor(diff > 0 ? this.cSuccess : this.cWarning);
         sub.setTextSize(sp(14.0f));
         sub.setTypeface(null, 1);
-        sub.setPadding(0, dp(6), 0, dp(12));
+        sub.setPadding(0, 0, 0, dp(12));
         box.addView(sub);
 
         final EditText typeInput = createInput("Tipo (compra, ajuste, correcao)", diff > 0 ? "compra" : "ajuste");
@@ -2631,10 +3154,9 @@ public class MainActivity extends Activity {
         box.addView(reasonInput);
 
         sv.addView(box);
-        b.setView(sv);
-        b.setPositiveButton("Registrar", new DialogInterface.OnClickListener() {
+        showStyledFormModal("📦 Movimentação de Estoque", sv, "Registrar", "Pular", this.cPrimary, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 try {
                     String today = todayIso();
                     String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
@@ -2678,8 +3200,6 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
             }
         });
-        b.setNegativeButton("Pular detalhe", null);
-        b.show();
     }
 
     private static final String[][] BRAZIL_MED_CATALOG = {
@@ -3104,6 +3624,7 @@ public class MainActivity extends Activity {
         populateCatalogList.run();
         dialog.setView(root);
         dialog.show();
+        styleDialogWindow(dialog);
     }
 
     private View buildCatalogResultRow(final String[] item, final AlertDialog parentDialog) {
@@ -3440,6 +3961,7 @@ public class MainActivity extends Activity {
         root.addView(sv);
         dialog.setView(root);
         dialog.show();
+        styleDialogWindow(dialog);
     }
 
     private TextView createFormLabel(String text) {
@@ -3448,7 +3970,7 @@ public class MainActivity extends Activity {
         tv.setTextColor(this.cTextMuted);
         tv.setTextSize(sp(11.0f));
         tv.setTypeface(null, 1);
-        tv.setPadding(0, dp(4), 0, dp(6));
+        tv.setPadding(0, dp(2), 0, dp(5));
         return tv;
     }
 
@@ -3458,7 +3980,6 @@ public class MainActivity extends Activity {
         final int prevStock = isEditing ? getMedStock(jSONObject) : -1;
         final String[] currentTreatType = {initialTreatmentType != null ? initialTreatmentType : "continuous"};
 
-        ScrollView sv = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(1);
         root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
@@ -3467,7 +3988,7 @@ public class MainActivity extends Activity {
         LinearLayout hdr = new LinearLayout(this);
         hdr.setOrientation(0);
         hdr.setGravity(16);
-        hdr.setPadding(dp(18), dp(20), dp(18), dp(16));
+        hdr.setPadding(dp(18), dp(16), dp(18), dp(14));
 
         if (!isEditing) {
             TextView btnBack = new TextView(this);
@@ -3520,9 +4041,12 @@ public class MainActivity extends Activity {
         div.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
         root.addView(div);
 
+        ScrollView sv = new ScrollView(this);
+        sv.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(1);
-        body.setPadding(dp(20), dp(18), dp(20), dp(24));
+        body.setPadding(dp(18), dp(14), dp(18), dp(16));
 
         if (catalogItem != null && !isEditing) {
             body.addView(buildCatalogPreviewCard(catalogItem));
@@ -3541,12 +4065,12 @@ public class MainActivity extends Activity {
         treatBanner.setBackground(shape(Color.argb(24, Color.red(tCol), Color.green(tCol), Color.blue(tCol)), 12, Color.argb(75, Color.red(tCol), Color.green(tCol), Color.blue(tCol)), 1));
         treatBanner.setPadding(dp(14), dp(10), dp(14), dp(10));
         LinearLayout.LayoutParams tbLp = new LinearLayout.LayoutParams(-1, -2);
-        tbLp.bottomMargin = dp(18);
+        tbLp.bottomMargin = dp(14);
         treatBanner.setLayoutParams(tbLp);
 
         TextView tvTI = new TextView(this);
         tvTI.setText(tIcon);
-        tvTI.setTextSize(sp(16.0f));
+        tvTI.setTextSize(sp(15.0f));
         tvTI.setPadding(0, 0, dp(8), 0);
         treatBanner.addView(tvTI);
 
@@ -3563,34 +4087,32 @@ public class MainActivity extends Activity {
         btnChangeTreat.setTextColor(tCol);
         btnChangeTreat.setTextSize(sp(12.0f));
         btnChangeTreat.setTypeface(null, 1);
-        btnChangeTreat.setOnClickListener(new View.OnClickListener() {
+        treatBanner.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 final String[] labels = {"🟢 Uso Contínuo", "🟡 Tratamento Temporário", "🔵 Uso Sob Demanda (SOS)"};
                 final String[] codes = {"continuous", "temporary", "sos"};
-                new AlertDialog.Builder(MainActivity.this)
-                    .setTitle("Tipo de tratamento")
-                    .setItems(labels, new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface d, int which) {
-                            dialog.dismiss();
-                            showMedFormStepDialog(jSONObject, i, catalogItem, codes[which]);
-                        }
-                    })
-                    .show();
+                int curTIdx = "temporary".equals(currentTreatType[0]) ? 1 : ("sos".equals(currentTreatType[0]) ? 2 : 0);
+                showStyledSelectDialog("Tipo de tratamento", labels, curTIdx, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        dialog.dismiss();
+                        showMedFormStepDialog(jSONObject, i, catalogItem, codes[which]);
+                    }
+                });
             }
         });
         treatBanner.addView(btnChangeTreat);
         body.addView(treatBanner);
 
-        // Color swatches: COR DO MEDICAMENTO
+        // Color swatches: COR DO MEDICAMENTO (7 responsive flex swatches so none are ever clipped)
         body.addView(createFormLabel("COR DO MEDICAMENTO"));
-        final String[] pillColors = {"#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899", "#06B6D4", "#F97316"};
+        final String[] pillColors = {"#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899", "#06B6D4"};
         final String[] selectedColor = {isEditing ? jSONObject.optString("cor", "#3B82F6") : "#3B82F6"};
         final LinearLayout colorRow = new LinearLayout(this);
         colorRow.setOrientation(0);
         LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(-1, -2);
-        crLp.bottomMargin = dp(16);
+        crLp.bottomMargin = dp(12);
         colorRow.setLayoutParams(crLp);
 
         final Runnable renderColors = new Runnable() {
@@ -3602,8 +4124,10 @@ public class MainActivity extends Activity {
                     boolean isSel = cHex.equalsIgnoreCase(selectedColor[0]);
                     View sw = new View(MainActivity.this);
                     sw.setBackground(shape(Color.parseColor(cHex), 10, isSel ? Color.WHITE : Color.TRANSPARENT, isSel ? 3 : 0));
-                    LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-                    swLp.rightMargin = dp(8);
+                    LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(0, dp(36), 1.0f);
+                    if (cIdx < pillColors.length - 1) {
+                        swLp.rightMargin = dp(7);
+                    }
                     sw.setLayoutParams(swLp);
                     sw.setOnClickListener(new View.OnClickListener() {
                         @Override
@@ -3668,24 +4192,28 @@ public class MainActivity extends Activity {
         tvUnitSelect.setTextColor(this.cTextMain);
         tvUnitSelect.setTextSize(sp(14.0f));
         tvUnitSelect.setBackground(shape(this.isDarkMode ? Color.parseColor("#162032") : this.cBgMain, 12, this.cBorder, 1));
-        tvUnitSelect.setPadding(dp(14), dp(12), dp(14), dp(12));
+        tvUnitSelect.setPadding(dp(14), dp(11), dp(14), dp(11));
         LinearLayout.LayoutParams usLp = new LinearLayout.LayoutParams(-1, -2);
-        usLp.bottomMargin = dp(10);
+        usLp.bottomMargin = dp(8);
         tvUnitSelect.setLayoutParams(usLp);
         tvUnitSelect.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 final String[] units = {"comprimido", "cápsula", "ml", "gotas", "sachê", "unidade", "dose", "g"};
-                new AlertDialog.Builder(MainActivity.this)
-                    .setTitle("Selecionar unidade")
-                    .setItems(units, new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface d, int which) {
-                            unitVal[0] = units[which];
-                            tvUnitSelect.setText(unitVal[0] + "  ⌄");
-                        }
-                    })
-                    .show();
+                int curU = 0;
+                for (int uIdx = 0; uIdx < units.length; uIdx++) {
+                    if (units[uIdx].equalsIgnoreCase(unitVal[0])) {
+                        curU = uIdx;
+                        break;
+                    }
+                }
+                showStyledSelectDialog("Selecionar unidade", units, curU, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        unitVal[0] = units[which];
+                        tvUnitSelect.setText(unitVal[0] + "  ⌄");
+                    }
+                });
             }
         });
         body.addView(tvUnitSelect);
@@ -3703,7 +4231,7 @@ public class MainActivity extends Activity {
         emergCheck.setTextColor(this.cTextMain);
         emergCheck.setTextSize(sp(13.5f));
         emergCheck.setChecked(isEditing && jSONObject.optBoolean("important_for_emergency", false));
-        emergCheck.setPadding(0, dp(8), 0, dp(12));
+        emergCheck.setPadding(0, dp(6), 0, dp(10));
         body.addView(emergCheck);
 
         // Conditional Temporary Duration
@@ -3713,9 +4241,9 @@ public class MainActivity extends Activity {
             LinearLayout tempBox = new LinearLayout(this);
             tempBox.setOrientation(1);
             tempBox.setBackground(shape(Color.argb(20, 245, 158, 11), 14, Color.argb(65, 245, 158, 11), 1));
-            tempBox.setPadding(dp(14), dp(14), dp(14), dp(14));
+            tempBox.setPadding(dp(14), dp(12), dp(14), dp(12));
             LinearLayout.LayoutParams tmLp = new LinearLayout.LayoutParams(-1, -2);
-            tmLp.bottomMargin = dp(14);
+            tmLp.bottomMargin = dp(12);
             tempBox.setLayoutParams(tmLp);
 
             TextView tvTmHdr = new TextView(this);
@@ -3754,7 +4282,7 @@ public class MainActivity extends Activity {
             LinearLayout schedHdr = new LinearLayout(this);
             schedHdr.setOrientation(0);
             schedHdr.setGravity(16);
-            schedHdr.setPadding(0, dp(6), 0, dp(8));
+            schedHdr.setPadding(0, dp(4), 0, dp(8));
 
             TextView tvSH = new TextView(this);
             tvSH.setText("HORÁRIOS DE ADMINISTRAÇÃO");
@@ -3787,7 +4315,7 @@ public class MainActivity extends Activity {
                         tvTimeBox.setTextSize(sp(15.0f));
                         tvTimeBox.setTypeface(null, 1);
                         tvTimeBox.setBackground(shape(MainActivity.this.isDarkMode ? Color.parseColor("#162032") : MainActivity.this.cBgMain, 12, MainActivity.this.cBorder, 1));
-                        tvTimeBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+                        tvTimeBox.setPadding(dp(14), dp(11), dp(14), dp(11));
                         tvTimeBox.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
                         tvTimeBox.setOnClickListener(new View.OnClickListener() {
                             @Override
@@ -3817,7 +4345,7 @@ public class MainActivity extends Activity {
                             btnRemTime.setTypeface(null, 1);
                             btnRemTime.setGravity(17);
                             btnRemTime.setBackground(shape(Color.parseColor("#1AEF4444"), 12, Color.parseColor("#40EF4444"), 1));
-                            LinearLayout.LayoutParams rmLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+                            LinearLayout.LayoutParams rmLp = new LinearLayout.LayoutParams(dp(42), dp(42));
                             rmLp.leftMargin = dp(8);
                             btnRemTime.setLayoutParams(rmLp);
                             btnRemTime.setOnClickListener(new View.OnClickListener() {
@@ -3858,7 +4386,7 @@ public class MainActivity extends Activity {
                 final LinearLayout daysRow = new LinearLayout(this);
                 daysRow.setOrientation(0);
                 LinearLayout.LayoutParams drLp = new LinearLayout.LayoutParams(-1, -2);
-                drLp.bottomMargin = dp(18);
+                drLp.bottomMargin = dp(8);
                 daysRow.setLayoutParams(drLp);
 
                 final Runnable renderDays = new Runnable() {
@@ -3903,7 +4431,7 @@ public class MainActivity extends Activity {
             sosNote.setBackground(shape(Color.argb(20, 59, 130, 246), 12, Color.argb(65, 59, 130, 246), 1));
             sosNote.setPadding(dp(14), dp(14), dp(14), dp(14));
             LinearLayout.LayoutParams snLp = new LinearLayout.LayoutParams(-1, -2);
-            snLp.bottomMargin = dp(18);
+            snLp.bottomMargin = dp(8);
             sosNote.setLayoutParams(snLp);
 
             TextView tvSn = new TextView(this);
@@ -3915,7 +4443,19 @@ public class MainActivity extends Activity {
             body.addView(sosNote);
         }
 
-        // Primary Save Button: "+ Adicionar medicamento" or "✓ Salvar alterações"
+        sv.addView(body);
+        root.addView(sv);
+
+        // Sticky Footer Divider + Primary Save Button
+        View botDiv = new View(this);
+        botDiv.setBackgroundColor(this.cBorder);
+        botDiv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        root.addView(botDiv);
+
+        LinearLayout footerBar = new LinearLayout(this);
+        footerBar.setOrientation(1);
+        footerBar.setPadding(dp(18), dp(12), dp(18), dp(14));
+
         TextView btnSaveMed = new TextView(this);
         btnSaveMed.setText(isEditing ? "✓ Salvar alterações" : "+ Adicionar medicamento");
         btnSaveMed.setTextColor(Color.WHITE);
@@ -3923,7 +4463,7 @@ public class MainActivity extends Activity {
         btnSaveMed.setTypeface(null, 1);
         btnSaveMed.setGravity(17);
         btnSaveMed.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 14));
-        btnSaveMed.setPadding(dp(16), dp(16), dp(16), dp(16));
+        btnSaveMed.setPadding(dp(16), dp(14), dp(16), dp(14));
         btnSaveMed.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -3995,12 +4535,12 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
             }
         });
-        body.addView(btnSaveMed);
+        footerBar.addView(btnSaveMed);
+        root.addView(footerBar);
 
-        sv.addView(body);
-        root.addView(sv);
         dialog.setView(root);
         dialog.show();
+        styleDialogWindow(dialog);
     }
 
     private String joinArray(JSONArray jSONArray) {
@@ -5728,46 +6268,43 @@ public class MainActivity extends Activity {
         heroCenter.setOrientation(1);
         heroCenter.setGravity(17);
         LinearLayout.LayoutParams hcLp = new LinearLayout.LayoutParams(-1, -2);
-        hcLp.bottomMargin = dp(24);
+        hcLp.bottomMargin = dp(22);
         heroCenter.setLayoutParams(hcLp);
-
-        FrameLayout avatarFrame = new FrameLayout(this);
-        LinearLayout.LayoutParams afLp = new LinearLayout.LayoutParams(dp(104), dp(104));
-        afLp.bottomMargin = dp(14);
-        avatarFrame.setLayoutParams(afLp);
 
         String socialName = this.profile.optString("social_name", "").trim();
         String fullName = this.profile.optString("nome", "Seu Nome").trim();
         String displayName = !socialName.isEmpty() ? socialName : (!fullName.isEmpty() ? fullName : "Seu Nome");
-        String initial = displayName.isEmpty() ? "👤" : displayName.substring(0, 1).toUpperCase(Locale.ROOT);
-        TextView tvAvatarCircle = new TextView(this);
-        tvAvatarCircle.setText(initial);
-        tvAvatarCircle.setTextColor(this.cTextMain);
-        tvAvatarCircle.setTextSize(sp(36.0f));
-        tvAvatarCircle.setTypeface(null, 1);
-        tvAvatarCircle.setGravity(17);
-        tvAvatarCircle.setBackground(shape(this.cSurface, 50, this.cPrimary, 2));
-        FrameLayout.LayoutParams acLp = new FrameLayout.LayoutParams(dp(100), dp(100), 17);
-        tvAvatarCircle.setLayoutParams(acLp);
-        avatarFrame.addView(tvAvatarCircle);
 
-        TextView tvCamBadge = new TextView(this);
-        tvCamBadge.setText("📷");
-        tvCamBadge.setTextSize(sp(14.0f));
-        tvCamBadge.setGravity(17);
-        tvCamBadge.setBackground(shape(this.cPrimary, 16, this.cBgMain, 2));
-        FrameLayout.LayoutParams cbLp = new FrameLayout.LayoutParams(dp(32), dp(32), 85); // Gravity.BOTTOM | Gravity.RIGHT
-        tvCamBadge.setLayoutParams(cbLp);
-        avatarFrame.addView(tvCamBadge);
-
-        avatarFrame.setOnClickListener(new View.OnClickListener() {
+        View avatarView = buildProfileAvatarView(104, true, new Runnable() {
             @Override
-            public void onClick(View v) {
-                MainActivity.this.profileSubView = "personal";
-                render();
+            public void run() {
+                showPhotoOptionsDialog();
             }
         });
-        heroCenter.addView(avatarFrame);
+        LinearLayout.LayoutParams avWrapLp = new LinearLayout.LayoutParams(dp(110), dp(110));
+        avWrapLp.bottomMargin = dp(10);
+        avatarView.setLayoutParams(avWrapLp);
+        heroCenter.addView(avatarView);
+
+        TextView btnChangePhotoPill = new TextView(this);
+        boolean hasCustomPhoto = !this.profile.optString("foto_base64", "").isEmpty()
+                || this.profile.optString("foto_url", "").startsWith("data:image");
+        btnChangePhotoPill.setText(hasCustomPhoto ? "📷 Alterar foto" : "📷 Adicionar foto");
+        btnChangePhotoPill.setTextColor(this.cPrimary);
+        btnChangePhotoPill.setTextSize(sp(12.0f));
+        btnChangePhotoPill.setTypeface(null, 1);
+        btnChangePhotoPill.setBackground(shape(Color.argb(24, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 99, Color.argb(70, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 1));
+        btnChangePhotoPill.setPadding(dp(12), dp(4), dp(12), dp(4));
+        LinearLayout.LayoutParams cppLp = new LinearLayout.LayoutParams(-2, -2);
+        cppLp.bottomMargin = dp(10);
+        btnChangePhotoPill.setLayoutParams(cppLp);
+        btnChangePhotoPill.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showPhotoOptionsDialog();
+            }
+        });
+        heroCenter.addView(btnChangePhotoPill);
 
         TextView tvName = new TextView(this);
         tvName.setText(displayName);
@@ -5808,7 +6345,7 @@ public class MainActivity extends Activity {
         // 3. Red Emergency Card (#EF4444) with [ Abrir Cartão ] and [ Configurar ]
         LinearLayout emergCard = new LinearLayout(this);
         emergCard.setOrientation(1);
-        emergCard.setBackground(shape(Color.parseColor("#EF4444"), 24, 0, 0));
+        emergCard.setBackground(gradientShape(Color.parseColor("#EF4444"), Color.parseColor("#DC2626"), 24));
         emergCard.setPadding(dp(22), dp(22), dp(22), dp(22));
         LinearLayout.LayoutParams emLp = new LinearLayout.LayoutParams(-1, -2);
         emLp.bottomMargin = dp(24);
@@ -5823,7 +6360,7 @@ public class MainActivity extends Activity {
 
         TextView tvEmSub = new TextView(this);
         tvEmSub.setText("Informações vitais para um momento de necessidade.");
-        tvEmSub.setTextColor(Color.parseColor("#E6FFFFFF"));
+        tvEmSub.setTextColor(Color.parseColor("#F2FFFFFF"));
         tvEmSub.setTextSize(sp(14.0f));
         tvEmSub.setPadding(0, dp(8), 0, dp(18));
         emergCard.addView(tvEmSub);
@@ -5833,7 +6370,7 @@ public class MainActivity extends Activity {
 
         TextView btnOpenCard = new TextView(this);
         btnOpenCard.setText("Abrir Cartão");
-        btnOpenCard.setTextColor(Color.parseColor("#EF4444"));
+        btnOpenCard.setTextColor(Color.parseColor("#DC2626"));
         btnOpenCard.setTextSize(sp(15.0f));
         btnOpenCard.setTypeface(null, 1);
         btnOpenCard.setGravity(17);
@@ -5857,7 +6394,7 @@ public class MainActivity extends Activity {
         btnConfigCard.setTextSize(sp(14.0f));
         btnConfigCard.setTypeface(null, 1);
         btnConfigCard.setGravity(17);
-        btnConfigCard.setBackground(shape(Color.parseColor("#33FFFFFF"), 14, 0, 0));
+        btnConfigCard.setBackground(shape(Color.parseColor("#38FFFFFF"), 14, Color.parseColor("#4DFFFFFF"), 1));
         btnConfigCard.setPadding(dp(16), dp(14), dp(16), dp(14));
         LinearLayout.LayoutParams ccLp = new LinearLayout.LayoutParams(0, -2, 0.9f);
         btnConfigCard.setLayoutParams(ccLp);
@@ -5883,20 +6420,20 @@ public class MainActivity extends Activity {
         menuCard.setLayoutParams(mcLp);
 
         String[][] navItems = {
-            {"👤", "Dados pessoais", "Nome, nascimento, peso, altura...", "personal"},
-            {"❤️", "Saúde", "Alergias e condições importantes...", "health"},
-            {"💊", "Tratamento", "Medicamentos para emergência...", "important_meds"},
-            {"👨‍⚕️", "Profissionais", "Médicos e especialistas...", "professionals"},
-            {"👨‍👩‍👧", "Contatos", "Emergência e familiares...", "contacts"},
-            {"🤝", "Cuidadores", "Quem acompanha seu tratamento...", "caregivers"},
-            {"📦", "Estoque", "Histórico e previsões...", "stock"},
-            {"🔄", "Mudar Perfil", "Alterar tipo de conta...", "role_swap"},
-            {"🔐", "Privacidade", "Controle dos seus dados...", "privacy"},
-            {"⚙️", "Preferências", "Acessibilidade e notificações...", "prefs"}
+            {"👤", "Dados pessoais", "Nome, nascimento, peso, altura...", "personal", "#3B82F6"},
+            {"❤️", "Saúde", "Alergias e condições importantes...", "health", "#EF4444"},
+            {"💊", "Tratamento", "Medicamentos para emergência...", "important_meds", "#8B5CF6"},
+            {"👨‍⚕️", "Profissionais", "Médicos e especialistas...", "professionals", "#06B6D4"},
+            {"👨‍👩‍👧", "Contatos", "Emergência e familiares...", "contacts", "#10B981"},
+            {"🤝", "Cuidadores", "Quem acompanha seu tratamento...", "caregivers", "#F59E0B"},
+            {"📦", "Estoque", "Histórico e previsões...", "stock", "#6366F1"},
+            {"🔄", "Mudar Perfil", "Alterar tipo de conta...", "role_swap", "#EC4899"},
+            {"🔐", "Privacidade", "Controle dos seus dados...", "privacy", "#14B8A6"},
+            {"⚙️", "Preferências", "Acessibilidade e notificações...", "prefs", "#64748B"}
         };
 
         for (int i = 0; i < navItems.length; i++) {
-            menuCard.addView(createProfileNavRow(navItems[i][0], navItems[i][1], navItems[i][2], navItems[i][3]));
+            menuCard.addView(createProfileNavRow(navItems[i][0], navItems[i][1], navItems[i][2], navItems[i][3], navItems[i][4]));
             if (i < navItems.length - 1) {
                 View div = new View(this);
                 div.setBackgroundColor(this.cBorder);
@@ -5932,17 +6469,22 @@ public class MainActivity extends Activity {
         linearLayout.addView(btnLogout);
     }
 
-    private View createProfileNavRow(String icon, String title, String subtitle, final String subViewTarget) {
+    private View createProfileNavRow(String icon, String title, String subtitle, final String subViewTarget, String accentHex) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(0);
         row.setGravity(16);
-        row.setPadding(dp(14), dp(16), dp(14), dp(16));
+        row.setPadding(dp(12), dp(14), dp(12), dp(14));
+
+        int accentCol = Color.parseColor(accentHex);
+        int badgeBg = Color.argb(this.isDarkMode ? 38 : 26, Color.red(accentCol), Color.green(accentCol), Color.blue(accentCol));
+        int badgeBorder = Color.argb(this.isDarkMode ? 80 : 55, Color.red(accentCol), Color.green(accentCol), Color.blue(accentCol));
 
         TextView tvI = new TextView(this);
         tvI.setText(icon);
-        tvI.setTextSize(sp(22.0f));
+        tvI.setTextSize(sp(19.0f));
         tvI.setGravity(17);
-        LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(36), -2);
+        tvI.setBackground(shape(badgeBg, 13, badgeBorder, 1));
+        LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(44), dp(44));
         iLp.rightMargin = dp(14);
         tvI.setLayoutParams(iLp);
         row.addView(tvI);
@@ -5954,14 +6496,14 @@ public class MainActivity extends Activity {
         TextView tvT = new TextView(this);
         tvT.setText(title);
         tvT.setTextColor(this.cTextMain);
-        tvT.setTextSize(sp(16.0f));
+        tvT.setTextSize(sp(15.5f));
         tvT.setTypeface(null, 1);
         col.addView(tvT);
 
         TextView tvS = new TextView(this);
         tvS.setText(subtitle);
         tvS.setTextColor(this.cTextMuted);
-        tvS.setTextSize(sp(13.0f));
+        tvS.setTextSize(sp(12.5f));
         tvS.setPadding(0, dp(2), 0, 0);
         col.addView(tvS);
 
@@ -5970,7 +6512,11 @@ public class MainActivity extends Activity {
         TextView tvChev = new TextView(this);
         tvChev.setText("›");
         tvChev.setTextColor(this.cTextMuted);
-        tvChev.setTextSize(sp(20.0f));
+        tvChev.setTextSize(sp(18.0f));
+        tvChev.setTypeface(null, 1);
+        tvChev.setGravity(17);
+        tvChev.setBackground(shape(this.cSurfaceHover, 10, 0, 0));
+        tvChev.setLayoutParams(new LinearLayout.LayoutParams(dp(28), dp(28)));
         row.addView(tvChev);
 
         row.setOnClickListener(new View.OnClickListener() {
@@ -6670,6 +7216,61 @@ public class MainActivity extends Activity {
         card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
         card.setPadding(dp(18), dp(18), dp(18), dp(18));
 
+        // 0. Profile Photo Row at top of Personal Data
+        LinearLayout photoRow = new LinearLayout(this);
+        photoRow.setOrientation(0);
+        photoRow.setGravity(16);
+        photoRow.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+        photoRow.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams prLp = new LinearLayout.LayoutParams(-1, -2);
+        prLp.bottomMargin = dp(16);
+        photoRow.setLayoutParams(prLp);
+
+        View miniAv = buildProfileAvatarView(60, true, new Runnable() {
+            @Override
+            public void run() {
+                showPhotoOptionsDialog();
+            }
+        });
+        LinearLayout.LayoutParams maLp = new LinearLayout.LayoutParams(dp(66), dp(66));
+        maLp.rightMargin = dp(14);
+        miniAv.setLayoutParams(maLp);
+        photoRow.addView(miniAv);
+
+        LinearLayout phCol = new LinearLayout(this);
+        phCol.setOrientation(1);
+        phCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvPhTitle = new TextView(this);
+        tvPhTitle.setText("Foto do Perfil");
+        tvPhTitle.setTextColor(this.cTextMain);
+        tvPhTitle.setTextSize(sp(15.0f));
+        tvPhTitle.setTypeface(null, 1);
+        phCol.addView(tvPhTitle);
+
+        TextView tvPhSub = new TextView(this);
+        tvPhSub.setText("Toque para escolher uma foto da galeria ou tirar uma foto");
+        tvPhSub.setTextColor(this.cTextMuted);
+        tvPhSub.setTextSize(sp(12.0f));
+        tvPhSub.setPadding(0, dp(2), 0, dp(6));
+        phCol.addView(tvPhSub);
+
+        TextView btnPickPhoto = new TextView(this);
+        btnPickPhoto.setText("📷 Alterar foto");
+        btnPickPhoto.setTextColor(this.cPrimary);
+        btnPickPhoto.setTextSize(sp(12.5f));
+        btnPickPhoto.setTypeface(null, 1);
+        phCol.addView(btnPickPhoto);
+
+        photoRow.addView(phCol);
+        photoRow.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showPhotoOptionsDialog();
+            }
+        });
+        card.addView(photoRow);
+
         // 1. Nome completo
         card.addView(makePersonalFieldLabel("Nome completo"));
         final EditText inNome = makePersonalInputBox("Seu nome completo", this.profile.optString("nome", ""), 0);
@@ -6730,7 +7331,6 @@ public class MainActivity extends Activity {
         tvCalIcon.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Calendar cal = Calendar.getInstance();
                 int yr = 1980, mo = 0, dy = 1;
                 String cur = inDob.getText().toString().trim();
                 try {
@@ -6795,16 +7395,13 @@ public class MainActivity extends Activity {
         genderBox.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                AlertDialog.Builder gb = new AlertDialog.Builder(MainActivity.this);
-                gb.setTitle("Sexo");
-                gb.setItems(genderLabels, new DialogInterface.OnClickListener() {
+                showStyledSelectDialog("Sexo", genderLabels, selectedGenderIdx[0], new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int which) {
                         selectedGenderIdx[0] = which;
                         tvGenderVal.setText(genderLabels[which]);
                     }
                 });
-                gb.show();
             }
         });
         colGender.addView(genderBox);
@@ -6900,16 +7497,13 @@ public class MainActivity extends Activity {
         bloodBox.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                AlertDialog.Builder bb = new AlertDialog.Builder(MainActivity.this);
-                bb.setTitle("Tipo sanguíneo");
-                bb.setItems(bloodOptions, new DialogInterface.OnClickListener() {
+                showStyledSelectDialog("Tipo sanguíneo", bloodOptions, selectedBloodIdx[0], new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int which) {
                         selectedBloodIdx[0] = which;
                         tvBloodVal.setText(bloodOptions[which]);
                     }
                 });
-                bb.show();
             }
         });
         card.addView(bloodBox);
@@ -6987,17 +7581,28 @@ public class MainActivity extends Activity {
         if (nomeStr.isEmpty()) nomeStr = this.profile.optString("nome", "Paciente").trim();
         String initial = nomeStr.isEmpty() ? "👤" : nomeStr.substring(0, 1).toUpperCase(Locale.ROOT);
 
-        TextView tvAvatar = new TextView(this);
-        tvAvatar.setText(initial);
-        tvAvatar.setTextColor(Color.WHITE);
-        tvAvatar.setTextSize(sp(24.0f));
-        tvAvatar.setTypeface(null, 1);
-        tvAvatar.setGravity(17);
-        tvAvatar.setBackground(shape(Color.parseColor("#33FFFFFF"), 32, Color.WHITE, 2));
-        LinearLayout.LayoutParams avLp = new LinearLayout.LayoutParams(dp(64), dp(64));
-        avLp.rightMargin = dp(16);
-        tvAvatar.setLayoutParams(avLp);
-        banner.addView(tvAvatar);
+        Bitmap emergBmp = getProfileCircularBitmap(dp(64), Color.WHITE);
+        if (emergBmp != null) {
+            ImageView ivAv = new ImageView(this);
+            ivAv.setImageBitmap(emergBmp);
+            ivAv.setScaleType(ImageView.ScaleType.FIT_XY);
+            LinearLayout.LayoutParams avLp = new LinearLayout.LayoutParams(dp(64), dp(64));
+            avLp.rightMargin = dp(16);
+            ivAv.setLayoutParams(avLp);
+            banner.addView(ivAv);
+        } else {
+            TextView tvAvatar = new TextView(this);
+            tvAvatar.setText(initial);
+            tvAvatar.setTextColor(Color.WHITE);
+            tvAvatar.setTextSize(sp(24.0f));
+            tvAvatar.setTypeface(null, 1);
+            tvAvatar.setGravity(17);
+            tvAvatar.setBackground(shape(Color.parseColor("#33FFFFFF"), 32, Color.WHITE, 2));
+            LinearLayout.LayoutParams avLp = new LinearLayout.LayoutParams(dp(64), dp(64));
+            avLp.rightMargin = dp(16);
+            tvAvatar.setLayoutParams(avLp);
+            banner.addView(tvAvatar);
+        }
 
         LinearLayout bCol = new LinearLayout(this);
         bCol.setOrientation(1);
@@ -7462,11 +8067,8 @@ public class MainActivity extends Activity {
     }
 
     private void showAddAllergyDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Adicionar Alergia");
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
-        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
         final EditText etNome = createInput("Alérgeno (ex: Dipirona, Penicilina)", "");
         final EditText etReacao = createInput("Reação (ex: Inchaço, falta de ar)", "");
@@ -7475,11 +8077,10 @@ public class MainActivity extends Activity {
         layout.addView(etNome);
         layout.addView(etReacao);
         layout.addView(etGrav);
-        builder.setView(layout);
 
-        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+        showStyledFormModal("⚠️ Adicionar Alergia", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 try {
                     String nome = etNome.getText().toString().trim();
                     if (!nome.isEmpty()) {
@@ -7497,27 +8098,21 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {}
             }
         });
-        builder.setNegativeButton("Cancelar", null);
-        builder.show();
     }
 
     private void showAddConditionDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Adicionar Condição de Saúde");
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
-        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
         final EditText etNome = createInput("Condição (ex: Hipertensão, Diabetes)", "");
         final EditText etNotas = createInput("Observações (ex: Controlada com medicação)", "");
 
         layout.addView(etNome);
         layout.addView(etNotas);
-        builder.setView(layout);
 
-        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+        showStyledFormModal("❤️ Adicionar Condição de Saúde", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 try {
                     String nome = etNome.getText().toString().trim();
                     if (!nome.isEmpty()) {
@@ -7534,8 +8129,6 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {}
             }
         });
-        builder.setNegativeButton("Cancelar", null);
-        builder.show();
     }
 
     private void buildContactsSubScreen(LinearLayout linearLayout) {
@@ -7664,11 +8257,8 @@ public class MainActivity extends Activity {
     }
 
     private void showAddContactDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Adicionar Contato de Emergência");
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
-        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
         final EditText etNome = createInput("Nome completo", "");
         final EditText etRel = createInput("Parentesco / Relação (ex: Filha, Esposo)", "");
@@ -7677,11 +8267,10 @@ public class MainActivity extends Activity {
         layout.addView(etNome);
         layout.addView(etRel);
         layout.addView(etTel);
-        builder.setView(layout);
 
-        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+        showStyledFormModal("📞 Adicionar Contato de Emergência", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 try {
                     String nome = etNome.getText().toString().trim();
                     if (!nome.isEmpty()) {
@@ -7700,8 +8289,6 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {}
             }
         });
-        builder.setNegativeButton("Cancelar", null);
-        builder.show();
     }
 
     private void buildProfessionalsSubScreen(LinearLayout linearLayout) {
@@ -7844,11 +8431,8 @@ public class MainActivity extends Activity {
     }
 
     private void showAddProfessionalDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Adicionar Profissional");
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
-        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
 
         final EditText etNome = createInput("Nome (ex: Dr. Carlos Silva)", "");
         final EditText etEsp = createInput("Especialidade (ex: Cardiologista)", "");
@@ -7861,11 +8445,10 @@ public class MainActivity extends Activity {
         layout.addView(etCrm);
         layout.addView(etClinica);
         layout.addView(etTel);
-        builder.setView(layout);
 
-        builder.setPositiveButton("Salvar", new DialogInterface.OnClickListener() {
+        showStyledFormModal("👨‍⚕️ Adicionar Profissional", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 try {
                     String nome = etNome.getText().toString().trim();
                     if (!nome.isEmpty()) {
@@ -7887,8 +8470,6 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {}
             }
         });
-        builder.setNegativeButton("Cancelar", null);
-        builder.show();
     }
 
     private void buildCaregiversSubScreen(LinearLayout linearLayout) {
@@ -7998,11 +8579,14 @@ public class MainActivity extends Activity {
             saveAll();
             render();
 
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("🔑 Código de Convite Criado!");
-            builder.setMessage("Compartilhe este código com seu cuidador para que ele acompanhe seus medicamentos:\n\nCÓDIGO: " + token + "\n\nO cuidador deverá digitar este código na plataforma Web do MediCare Cuidador.");
-            builder.setPositiveButton("OK", null);
-            builder.show();
+            showStyledConfirmDialog(
+                "🔑 Código de Convite Criado!",
+                "Compartilhe este código com seu cuidador para que ele acompanhe seus medicamentos:\n\nCÓDIGO: " + token + "\n\nO cuidador deverá digitar este código na plataforma Web do MediCare Cuidador.",
+                "Entendi",
+                null,
+                this.cPrimary,
+                null
+            );
         } catch (Exception e) {}
     }
 
@@ -8092,11 +8676,8 @@ public class MainActivity extends Activity {
 
     private void showRefillStockDialog(final JSONObject med) {
         final int curStock = getMedStock(med);
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("📦 Repor Estoque — " + med.optString("nome"));
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
-        layout.setPadding(dp(20), dp(12), dp(20), dp(8));
 
         TextView tvCur = new TextView(this);
         tvCur.setText("Quantidade atual: " + curStock + " " + med.optString("unidade", "unid."));
@@ -8108,11 +8689,10 @@ public class MainActivity extends Activity {
         final EditText etAdd = createInput("Quantidade comprada / adicionada (ex: 30)", "30");
         etAdd.setInputType(InputType.TYPE_CLASS_NUMBER);
         layout.addView(etAdd);
-        builder.setView(layout);
 
-        builder.setPositiveButton("Confirmar Reposição", new DialogInterface.OnClickListener() {
+        showStyledFormModal("📦 Repor Estoque — " + med.optString("nome"), layout, "Confirmar Reposição", "Cancelar", this.cPrimary, new Runnable() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void run() {
                 try {
                     int addQty = Integer.parseInt(etAdd.getText().toString().trim());
                     if (addQty > 0) {
@@ -8125,8 +8705,6 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
             }
         });
-        builder.setNegativeButton("Cancelar", null);
-        builder.show();
     }
 
     /* JADX INFO: Access modifiers changed from: package-private */
@@ -8327,8 +8905,6 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            AlertDialog.Builder b = new AlertDialog.Builder(MainActivity.this);
-                            b.setTitle("🗄️ Status no Banco Oracle (PostgreSQL)");
                             StringBuilder msg = new StringBuilder();
                             boolean ok = resp.optBoolean("ok", false);
                             msg.append("Status da conexão: ").append(ok ? "✅ ONLINE (Gravação Ativa)" : "⚠️ Indisponível").append("\n");
@@ -8342,6 +8918,7 @@ public class MainActivity extends Activity {
                                 msg.append("• CPF: ").append(u.optString("cpf", "-")).append("\n");
                                 msg.append("• Telefone: ").append(u.optString("phone", "-")).append("\n");
                                 msg.append("• Tipo Sanguíneo: ").append(u.optString("blood_type", "-")).append("\n");
+                                msg.append("• Foto salva: ").append(!u.optString("foto_url", "").isEmpty() ? "Sim ✅" : "Não").append("\n");
                                 msg.append("• Atualizado em: ").append(u.optString("updated_at", "-")).append("\n\n");
                             } else {
                                 msg.append("👤 Perfil ainda não localizado para ID ").append(MainActivity.this.profile.optString("id", "pac-001")).append(".\nToque em 'Sincronizar dados agora' para enviar.\n\n");
@@ -8359,20 +8936,21 @@ public class MainActivity extends Activity {
                             msg.append("• Notas (calendar_notes): ").append(nArr != null ? nArr.length() : 0).append("\n");
                             msg.append("• Alergias (allergies): ").append(aArr != null ? aArr.length() : 0).append("\n");
                             msg.append("• Contatos SOS (emergency_contacts): ").append(cArr != null ? cArr.length() : 0).append("\n");
-                            b.setMessage(msg.toString());
-                            b.setPositiveButton("Fechar", null);
-                            b.show();
+                            showStyledConfirmDialog("🗄️ Status no Banco Oracle (PostgreSQL)", msg.toString(), "Fechar", null, MainActivity.this.cPrimary, null);
                         }
                     });
                 } catch (final Exception ex) {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            AlertDialog.Builder b = new AlertDialog.Builder(MainActivity.this);
-                            b.setTitle("⚠️ Servidor Offline / Sem Conexão");
-                            b.setMessage("Não foi possível consultar " + EMBEDDED_BACKEND_URL + "/api/v1/sync.\n\nSeus dados estão salvos localmente no aparelho e serão sincronizados assim que o servidor responder.\n\nDetalhe: " + ex.getMessage());
-                            b.setPositiveButton("OK", null);
-                            b.show();
+                            showStyledConfirmDialog(
+                                "⚠️ Servidor Offline / Sem Conexão",
+                                "Não foi possível consultar " + EMBEDDED_BACKEND_URL + "/api/v1/sync.\n\nSeus dados estão salvos localmente no aparelho e serão sincronizados assim que o servidor responder.\n\nDetalhe: " + ex.getMessage(),
+                                "OK",
+                                null,
+                                MainActivity.this.cWarning,
+                                null
+                            );
                         }
                     });
                 }
@@ -8408,8 +8986,6 @@ public class MainActivity extends Activity {
     }
 
     private void showSosEmergencyDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("🚨 Emergência Médica (SOS)");
         StringBuilder sb = new StringBuilder();
         sb.append("Paciente: ").append(this.profile.optString("nome")).append("\n");
         sb.append("Tipo Sanguíneo: ").append(this.profile.optString("tipo_sanguineo")).append("\n");
@@ -8421,15 +8997,12 @@ public class MainActivity extends Activity {
                 sb.append("• ").append(optJSONObject.optString("nome")).append(" (").append(optJSONObject.optString("relacao")).append("): ").append(optJSONObject.optString("telefone")).append("\n");
             }
         }
-        builder.setMessage(sb.toString());
-        builder.setPositiveButton("📞 Ligar SAMU 192", new DialogInterface.OnClickListener() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda10
-            @Override // android.content.DialogInterface.OnClickListener
-            public final void onClick(DialogInterface dialogInterface, int i2) {
-                MainActivity.this.m21x2ce5f109(dialogInterface, i2);
+        showStyledConfirmDialog("🚨 Emergência Médica (SOS)", sb.toString(), "📞 Ligar SAMU 192", "Fechar", this.cDanger, new Runnable() {
+            @Override
+            public void run() {
+                m21x2ce5f109(null, 0);
             }
         });
-        builder.setNegativeButton("Fechar", (DialogInterface.OnClickListener) null);
-        builder.show();
     }
 
     /* JADX INFO: Access modifiers changed from: package-private */

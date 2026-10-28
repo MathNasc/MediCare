@@ -320,8 +320,8 @@ export async function POST(request) {
       : 'independente';
 
     await client.query(
-      `INSERT INTO profiles (id, nome, social_name, email, role, blood_type, dob, sex, cpf, phone, address, weight, height, role_change_pin, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+      `INSERT INTO profiles (id, nome, social_name, email, role, blood_type, dob, sex, cpf, phone, address, weight, height, foto_url, role_change_pin, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
        ON CONFLICT (id) DO UPDATE SET
          nome = COALESCE(NULLIF(EXCLUDED.nome, ''), profiles.nome),
          social_name = COALESCE(EXCLUDED.social_name, profiles.social_name),
@@ -335,6 +335,7 @@ export async function POST(request) {
          address = COALESCE(EXCLUDED.address, profiles.address),
          weight = COALESCE(EXCLUDED.weight, profiles.weight),
          height = COALESCE(EXCLUDED.height, profiles.height),
+         foto_url = COALESCE(EXCLUDED.foto_url, profiles.foto_url),
          role_change_pin = COALESCE(EXCLUDED.role_change_pin, profiles.role_change_pin),
          updated_at = NOW()`,
       [
@@ -351,6 +352,7 @@ export async function POST(request) {
         user.address || user.endereco || null,
         parsePgNumeric(user.weight ?? user.peso),
         parsePgNumeric(user.height ?? user.altura),
+        user.foto_url || null,
         user.role_change_pin || '123456',
       ]
     );
