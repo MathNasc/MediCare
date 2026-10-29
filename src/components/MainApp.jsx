@@ -209,6 +209,141 @@ function CaregiverInviteModal({ status, invite, onAccept, onDismiss, T }) {
   );
 }
 
+// ─── Modal de solicitação de permissão de notificações na abertura do app ────
+function NotificationPromptModal({ permission, onAllow, onDismiss, T, scale = 1 }) {
+  const [requesting, setRequesting] = useState(false);
+  const isDenied = permission === 'denied';
+
+  const handleAllow = async () => {
+    setRequesting(true);
+    try {
+      await onAllow();
+    } finally {
+      setRequesting(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Ativar notificações"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.75)',
+        backdropFilter: 'blur(8px)',
+        zIndex: 9500,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+      }}
+    >
+      <div
+        className="anim-scaleIn"
+        style={{
+          background: T.bg1,
+          border: `1px solid ${T.bdr}`,
+          borderRadius: 24,
+          padding: 26,
+          maxWidth: 380,
+          width: '100%',
+          boxShadow: '0 20px 45px rgba(0,0,0,0.45)',
+          textAlign: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: '50%',
+            background: isDenied ? 'rgba(239,68,68,0.14)' : 'rgba(59,130,246,0.15)',
+            border: `1.5px solid ${isDenied ? 'rgba(239,68,68,0.35)' : 'rgba(59,130,246,0.4)'}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 30,
+            margin: '0 auto 16px',
+          }}
+        >
+          {isDenied ? '🔕' : '🔔'}
+        </div>
+
+        <h3 style={{ color: T.txt, fontWeight: 900, fontSize: 20 * scale, marginBottom: 10, lineHeight: 1.25 }}>
+          {isDenied ? 'Notificações bloqueadas' : 'Permitir notificações?'}
+        </h3>
+
+        <p style={{ color: T.sub, fontSize: 14 * scale, lineHeight: 1.55, marginBottom: 22 }}>
+          {isDenied
+            ? 'As notificações estão bloqueadas nas configurações do seu navegador ou aparelho. Para receber alertas nos horários das suas doses, libere a permissão nas configurações do navegador/app.'
+            : 'As notificações não estão ativas neste aparelho. Permita que o MediCare envie alertas para lembrar os horários exatos dos seus medicamentos.'}
+        </p>
+
+        {isDenied ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            style={{
+              width: '100%',
+              padding: '14px 16px',
+              borderRadius: 14,
+              background: '#3b82f6',
+              color: '#fff',
+              border: 'none',
+              fontWeight: 800,
+              fontSize: 15 * scale,
+              cursor: 'pointer',
+            }}
+          >
+            Entendi
+          </button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button
+              type="button"
+              onClick={handleAllow}
+              disabled={requesting}
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                borderRadius: 14,
+                background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                color: '#fff',
+                border: 'none',
+                fontWeight: 800,
+                fontSize: 15 * scale,
+                cursor: requesting ? 'wait' : 'pointer',
+                boxShadow: '0 6px 18px rgba(37,99,235,0.35)',
+              }}
+            >
+              {requesting ? 'Solicitando permissão…' : '🔔 Permitir notificações'}
+            </button>
+            <button
+              type="button"
+              onClick={onDismiss}
+              disabled={requesting}
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                borderRadius: 14,
+                background: T.bg2,
+                color: T.sub,
+                border: `1px solid ${T.bdr}`,
+                fontWeight: 700,
+                fontSize: 14 * scale,
+                cursor: 'pointer',
+              }}
+            >
+              Agora não
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Inner app ────────────────────────────────────────────────────────────────
 function InnerApp() {
   const { user, loading, syncing, login, doses, meds, history, confirmDose, undoDose, saveMed, refresh } = useApp();
@@ -315,7 +450,30 @@ function InnerApp() {
   useBackButton(timeWarning !== null, () => setTimeWarning(null));
   useBackButton(undoWarning !== null, () => setUndoWarning(null));
 
-  useNotifications(doses, user?.id);
+  const {
+    setup: setupNotifications,
+    isSubscribed: notifSubscribed,
+    permission: notifPermission,
+    checked: notifChecked,
+  } = useNotifications(doses, user?.id);
+  const [notifPromptDismissed, setNotifPromptDismissed] = useState(false);
+
+  const shouldPromptNotifications =
+    notifChecked &&
+    !notifSubscribed &&
+    !notifPromptDismissed &&
+    typeof window !== 'undefined' &&
+    'Notification' in window;
+
+  const handleAllowNotifications = useCallback(async () => {
+    const ok = await setupNotifications();
+    if (ok) {
+      toast('✓ Notificações ativadas com sucesso!', 'ok');
+      setNotifPromptDismissed(true);
+    } else if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'denied') {
+      toast('Permissão de notificação negada no navegador.', 'warn');
+    }
+  }, [setupNotifications, toast]);
 
   const handleConfirmDose = useCallback((dose) => {
     confirmDose(dose, toast);
@@ -506,6 +664,16 @@ function InnerApp() {
           onAccept={invite.accept}
           onDismiss={invite.dismiss}
           T={T}
+        />
+      )}
+
+      {shouldPromptNotifications && !invite.status && (
+        <NotificationPromptModal
+          permission={notifPermission}
+          onAllow={handleAllowNotifications}
+          onDismiss={() => setNotifPromptDismissed(true)}
+          T={T}
+          scale={scale}
         />
       )}
     </div>

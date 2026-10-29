@@ -26,17 +26,29 @@ export const isPushSupported = () =>
  * ou null se não suportado / permissão negada.
  */
 export async function subscribeToPush() {
-  if (!isPushSupported()) return null;
+  if (typeof window === 'undefined' || !('Notification' in window)) return null;
   if (Notification.permission === 'denied') return null;
 
   if (Notification.permission === 'default') {
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return null;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return null;
+    } catch {
+      return null;
+    }
   }
 
   try {
-    const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-    await navigator.serviceWorker.ready;
+    if ('serviceWorker' in navigator) {
+      await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+    }
+  } catch {}
+
+  if (!isPushSupported()) return null;
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
 
     let sub = await reg.pushManager.getSubscription();
     const currentVapidArray = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);

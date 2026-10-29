@@ -37,10 +37,8 @@ function FullSubScreen({ children, bg }) {
 
 export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggleHc, initialView = 'main', initialCgTab = 'summary' }) {
   const { user, logout, meds } = useApp();
-  const [permission, setPermission] = useState('default');
-  const { setup, disable, isSubscribed } = useNotifications(meds, user?.id);
-  useEffect(() => { if (typeof window !== 'undefined' && 'Notification' in window) setPermission(Notification.permission); }, []);
-  const setupPush = async () => { if (await setup()) setPermission(Notification.permission); };
+  const { setup, disable, isSubscribed, permission } = useNotifications(meds, user?.id);
+  const setupPush = async () => { await setup(); };
   const disablePush = async () => { await disable(); };
   
   const [profile, setProfile] = useState(null);
