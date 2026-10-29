@@ -441,8 +441,11 @@ fun PatientProfileScreen(
             }
 
             "health" -> {
+                var editingAllergyId by remember { mutableStateOf<String?>(null) }
                 var newAllergyName by remember { mutableStateOf("") }
                 var newAllergyReaction by remember { mutableStateOf("") }
+                var newAllergySeverity by remember { mutableStateOf("Moderada") }
+                var editingCondId by remember { mutableStateOf<String?>(null) }
                 var newCondName by remember { mutableStateOf("") }
                 var newCondNotes by remember { mutableStateOf("") }
 
@@ -458,25 +461,37 @@ fun PatientProfileScreen(
                             .clip(RoundedCornerShape(12.dp))
                             .background(tokens.bg1)
                             .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("${a.name} (${a.severity}) — ${a.reaction ?: ""}", color = tokens.txt, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        Text("🗑️", modifier = Modifier.clickable { onDeleteAllergy(a.id) })
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("✏️", modifier = Modifier.clickable {
+                                editingAllergyId = a.id
+                                newAllergyName = a.name
+                                newAllergyReaction = a.reaction ?: ""
+                                newAllergySeverity = a.severity
+                            })
+                            Text("🗑️", modifier = Modifier.clickable { onDeleteAllergy(a.id) })
+                        }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = newAllergyName, onValueChange = { newAllergyName = it }, label = { Text("Nova alergia") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = newAllergyName, onValueChange = { newAllergyName = it }, label = { Text(if (editingAllergyId != null) "Editar alergia" else "Nova alergia") }, singleLine = true, modifier = Modifier.weight(1f))
                     OutlinedTextField(value = newAllergyReaction, onValueChange = { newAllergyReaction = it }, label = { Text("Reação") }, singleLine = true, modifier = Modifier.weight(1f))
                     Button(
                         onClick = {
                             if (newAllergyName.isNotBlank()) {
-                                onSaveAllergy(AllergyItem("alg-${UUID.randomUUID().toString().take(6)}", user.id, newAllergyName.trim(), newAllergyReaction.trim(), "Moderada"))
+                                val targetId = editingAllergyId ?: "alg-${UUID.randomUUID().toString().take(6)}"
+                                onSaveAllergy(AllergyItem(targetId, user.id, newAllergyName.trim(), newAllergyReaction.trim(), newAllergySeverity.ifBlank { "Moderada" }))
+                                editingAllergyId = null
                                 newAllergyName = ""
                                 newAllergyReaction = ""
+                                newAllergySeverity = "Moderada"
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Red)
-                    ) { Text("+") }
+                    ) { Text(if (editingAllergyId != null) "✓" else "+") }
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
@@ -490,25 +505,35 @@ fun PatientProfileScreen(
                             .clip(RoundedCornerShape(12.dp))
                             .background(tokens.bg1)
                             .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("${c.name} ${c.notes?.let { "— $it" } ?: ""}", color = tokens.txt, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        Text("🗑️", modifier = Modifier.clickable { onDeleteCondition(c.id) })
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("✏️", modifier = Modifier.clickable {
+                                editingCondId = c.id
+                                newCondName = c.name
+                                newCondNotes = c.notes ?: ""
+                            })
+                            Text("🗑️", modifier = Modifier.clickable { onDeleteCondition(c.id) })
+                        }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = newCondName, onValueChange = { newCondName = it }, label = { Text("Nova condição") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = newCondName, onValueChange = { newCondName = it }, label = { Text(if (editingCondId != null) "Editar condição" else "Nova condição") }, singleLine = true, modifier = Modifier.weight(1f))
                     OutlinedTextField(value = newCondNotes, onValueChange = { newCondNotes = it }, label = { Text("Observação") }, singleLine = true, modifier = Modifier.weight(1f))
                     Button(
                         onClick = {
                             if (newCondName.isNotBlank()) {
-                                onSaveCondition(HealthConditionItem("cond-${UUID.randomUUID().toString().take(6)}", user.id, newCondName.trim(), newCondNotes.trim()))
+                                val targetId = editingCondId ?: "cond-${UUID.randomUUID().toString().take(6)}"
+                                onSaveCondition(HealthConditionItem(targetId, user.id, newCondName.trim(), newCondNotes.trim()))
+                                editingCondId = null
                                 newCondName = ""
                                 newCondNotes = ""
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Blue)
-                    ) { Text("+") }
+                    ) { Text(if (editingCondId != null) "✓" else "+") }
                 }
             }
 
@@ -524,6 +549,7 @@ fun PatientProfileScreen(
             }
 
             "professionals" -> {
+                var editingProfId by remember { mutableStateOf<String?>(null) }
                 var name by remember { mutableStateOf("") }
                 var specialty by remember { mutableStateOf("") }
                 var phone by remember { mutableStateOf("") }
@@ -545,7 +571,7 @@ fun PatientProfileScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(p.name, color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            Text(listOfNotNull(p.specialty, p.crm, p.phone).joinToString(" · "), color = tokens.sub, fontSize = 12.sp)
+                            Text(listOfNotNull(p.specialty, p.crm?.takeIf { it.isNotBlank() && it != "null" }, p.phone).joinToString(" · "), color = tokens.sub, fontSize = 12.sp)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (!p.phone.isNullOrBlank()) {
@@ -555,12 +581,19 @@ fun PatientProfileScreen(
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                 ) { Text("📞 Ligar", color = Color.White, fontSize = 12.sp) }
                             }
+                            Text("✏️", modifier = Modifier.clickable {
+                                editingProfId = p.id
+                                name = p.name
+                                specialty = p.specialty
+                                crm = p.crm?.takeIf { it != "null" } ?: ""
+                                phone = p.phone ?: ""
+                            })
                             Text("🗑️", modifier = Modifier.clickable { onDeleteProfessional(p.id) })
                         }
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("Adicionar profissional:", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(if (editingProfId != null) "Editar profissional:" else "Adicionar profissional:", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nome do médico/profissional") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -575,7 +608,7 @@ fun PatientProfileScreen(
                         if (name.isNotBlank()) {
                             onSaveProfessional(
                                 HealthcareProfessional(
-                                    id = "prof-${UUID.randomUUID().toString().take(6)}",
+                                    id = editingProfId ?: "prof-${UUID.randomUUID().toString().take(6)}",
                                     userId = user.id,
                                     name = name.trim(),
                                     specialty = specialty.ifBlank { "Clínico Geral" },
@@ -583,15 +616,16 @@ fun PatientProfileScreen(
                                     crm = crm.takeIf { it.isNotBlank() }
                                 )
                             )
-                            name = ""; specialty = ""; phone = ""; crm = ""
+                            editingProfId = null; name = ""; specialty = ""; phone = ""; crm = ""
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Blue),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("+ Salvar Profissional", color = Color.White, fontWeight = FontWeight.Bold) }
+                ) { Text(if (editingProfId != null) "✓ Salvar Alterações" else "+ Salvar Profissional", color = Color.White, fontWeight = FontWeight.Bold) }
             }
 
             "contacts" -> {
+                var editingContactId by remember { mutableStateOf<String?>(null) }
                 var name by remember { mutableStateOf("") }
                 var relation by remember { mutableStateOf("") }
                 var phone by remember { mutableStateOf("") }
@@ -620,6 +654,12 @@ fun PatientProfileScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Green),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                             ) { Text("📞 Ligar", color = Color.White, fontSize = 12.sp) }
+                            Text("✏️", modifier = Modifier.clickable {
+                                editingContactId = ec.id
+                                name = ec.name
+                                relation = ec.relation
+                                phone = ec.phone
+                            })
                             Text("🗑️", modifier = Modifier.clickable { onDeleteContact(ec.id) })
                         }
                     }
@@ -637,7 +677,7 @@ fun PatientProfileScreen(
                         if (name.isNotBlank() && phone.isNotBlank()) {
                             onSaveContact(
                                 EmergencyContact(
-                                    id = "ec-${UUID.randomUUID().toString().take(6)}",
+                                    id = editingContactId ?: "ec-${UUID.randomUUID().toString().take(6)}",
                                     userId = user.id,
                                     name = name.trim(),
                                     relation = relation.ifBlank { "Familiar" },
@@ -645,12 +685,12 @@ fun PatientProfileScreen(
                                     priority = state.emergencyContacts.size + 1
                                 )
                             )
-                            name = ""; relation = ""; phone = ""
+                            editingContactId = null; name = ""; relation = ""; phone = ""
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Blue),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("+ Adicionar Contato", color = Color.White, fontWeight = FontWeight.Bold) }
+                ) { Text(if (editingContactId != null) "✓ Salvar Alterações" else "+ Adicionar Contato", color = Color.White, fontWeight = FontWeight.Bold) }
             }
 
             "caregivers" -> {
@@ -658,102 +698,137 @@ fun PatientProfileScreen(
                 var label by remember { mutableStateOf("Familiar") }
                 var perm by remember { mutableStateOf("caregiver") }
                 var generatedInvite by remember { mutableStateOf<CaregiverRelationship?>(null) }
+                val isPatientRole = user.role.equals("paciente", ignoreCase = true) || user.role.equals("patient", ignoreCase = true) || user.role.equals("supervised", ignoreCase = true)
 
                 Text("🤝 Cuidadores e Vínculos", color = tokens.txt, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Text("Gerencie quem pode acompanhar ou administrar suas doses no MediCare Cuidador Web:", color = tokens.sub, fontSize = 13.sp)
 
                 Spacer(modifier = Modifier.height(14.dp))
-                state.caregivers.forEach { cg ->
+                if (!isPatientRole) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 10.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(tokens.bg1)
-                            .border(1.dp, tokens.bdr, RoundedCornerShape(16.dp))
-                            .padding(14.dp)
+                            .background(MediCareColors.Amber.copy(alpha = 0.14f))
+                            .border(1.dp, MediCareColors.Amber.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column {
-                                Text(cg.caregiverName ?: cg.inviteEmail ?: "Cuidador Convidado", color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                                Text("${cg.relationshipLabel ?: "Familiar"} · Status: ${cg.status.uppercase()}", color = tokens.sub, fontSize = 12.sp)
+                        Text(
+                            text = "⚠️ Você é independente, vire paciente para continuar",
+                            color = MediCareColors.Amber,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "O vínculo com cuidadores está disponível apenas quando seu perfil está configurado como Paciente.",
+                            color = tokens.sub,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = { subView = "role_swap" },
+                            colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Amber),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("🔄 Mudar para perfil Paciente", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    state.caregivers.forEach { cg ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(tokens.bg1)
+                                .border(1.dp, tokens.bdr, RoundedCornerShape(16.dp))
+                                .padding(14.dp)
+                        ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column {
+                                    Text(cg.caregiverName ?: cg.inviteEmail ?: "Cuidador Convidado", color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                                    Text("${cg.relationshipLabel ?: "Familiar"} · Status: ${cg.status.uppercase()}", color = tokens.sub, fontSize = 12.sp)
+                                }
+                                if (cg.status != "revoked") {
+                                    Text(
+                                        text = "Revogar",
+                                        color = MediCareColors.Red,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable {
+                                            onUpdateCaregiver(cg.copy(status = "revoked"))
+                                        }
+                                    )
+                                }
                             }
                             if (cg.status != "revoked") {
-                                Text(
-                                    text = "Revogar",
-                                    color = MediCareColors.Red,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.clickable {
-                                        onUpdateCaregiver(cg.copy(status = "revoked"))
-                                    }
-                                )
-                            }
-                        }
-                        if (cg.status != "revoked") {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf("viewer" to "👁️ Visualizador", "caregiver" to "🤝 Cuidador", "admin" to "🛡️ Admin").forEach { (pCode, pLabel) ->
-                                    val active = cg.permissionLevel == pCode
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(if (active) MediCareColors.Purple else tokens.bg2)
-                                            .clickable { onUpdateCaregiver(cg.copy(permissionLevel = pCode)) }
-                                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                                    ) {
-                                        Text(pLabel, color = if (active) Color.White else tokens.sub, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("viewer" to "👁️ Visualizador", "caregiver" to "🤝 Cuidador", "admin" to "🛡️ Admin").forEach { (pCode, pLabel) ->
+                                        val active = cg.permissionLevel == pCode
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (active) MediCareColors.Purple else tokens.bg2)
+                                                .clickable { onUpdateCaregiver(cg.copy(permissionLevel = pCode)) }
+                                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                                        ) {
+                                            Text(pLabel, color = if (active) Color.White else tokens.sub, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Convidar novo cuidador:", color = tokens.sub, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("E-mail do cuidador (opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(value = label, onValueChange = { label = it }, label = { Text("Vínculo (ex: Filho, Enfermeira)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        onCreateCaregiverInvite(email, label, perm) { created ->
-                            generatedInvite = created
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Purple),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("🔗 Gerar Link de Convite", color = Color.White, fontWeight = FontWeight.ExtraBold)
-                }
-
-                generatedInvite?.let { inv ->
-                    val link = "https://medicare.app/invite/${inv.inviteToken}"
                     Spacer(modifier = Modifier.height(12.dp))
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(MediCareColors.Purple.copy(alpha = 0.14f))
-                            .border(1.dp, MediCareColors.Purple, RoundedCornerShape(14.dp))
-                            .padding(14.dp)
+                    Text("Convidar novo cuidador:", color = tokens.sub, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("E-mail do cuidador (opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(value = label, onValueChange = { label = it }, label = { Text("Vínculo (ex: Filho, Enfermeira)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            onCreateCaregiverInvite(email, label, perm) { created ->
+                                generatedInvite = created
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Purple),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
-                        Text("Link de convite gerado:", color = MediCareColors.Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text(link, color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, "Olá! Acompanhe meu tratamento no MediCare Cuidador: $link")
-                                }
-                                context.startActivity(Intent.createChooser(sendIntent, "Compartilhar Convite"))
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Green)
+                        Text("🔗 Gerar Link de Convite", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                    }
+
+                    generatedInvite?.let { inv ->
+                        val link = "https://medicare.app/invite/${inv.inviteToken}"
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MediCareColors.Purple.copy(alpha = 0.14f))
+                                .border(1.dp, MediCareColors.Purple, RoundedCornerShape(14.dp))
+                                .padding(14.dp)
                         ) {
-                            Text("📤 Compartilhar via WhatsApp / SMS", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Link de convite gerado:", color = MediCareColors.Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(link, color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, "Olá! Acompanhe meu tratamento no MediCare Cuidador: $link")
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Compartilhar Convite"))
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Green)
+                            ) {
+                                Text("📤 Compartilhar via WhatsApp / SMS", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

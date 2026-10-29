@@ -2292,7 +2292,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.5.7 • Produção");
+        versionBadge.setText("Versão 2.5.8 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -9355,6 +9355,13 @@ public class MainActivity extends Activity {
         linearLayout.addView(card);
     }
 
+    private String optCleanString(JSONObject obj, String key, String fallback) {
+        if (obj == null || obj.isNull(key)) return fallback;
+        String val = obj.optString(key, fallback).trim();
+        if ("null".equalsIgnoreCase(val) || "undefined".equalsIgnoreCase(val)) return fallback;
+        return val;
+    }
+
     private void buildHealthSubScreen(LinearLayout linearLayout) {
         // Card 1: Alergias
         LinearLayout algCard = new LinearLayout(this);
@@ -9434,14 +9441,18 @@ public class MainActivity extends Activity {
                 textCol.setOrientation(1);
                 textCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
+                String algName = optCleanString(a, "nome", optCleanString(a, "allergen", ""));
+                String algGrav = optCleanString(a, "gravidade", optCleanString(a, "severity", "Moderada"));
+                if (algGrav.isEmpty()) algGrav = "Moderada";
+
                 TextView tvN = new TextView(this);
-                tvN.setText(a.optString("nome", a.optString("allergen", "")) + "  •  " + a.optString("gravidade", "Moderada"));
+                tvN.setText(algName + "  •  " + algGrav);
                 tvN.setTextColor(this.cTextMain);
                 tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 textCol.addView(tvN);
 
-                String reac = a.optString("reacao", a.optString("reaction", ""));
+                String reac = optCleanString(a, "reacao", optCleanString(a, "reaction", ""));
                 if (!reac.isEmpty()) {
                     TextView tvR = new TextView(this);
                     tvR.setText("Reação: " + reac);
@@ -9451,6 +9462,24 @@ public class MainActivity extends Activity {
                 }
 
                 item.addView(textCol);
+
+                TextView btnEdit = new TextView(this);
+                btnEdit.setText("✏️");
+                btnEdit.setTextSize(sp(15.0f));
+                btnEdit.setGravity(17);
+                btnEdit.setBackground(shape(Color.parseColor("#1A3B82F6"), 10, Color.parseColor("#333B82F6"), 1));
+                btnEdit.setPadding(dp(9), dp(6), dp(9), dp(6));
+                LinearLayout.LayoutParams edLp = new LinearLayout.LayoutParams(-2, -2);
+                edLp.leftMargin = dp(6);
+                edLp.rightMargin = dp(4);
+                btnEdit.setLayoutParams(edLp);
+                btnEdit.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showEditAllergyDialog(a, idx);
+                    }
+                });
+                item.addView(btnEdit);
 
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
@@ -9547,13 +9576,13 @@ public class MainActivity extends Activity {
                 textCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                 TextView tvN = new TextView(this);
-                tvN.setText(c.optString("nome", c.optString("condition_name", "")));
+                tvN.setText(optCleanString(c, "nome", optCleanString(c, "condition_name", "")));
                 tvN.setTextColor(this.cTextMain);
                 tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 textCol.addView(tvN);
 
-                String nts = c.optString("notas", c.optString("notes", ""));
+                String nts = optCleanString(c, "notas", optCleanString(c, "notes", ""));
                 if (!nts.isEmpty()) {
                     TextView tvD = new TextView(this);
                     tvD.setText(nts);
@@ -9563,6 +9592,24 @@ public class MainActivity extends Activity {
                 }
 
                 item.addView(textCol);
+
+                TextView btnEdit = new TextView(this);
+                btnEdit.setText("✏️");
+                btnEdit.setTextSize(sp(15.0f));
+                btnEdit.setGravity(17);
+                btnEdit.setBackground(shape(Color.parseColor("#1A3B82F6"), 10, Color.parseColor("#333B82F6"), 1));
+                btnEdit.setPadding(dp(9), dp(6), dp(9), dp(6));
+                LinearLayout.LayoutParams edLp = new LinearLayout.LayoutParams(-2, -2);
+                edLp.leftMargin = dp(6);
+                edLp.rightMargin = dp(4);
+                btnEdit.setLayoutParams(edLp);
+                btnEdit.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showEditConditionDialog(c, idx);
+                    }
+                });
+                item.addView(btnEdit);
 
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
@@ -9585,68 +9632,115 @@ public class MainActivity extends Activity {
     }
 
     private void showAddAllergyDialog() {
+        showEditAllergyDialog(null, -1);
+    }
+
+    private void showEditAllergyDialog(final JSONObject existing, final int editIdx) {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
 
-        final EditText etNome = createInput("Alérgeno (ex: Dipirona, Penicilina)", "");
-        final EditText etReacao = createInput("Reação (ex: Inchaço, falta de ar)", "");
-        final EditText etGrav = createInput("Severidade (Leve, Moderada, Grave)", "Moderada");
+        String initNome = existing != null ? optCleanString(existing, "nome", optCleanString(existing, "allergen", "")) : "";
+        String initReacao = existing != null ? optCleanString(existing, "reacao", optCleanString(existing, "reaction", "")) : "";
+        String initGrav = existing != null ? optCleanString(existing, "gravidade", optCleanString(existing, "severity", "Moderada")) : "Moderada";
+        if (initGrav.isEmpty()) initGrav = "Moderada";
+
+        final EditText etNome = createInput("Alérgeno (ex: Dipirona, Penicilina)", initNome);
+        final EditText etReacao = createInput("Reação (ex: Inchaço, falta de ar)", initReacao);
+        final EditText etGrav = createInput("Severidade (Leve, Moderada, Grave)", initGrav);
 
         layout.addView(etNome);
         layout.addView(etReacao);
         layout.addView(etGrav);
 
-        showStyledFormModal("⚠️ Adicionar Alergia", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String nome = etNome.getText().toString().trim();
-                    if (!nome.isEmpty()) {
-                        JSONObject newA = new JSONObject();
-                        newA.put("id", "alg-" + System.currentTimeMillis());
-                        newA.put("nome", nome);
-                        newA.put("allergen", nome);
-                        newA.put("gravidade", etGrav.getText().toString().trim());
-                        newA.put("reacao", etReacao.getText().toString().trim());
-                        newA.put("reaction", etReacao.getText().toString().trim());
-                        MainActivity.this.allergies.put(newA);
-                        saveAll();
-                        render();
-                    }
-                } catch (Exception e) {}
+        showStyledFormModal(
+            existing != null ? "✏️ Editar Alergia" : "⚠️ Adicionar Alergia",
+            layout,
+            "Salvar",
+            "Cancelar",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String nome = etNome.getText().toString().trim();
+                        if (!nome.isEmpty()) {
+                            JSONObject obj = existing != null ? existing : new JSONObject();
+                            if (existing == null || obj.optString("id", "").trim().isEmpty()) {
+                                obj.put("id", "alg-" + System.currentTimeMillis());
+                            }
+                            String grav = etGrav.getText().toString().trim();
+                            if (grav.isEmpty()) grav = "Moderada";
+                            String reac = etReacao.getText().toString().trim();
+                            obj.put("nome", nome);
+                            obj.put("allergen", nome);
+                            obj.put("gravidade", grav);
+                            obj.put("severity", grav);
+                            obj.put("reacao", reac);
+                            obj.put("reaction", reac);
+                            if (editIdx >= 0) {
+                                MainActivity.this.allergies.put(editIdx, obj);
+                            } else {
+                                MainActivity.this.allergies.put(obj);
+                            }
+                            saveAll();
+                            render();
+                        }
+                    } catch (Exception e) {}
+                }
             }
-        });
+        );
     }
 
     private void showAddConditionDialog() {
+        showEditConditionDialog(null, -1);
+    }
+
+    private void showEditConditionDialog(final JSONObject existing, final int editIdx) {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
 
-        final EditText etNome = createInput("Condição (ex: Hipertensão, Diabetes)", "");
-        final EditText etNotas = createInput("Observações (ex: Controlada com medicação)", "");
+        String initNome = existing != null ? optCleanString(existing, "nome", optCleanString(existing, "condition_name", "")) : "";
+        String initNotas = existing != null ? optCleanString(existing, "notas", optCleanString(existing, "notes", "")) : "";
+
+        final EditText etNome = createInput("Condição (ex: Hipertensão, Diabetes)", initNome);
+        final EditText etNotas = createInput("Observações (ex: Controlada com medicação)", initNotas);
 
         layout.addView(etNome);
         layout.addView(etNotas);
 
-        showStyledFormModal("❤️ Adicionar Condição de Saúde", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String nome = etNome.getText().toString().trim();
-                    if (!nome.isEmpty()) {
-                        JSONObject newC = new JSONObject();
-                        newC.put("id", "cond-" + System.currentTimeMillis());
-                        newC.put("nome", nome);
-                        newC.put("condition_name", nome);
-                        newC.put("notas", etNotas.getText().toString().trim());
-                        newC.put("notes", etNotas.getText().toString().trim());
-                        MainActivity.this.conditions.put(newC);
-                        saveAll();
-                        render();
-                    }
-                } catch (Exception e) {}
+        showStyledFormModal(
+            existing != null ? "✏️ Editar Condição de Saúde" : "❤️ Adicionar Condição de Saúde",
+            layout,
+            "Salvar",
+            "Cancelar",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String nome = etNome.getText().toString().trim();
+                        if (!nome.isEmpty()) {
+                            JSONObject obj = existing != null ? existing : new JSONObject();
+                            if (existing == null || obj.optString("id", "").trim().isEmpty()) {
+                                obj.put("id", "cond-" + System.currentTimeMillis());
+                            }
+                            String notas = etNotas.getText().toString().trim();
+                            obj.put("nome", nome);
+                            obj.put("condition_name", nome);
+                            obj.put("notas", notas);
+                            obj.put("notes", notas);
+                            if (editIdx >= 0) {
+                                MainActivity.this.conditions.put(editIdx, obj);
+                            } else {
+                                MainActivity.this.conditions.put(obj);
+                            }
+                            saveAll();
+                            render();
+                        }
+                    } catch (Exception e) {}
+                }
             }
-        });
+        );
     }
 
     private void buildContactsSubScreen(LinearLayout linearLayout) {
@@ -9710,7 +9804,7 @@ public class MainActivity extends Activity {
                 final int idx = i;
                 final JSONObject c = this.contacts.optJSONObject(i);
                 if (c == null) continue;
-                final String telNum = c.optString("telefone", c.optString("phone", ""));
+                final String telNum = optCleanString(c, "telefone", optCleanString(c, "phone", ""));
 
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(0);
@@ -9726,14 +9820,15 @@ public class MainActivity extends Activity {
                 col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                 TextView tvN = new TextView(this);
-                tvN.setText(c.optString("nome", c.optString("name", "")));
+                tvN.setText(optCleanString(c, "nome", optCleanString(c, "name", "")));
                 tvN.setTextColor(this.cTextMain);
                 tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 col.addView(tvN);
 
+                String relStr = optCleanString(c, "relacao", optCleanString(c, "relationship", ""));
                 TextView tvR = new TextView(this);
-                tvR.setText(c.optString("relacao", c.optString("relationship", "")) + " • " + telNum);
+                tvR.setText((!relStr.isEmpty() ? relStr : "Familiar") + (!telNum.isEmpty() ? " • " + telNum : ""));
                 tvR.setTextColor(this.cTextMuted);
                 tvR.setTextSize(sp(13.0f));
                 col.addView(tvR);
@@ -9753,6 +9848,23 @@ public class MainActivity extends Activity {
                     }
                 });
                 row.addView(btnDial);
+
+                TextView btnEdit = new TextView(this);
+                btnEdit.setText("✏️");
+                btnEdit.setTextSize(sp(15.0f));
+                btnEdit.setGravity(17);
+                btnEdit.setBackground(shape(Color.parseColor("#1A3B82F6"), 10, Color.parseColor("#333B82F6"), 1));
+                btnEdit.setPadding(dp(10), dp(8), dp(10), dp(8));
+                LinearLayout.LayoutParams edLp = new LinearLayout.LayoutParams(-2, -2);
+                edLp.leftMargin = dp(6);
+                btnEdit.setLayoutParams(edLp);
+                btnEdit.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showEditContactDialog(c, idx);
+                    }
+                });
+                row.addView(btnEdit);
 
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
@@ -9775,38 +9887,61 @@ public class MainActivity extends Activity {
     }
 
     private void showAddContactDialog() {
+        showEditContactDialog(null, -1);
+    }
+
+    private void showEditContactDialog(final JSONObject existing, final int editIdx) {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
 
-        final EditText etNome = createInput("Nome completo", "");
-        final EditText etRel = createInput("Parentesco / Relação (ex: Filha, Esposo)", "");
-        final EditText etTel = createInput("Telefone (00) 00000-0000", "");
+        String initNome = existing != null ? optCleanString(existing, "nome", optCleanString(existing, "name", "")) : "";
+        String initRel = existing != null ? optCleanString(existing, "relacao", optCleanString(existing, "relationship", "")) : "";
+        String initTel = existing != null ? optCleanString(existing, "telefone", optCleanString(existing, "phone", "")) : "";
+
+        final EditText etNome = createInput("Nome completo", initNome);
+        final EditText etRel = createInput("Parentesco / Relação (ex: Filha, Esposo)", initRel);
+        final EditText etTel = createInput("Telefone (00) 00000-0000", initTel);
 
         layout.addView(etNome);
         layout.addView(etRel);
         layout.addView(etTel);
 
-        showStyledFormModal("📞 Adicionar Contato de Emergência", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String nome = etNome.getText().toString().trim();
-                    if (!nome.isEmpty()) {
-                        JSONObject newC = new JSONObject();
-                        newC.put("id", "cnt-" + System.currentTimeMillis());
-                        newC.put("nome", nome);
-                        newC.put("name", nome);
-                        newC.put("relacao", etRel.getText().toString().trim());
-                        newC.put("relationship", etRel.getText().toString().trim());
-                        newC.put("telefone", etTel.getText().toString().trim());
-                        newC.put("phone", etTel.getText().toString().trim());
-                        MainActivity.this.contacts.put(newC);
-                        saveAll();
-                        render();
-                    }
-                } catch (Exception e) {}
+        showStyledFormModal(
+            existing != null ? "✏️ Editar Contato de Emergência" : "📞 Adicionar Contato de Emergência",
+            layout,
+            "Salvar",
+            "Cancelar",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String nome = etNome.getText().toString().trim();
+                        if (!nome.isEmpty()) {
+                            JSONObject obj = existing != null ? existing : new JSONObject();
+                            if (existing == null || obj.optString("id", "").trim().isEmpty()) {
+                                obj.put("id", "cnt-" + System.currentTimeMillis());
+                            }
+                            String rel = etRel.getText().toString().trim();
+                            String tel = etTel.getText().toString().trim();
+                            obj.put("nome", nome);
+                            obj.put("name", nome);
+                            obj.put("relacao", rel);
+                            obj.put("relationship", rel);
+                            obj.put("telefone", tel);
+                            obj.put("phone", tel);
+                            if (editIdx >= 0) {
+                                MainActivity.this.contacts.put(editIdx, obj);
+                            } else {
+                                MainActivity.this.contacts.put(obj);
+                            }
+                            saveAll();
+                            render();
+                        }
+                    } catch (Exception e) {}
+                }
             }
-        });
+        );
     }
 
     private void buildProfessionalsSubScreen(LinearLayout linearLayout) {
@@ -9870,7 +10005,7 @@ public class MainActivity extends Activity {
                 final int idx = i;
                 final JSONObject p = this.professionals.optJSONObject(i);
                 if (p == null) continue;
-                final String telNum = p.optString("telefone", p.optString("phone", ""));
+                final String telNum = optCleanString(p, "telefone", optCleanString(p, "phone", ""));
 
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(0);
@@ -9886,22 +10021,22 @@ public class MainActivity extends Activity {
                 col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                 TextView tvN = new TextView(this);
-                tvN.setText(p.optString("nome", p.optString("name", "")));
+                tvN.setText(optCleanString(p, "nome", optCleanString(p, "name", "")));
                 tvN.setTextColor(this.cTextMain);
                 tvN.setTextSize(sp(15.0f));
                 tvN.setTypeface(null, 1);
                 col.addView(tvN);
 
                 TextView tvEsp = new TextView(this);
-                String esp = p.optString("especialidade", p.optString("specialty", ""));
-                String crm = p.optString("crm", "");
-                tvEsp.setText(esp + (!crm.isEmpty() ? " • " + crm : ""));
+                String esp = optCleanString(p, "especialidade", optCleanString(p, "specialty", ""));
+                String crm = optCleanString(p, "crm", "");
+                tvEsp.setText(esp + (!crm.isEmpty() ? (!esp.isEmpty() ? " • " : "") + crm : ""));
                 tvEsp.setTextColor(this.cPrimary);
                 tvEsp.setTextSize(sp(13.0f));
                 tvEsp.setTypeface(null, 1);
                 col.addView(tvEsp);
 
-                String clin = p.optString("clinica", p.optString("clinic_address", ""));
+                String clin = optCleanString(p, "clinica", optCleanString(p, "clinic_address", ""));
                 if (!clin.isEmpty() || !telNum.isEmpty()) {
                     TextView tvI = new TextView(this);
                     tvI.setText((!clin.isEmpty() ? "📍 " + clin : "") + (!telNum.isEmpty() ? (!clin.isEmpty() ? "\n" : "") + "📞 " + telNum : ""));
@@ -9928,6 +10063,23 @@ public class MainActivity extends Activity {
                     row.addView(btnDial);
                 }
 
+                TextView btnEdit = new TextView(this);
+                btnEdit.setText("✏️");
+                btnEdit.setTextSize(sp(15.0f));
+                btnEdit.setGravity(17);
+                btnEdit.setBackground(shape(Color.parseColor("#1A3B82F6"), 10, Color.parseColor("#333B82F6"), 1));
+                btnEdit.setPadding(dp(10), dp(8), dp(10), dp(8));
+                LinearLayout.LayoutParams edLp = new LinearLayout.LayoutParams(-2, -2);
+                edLp.leftMargin = dp(6);
+                btnEdit.setLayoutParams(edLp);
+                btnEdit.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showEditProfessionalDialog(p, idx);
+                    }
+                });
+                row.addView(btnEdit);
+
                 TextView btnDel = new TextView(this);
                 btnDel.setText("🗑️");
                 btnDel.setTextSize(sp(16.0f));
@@ -9949,14 +10101,24 @@ public class MainActivity extends Activity {
     }
 
     private void showAddProfessionalDialog() {
+        showEditProfessionalDialog(null, -1);
+    }
+
+    private void showEditProfessionalDialog(final JSONObject existing, final int editIdx) {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(1);
 
-        final EditText etNome = createInput("Nome (ex: Dr. Carlos Silva)", "");
-        final EditText etEsp = createInput("Especialidade (ex: Cardiologista)", "");
-        final EditText etCrm = createInput("CRM / Registro", "");
-        final EditText etClinica = createInput("Hospital / Clínica / Endereço", "");
-        final EditText etTel = createInput("Telefone (00) 00000-0000", "");
+        String initNome = existing != null ? optCleanString(existing, "nome", optCleanString(existing, "name", "")) : "";
+        String initEsp = existing != null ? optCleanString(existing, "especialidade", optCleanString(existing, "specialty", "")) : "";
+        String initCrm = existing != null ? optCleanString(existing, "crm", "") : "";
+        String initClin = existing != null ? optCleanString(existing, "clinica", optCleanString(existing, "clinic_address", "")) : "";
+        String initTel = existing != null ? optCleanString(existing, "telefone", optCleanString(existing, "phone", "")) : "";
+
+        final EditText etNome = createInput("Nome (ex: Dr. Carlos Silva)", initNome);
+        final EditText etEsp = createInput("Especialidade (ex: Cardiologista)", initEsp);
+        final EditText etCrm = createInput("CRM / Registro", initCrm);
+        final EditText etClinica = createInput("Hospital / Clínica / Endereço", initClin);
+        final EditText etTel = createInput("Telefone (00) 00000-0000", initTel);
 
         layout.addView(etNome);
         layout.addView(etEsp);
@@ -9964,30 +10126,47 @@ public class MainActivity extends Activity {
         layout.addView(etClinica);
         layout.addView(etTel);
 
-        showStyledFormModal("👨‍⚕️ Adicionar Profissional", layout, "Salvar", "Cancelar", this.cPrimary, new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String nome = etNome.getText().toString().trim();
-                    if (!nome.isEmpty()) {
-                        JSONObject newP = new JSONObject();
-                        newP.put("id", "prof-" + System.currentTimeMillis());
-                        newP.put("nome", nome);
-                        newP.put("name", nome);
-                        newP.put("especialidade", etEsp.getText().toString().trim());
-                        newP.put("specialty", etEsp.getText().toString().trim());
-                        newP.put("crm", etCrm.getText().toString().trim());
-                        newP.put("clinica", etClinica.getText().toString().trim());
-                        newP.put("clinic_address", etClinica.getText().toString().trim());
-                        newP.put("telefone", etTel.getText().toString().trim());
-                        newP.put("phone", etTel.getText().toString().trim());
-                        MainActivity.this.professionals.put(newP);
-                        saveAll();
-                        render();
-                    }
-                } catch (Exception e) {}
+        showStyledFormModal(
+            existing != null ? "✏️ Editar Profissional" : "👨‍⚕️ Adicionar Profissional",
+            layout,
+            "Salvar",
+            "Cancelar",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String nome = etNome.getText().toString().trim();
+                        if (!nome.isEmpty()) {
+                            JSONObject obj = existing != null ? existing : new JSONObject();
+                            if (existing == null || obj.optString("id", "").trim().isEmpty()) {
+                                obj.put("id", "prof-" + System.currentTimeMillis());
+                            }
+                            String esp = etEsp.getText().toString().trim();
+                            String crm = etCrm.getText().toString().trim();
+                            String clin = etClinica.getText().toString().trim();
+                            String tel = etTel.getText().toString().trim();
+                            obj.put("nome", nome);
+                            obj.put("name", nome);
+                            obj.put("especialidade", esp);
+                            obj.put("specialty", esp);
+                            obj.put("crm", crm);
+                            obj.put("clinica", clin);
+                            obj.put("clinic_address", clin);
+                            obj.put("telefone", tel);
+                            obj.put("phone", tel);
+                            if (editIdx >= 0) {
+                                MainActivity.this.professionals.put(editIdx, obj);
+                            } else {
+                                MainActivity.this.professionals.put(obj);
+                            }
+                            saveAll();
+                            render();
+                        }
+                    } catch (Exception e) {}
+                }
             }
-        });
+        );
     }
 
     private void buildCaregiversSubScreen(LinearLayout linearLayout) {
@@ -10010,6 +10189,61 @@ public class MainActivity extends Activity {
         tvS.setTextSize(sp(13.0f));
         tvS.setPadding(0, 0, 0, dp(16));
         card.addView(tvS);
+
+        if (!isPatientProfileRole()) {
+            LinearLayout warnBox = new LinearLayout(this);
+            warnBox.setOrientation(1);
+            warnBox.setBackground(shape(Color.parseColor("#1AF59E0B"), 14, Color.parseColor("#4DF59E0B"), 1));
+            warnBox.setPadding(dp(16), dp(16), dp(16), dp(16));
+            LinearLayout.LayoutParams wbLp = new LinearLayout.LayoutParams(-1, -2);
+            wbLp.bottomMargin = dp(12);
+            warnBox.setLayoutParams(wbLp);
+
+            TextView tvWarnTitle = new TextView(this);
+            tvWarnTitle.setText("⚠️ Você é independente, vire paciente para continuar");
+            tvWarnTitle.setTextColor(Color.parseColor("#FBBF24"));
+            tvWarnTitle.setTextSize(sp(15.0f));
+            tvWarnTitle.setTypeface(null, 1);
+            tvWarnTitle.setGravity(17);
+            tvWarnTitle.setPadding(0, 0, 0, dp(6));
+            warnBox.addView(tvWarnTitle);
+
+            TextView tvWarnDesc = new TextView(this);
+            tvWarnDesc.setText("O vínculo com cuidadores está disponível apenas quando seu perfil está configurado como Paciente.");
+            tvWarnDesc.setTextColor(this.cTextMuted);
+            tvWarnDesc.setTextSize(sp(12.5f));
+            tvWarnDesc.setGravity(17);
+            tvWarnDesc.setPadding(0, 0, 0, dp(14));
+            warnBox.addView(tvWarnDesc);
+
+            TextView btnSwitchToPatient = createButton("🔄 Mudar para perfil Paciente", Color.parseColor("#F59E0B"), Color.WHITE);
+            btnSwitchToPatient.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showStyledConfirmDialog(
+                        "⚠️ Atenção",
+                        "Você só poderá alterar seu perfil para independente com a permissão do cuidador",
+                        "Confirmar",
+                        "Cancelar",
+                        Color.parseColor("#F59E0B"),
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                setProfileRoleValue("paciente");
+                                saveAll();
+                                render();
+                                Toast.makeText(MainActivity.this, "Perfil alterado para Paciente", 0).show();
+                            }
+                        }
+                    );
+                }
+            });
+            warnBox.addView(btnSwitchToPatient);
+
+            card.addView(warnBox);
+            linearLayout.addView(card);
+            return;
+        }
 
         TextView btnInvite = createButton("🔑 Gerar Código de Convite", this.cPrimary, Color.WHITE);
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(-1, -2);
@@ -10084,6 +10318,10 @@ public class MainActivity extends Activity {
     }
 
     private void generateCaregiverInviteCode() {
+        if (!isPatientProfileRole()) {
+            Toast.makeText(this, "Você é independente, vire paciente para continuar", 1).show();
+            return;
+        }
         int code = (int) (100000 + Math.random() * 900000);
         String token = "MED-" + code;
         try {
