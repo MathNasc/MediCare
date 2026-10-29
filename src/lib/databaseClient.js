@@ -5,7 +5,7 @@
  * para toda a aplicação web.
  */
 
-const databaseUrl = process.env.NEXT_PUBLIC_DATABASE_URL || process.env.NEXT_PUBLIC_APP_URL || '';
+const databaseUrl = process.env.NEXT_PUBLIC_DATABASE_URL || '';
 const databaseApiKey = process.env.NEXT_PUBLIC_DATABASE_KEY || '';
 
 export const isDatabaseConfigured = Boolean(databaseUrl && databaseApiKey);
@@ -96,18 +96,23 @@ class QueryBuilder {
     return this;
   }
 
+  neq(col, val) {
+    if (val !== undefined) this.filters.push([col, `neq.${val}`]);
+    return this;
+  }
+
   in(col, vals) {
     if (Array.isArray(vals)) this.filters.push([col, `in.(${vals.join(',')})`]);
     return this;
   }
 
   gte(col, val) {
-    this.filters.push([col, `gte.${val}`]);
+    if (val !== undefined && val !== null) this.filters.push([col, `gte.${val}`]);
     return this;
   }
 
   lte(col, val) {
-    this.filters.push([col, `lte.${val}`]);
+    if (val !== undefined && val !== null) this.filters.push([col, `lte.${val}`]);
     return this;
   }
 
@@ -153,7 +158,7 @@ class QueryBuilder {
       if (this.returnRepresentation) prefer.push('return=representation');
       if (this.isUpsert) prefer.push('resolution=merge-duplicates');
 
-      const res = await fetch(`${this.baseUrl}/rest/v1/${this.table}?${params.toString()}`, {
+      const res = await fetch(`${this.baseUrl}/api/rest/v1/${this.table}?${params.toString()}`, {
         method: this.method,
         headers: getAuthHeaders(prefer.length ? { Prefer: prefer.join(',') } : {}),
         body: this.bodyData !== null ? JSON.stringify(this.bodyData) : undefined,
@@ -194,7 +199,7 @@ function createNativeDatabaseClient(baseUrl) {
     },
     async rpc(fnName, args = {}) {
       try {
-        const res = await fetch(`${cleanUrl}/rest/v1/rpc/${fnName}`, {
+        const res = await fetch(`${cleanUrl}/api/rest/v1/rpc/${fnName}`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify(args),
@@ -218,7 +223,7 @@ function createNativeDatabaseClient(baseUrl) {
             body: JSON.stringify({ email, password, data: options?.data || {} }),
           });
           const data = await res.json();
-          if (!res.ok) return { data: null, error: new Error(data.msg || data.error_description || 'Falha no cadastro') };
+          if (!res.ok) return { data: null, error: new Error(data.error || data.msg || data.error_description || 'Falha no cadastro') };
           if (data.access_token) setStoredSession(data);
           return { data: { user: data.user || data, session: data }, error: null };
         } catch (error) {
@@ -233,7 +238,7 @@ function createNativeDatabaseClient(baseUrl) {
             body: JSON.stringify({ email, password }),
           });
           const data = await res.json();
-          if (!res.ok) return { data: null, error: new Error(data.error_description || data.msg || 'Credenciais inválidas') };
+          if (!res.ok) return { data: null, error: new Error(data.error || data.error_description || data.msg || 'Credenciais inválidas') };
           setStoredSession(data);
           return { data: { user: data.user, session: data }, error: null };
         } catch (error) {
@@ -276,7 +281,7 @@ function createNativeDatabaseClient(baseUrl) {
             body: JSON.stringify(payload),
           });
           const data = await res.json();
-          if (!res.ok) return { data: null, error: new Error(data.msg || 'Erro ao atualizar usuário') };
+          if (!res.ok) return { data: null, error: new Error(data.error || data.msg || 'Erro ao atualizar usuário') };
           return { data: { user: data }, error: null };
         } catch (error) {
           return { data: null, error };
@@ -291,7 +296,7 @@ function createNativeDatabaseClient(baseUrl) {
           });
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            return { error: new Error(data.msg || 'Erro ao solicitar recuperação de senha') };
+            return { error: new Error(data.error || data.msg || 'Erro ao solicitar recuperação de senha') };
           }
           return { error: null };
         } catch (error) {
@@ -325,7 +330,7 @@ function createNativeDatabaseClient(baseUrl) {
     functions: {
       async invoke(fnName, { body } = {}) {
         try {
-          const res = await fetch(`/api/v1/jobs/${fnName}`, {
+          const res = await fetch(`${cleanUrl}/api/v1/jobs/${fnName}`, {
             method: 'POST',
             headers: getAuthHeaders(),
             body: body ? JSON.stringify(body) : undefined,
@@ -346,20 +351,29 @@ export const databaseClient = isDatabaseConfigured
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 export const authService = {
-  async signUp({ email, password, nome, role = 'independente' }) {
+  async signUp(emailOrOpts, passwordArg, nomeArg, roleArg = 'independente') {
+    const opts =
+      typeof emailOrOpts === 'object' && emailOrOpts !== null
+        ? emailOrOpts
+        : { email: emailOrOpts, password: passwordArg, nome: nomeArg, role: roleArg };
     const { data, error } = await databaseClient.auth.signUp({
-      email,
-      password,
-      options: { data: { nome, role } },
+      email: opts.email,
+      password: opts.password,
+      options: { data: { nome: opts.nome, role: opts.role || 'independente' } },
     });
-    if (error) throw error;
-    return data.user;
+    return { data, error };
   },
 
-  async signIn({ email, password }) {
-    const { data, error } = await databaseClient.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    return data.user;
+  async signIn(emailOrOpts, passwordArg) {
+    const opts =
+      typeof emailOrOpts === 'object' && emailOrOpts !== null
+        ? emailOrOpts
+        : { email: emailOrOpts, password: passwordArg };
+    const { data, error } = await databaseClient.auth.signInWithPassword({
+      email: opts.email,
+      password: opts.password,
+    });
+    return { data, error };
   },
 
   async signOut() {
@@ -382,6 +396,11 @@ export const authService = {
     return data;
   },
 
+  async getProfileRole(userId) {
+    const prof = await this.getProfile(userId);
+    return prof?.role || 'independente';
+  },
+
   async updateRole(userId, role) {
     const { error } = await databaseClient.from('profiles').update({ role }).eq('id', userId);
     const { error: authError } = await databaseClient.auth.updateUser({ data: { role } });
@@ -390,8 +409,7 @@ export const authService = {
 
   async resetPassword(email) {
     const { error } = await databaseClient.auth.resetPasswordForEmail(email);
-    if (error) throw error;
-    return true;
+    return { error };
   },
 };
 
@@ -417,6 +435,10 @@ export const medicationService = {
     return data;
   },
 
+  async add(med) {
+    return this.create(med);
+  },
+
   async update(id, fields) {
     const { data, error } = await databaseClient
       .from('medicamentos')
@@ -434,6 +456,10 @@ export const medicationService = {
       .delete()
       .eq('id', id);
     if (error) throw error;
+  },
+
+  async delete(id) {
+    return this.remove(id);
   },
 };
 
@@ -467,6 +493,10 @@ export const historyService = {
       .eq('id', id);
     if (error) throw error;
   },
+
+  async delete(id) {
+    return this.remove(id);
+  },
 };
 
 // ─── Cuidadores ───────────────────────────────────────────────────────────────
@@ -478,13 +508,17 @@ export const caregiverRelationshipService = {
       .eq('patient_id', pacienteId)
       .eq('status', 'active');
     if (error) return [];
-    return data || [];
+    return (data || []).map((r) => ({ ...r, cuidador_id: r.caregiver_id || r.cuidador_id }));
+  },
+
+  async list(pacienteId) {
+    return this.listForPatient(pacienteId);
   },
 
   async invite({ pacienteId, email }) {
     const { data, error } = await databaseClient
-      .from('cuidadores')
-      .insert({ paciente_id: pacienteId, cuidador_email: email })
+      .from('caregiver_relationships')
+      .insert({ patient_id: pacienteId, invite_email: email, status: 'pending' })
       .select()
       .single();
     if (error) throw error;
@@ -492,7 +526,7 @@ export const caregiverRelationshipService = {
   },
 
   async remove(id) {
-    const { error } = await databaseClient.from('cuidadores').delete().eq('id', id);
+    const { error } = await databaseClient.from('caregiver_relationships').delete().eq('id', id);
     if (error) throw error;
   },
 };

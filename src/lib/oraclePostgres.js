@@ -89,6 +89,31 @@ export async function ensureOraclePostgresSchema(client) {
         mood text,
         created_at timestamptz DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS public.notes (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+        title text NOT NULL,
+        description text,
+        date date NOT NULL,
+        time time,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS public.custom_medications (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+        commercial_name text NOT NULL,
+        active_ingredient text,
+        dosage text,
+        pharmaceutical_form text,
+        presentation text,
+        unit text DEFAULT 'comprimido',
+        manufacturer text,
+        medicine_type text DEFAULT 'outro',
+        is_custom boolean DEFAULT true,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
     `).catch(() => {});
     schemaInitialized = true;
     return;

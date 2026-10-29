@@ -240,3 +240,94 @@ export async function POST(req, { params }) {
     client.release();
   }
 }
+
+export async function PUT(req, { params }) {
+  const action = (await params).action?.[0] || '';
+  if (action !== 'user') {
+    return NextResponse.json({ error: 'Rota não encontrada' }, { status: 404, headers: corsHeaders });
+  }
+
+  const claims = extractAuthenticatedUser(req);
+  if (!claims?.sub) {
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: corsHeaders });
+  }
+
+  const pool = getPgPool();
+  if (!pool) {
+    return NextResponse.json(
+      { error: 'PostgreSQL Oracle ainda não configurado no servidor.' },
+      { status: 503, headers: corsHeaders }
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await ensureOraclePostgresSchema(client);
+    const body = await req.json();
+    const userData = body.data || {};
+
+    await client.query('BEGIN');
+
+    if (body.password && String(body.password).length >= 6) {
+      await client.query(
+        `UPDATE app_users
+         SET password_hash = crypt($1, gen_salt('bf', 10)),
+             updated_at = NOW()
+         WHERE id::text = $2::text`,
+        [String(body.password), String(claims.sub)]
+      );
+    }
+
+    if (Object.keys(userData).length > 0) {
+      await client.query(
+        `UPDATE app_users
+         SET raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || $1::jsonb,
+             updated_at = NOW()
+         WHERE id::text = $2::text`,
+        [JSON.stringify(userData), String(claims.sub)]
+      );
+      if (userData.role) {
+        await client.query(`UPDATE profiles SET role = $1, updated_at = NOW() WHERE id::text = $2::text`, [
+          userData.role,
+          String(claims.sub),
+        ]);
+      }
+      if (userData.nome) {
+        await client.query(`UPDATE profiles SET nome = $1, updated_at = NOW() WHERE id::text = $2::text`, [
+          userData.nome,
+          String(claims.sub),
+        ]);
+      }
+    }
+
+    const updatedRes = await client.query(
+      `SELECT u.id, u.email, u.raw_user_meta_data, u.created_at, p.role
+       FROM app_users u
+       LEFT JOIN profiles p ON p.id::text = u.id::text
+       WHERE u.id::text = $1::text
+       LIMIT 1`,
+      [String(claims.sub)]
+    );
+
+    await client.query('COMMIT');
+    const row = updatedRes.rows[0] || { id: claims.sub, email: claims.email, raw_user_meta_data: userData };
+    return NextResponse.json(
+      {
+        id: row.id,
+        email: row.email,
+        role: row.role || userData.role || claims.role,
+        user_metadata: row.raw_user_meta_data || {},
+      },
+      { status: 200, headers: corsHeaders }
+    );
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    return NextResponse.json(
+      { error: err.message || 'Erro ao atualizar usuário.' },
+      { status: 500, headers: corsHeaders }
+    );
+  } finally {
+    client.release();
+  }
+}
+

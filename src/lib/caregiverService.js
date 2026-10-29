@@ -169,11 +169,14 @@ export const CaregiverDB = {
    */
   async declineInvite(relationshipId) {
     if (!databaseClient) return false;
+    const { data: userData } = await databaseClient.auth.getUser();
+    const uid = userData?.user?.id;
+    if (!uid) return false;
     const { error } = await databaseClient
       .from('caregiver_relationships')
       .update({ status: 'declined' })
       .eq('id', relationshipId)
-      .eq('caregiver_id', databaseClient.auth.getUser()?.id);
+      .eq('caregiver_id', uid);
     return !error;
   },
 

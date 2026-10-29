@@ -776,3 +776,311 @@ RETURNS TABLE (
   ORDER BY score DESC, commercial_name ASC
   LIMIT result_limit;
 $$;
+
+-- ─── 13. Funções RPC Adicionais (Auditoria, Estoque, Cuidadores e Tratamentos) ─
+
+CREATE OR REPLACE FUNCTION public.list_audit_logs(
+  p_patient_id uuid,
+  p_limit      int DEFAULT 50
+) RETURNS SETOF public.audit_logs LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_actor uuid := coalesce(public.app_current_user_id(), p_patient_id);
+BEGIN
+  IF v_actor <> p_patient_id AND NOT public.caregiver_has_permission(p_patient_id, 'viewer') THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT *
+  FROM public.audit_logs
+  WHERE patient_id = p_patient_id
+  ORDER BY created_at DESC
+  LIMIT coalesce(p_limit, 50);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.list_stock_movements(
+  p_med_id uuid DEFAULT null,
+  p_limit  int DEFAULT 50
+) RETURNS SETOF public.stock_movements LANGUAGE sql STABLE AS $$
+  SELECT *
+  FROM public.stock_movements
+  WHERE (public.app_current_user_id() IS NULL OR user_id = public.app_current_user_id())
+    AND (p_med_id IS NULL OR medication_id = p_med_id)
+  ORDER BY created_at DESC
+  LIMIT coalesce(p_limit, 50);
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_stock_forecast(p_med_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_med            record;
+  v_doses_per_day  numeric;
+  v_days_remaining int;
+  v_depletion_date date;
+  v_last_purchase  date;
+  v_month_qty      numeric;
+  v_avg_duration   int;
+BEGIN
+  SELECT * INTO v_med
+  FROM public.medicamentos
+  WHERE id = p_med_id
+    AND (public.app_current_user_id() IS NULL OR user_id = public.app_current_user_id());
+
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+
+  v_doses_per_day := greatest(1, coalesce(array_length(v_med.horarios, 1), 1));
+  v_days_remaining := floor(coalesce(v_med.quantidade, 0)::numeric / v_doses_per_day)::int;
+  v_depletion_date := current_date + v_days_remaining;
+
+  SELECT max(created_at)::date INTO v_last_purchase
+  FROM public.stock_movements
+  WHERE medication_id = p_med_id AND movement_type = 'purchase';
+
+  SELECT coalesce(sum(quantity_changed), 0) INTO v_month_qty
+  FROM public.stock_movements
+  WHERE medication_id = p_med_id
+    AND movement_type = 'purchase'
+    AND date_trunc('month', created_at) = date_trunc('month', now());
+
+  SELECT round(avg(greatest(1, quantity_changed / v_doses_per_day)))::int INTO v_avg_duration
+  FROM public.stock_movements
+  WHERE medication_id = p_med_id AND movement_type = 'purchase' AND quantity_changed > 0;
+
+  RETURN jsonb_build_object(
+    'med_id', v_med.id,
+    'nome', v_med.nome,
+    'dosagem', v_med.dosagem,
+    'quantidade', v_med.quantidade,
+    'doses_per_day', v_doses_per_day,
+    'days_remaining', v_days_remaining,
+    'depletion_date', v_depletion_date,
+    'forecast_depletion_date', v_depletion_date,
+    'last_purchase_date', v_last_purchase,
+    'month_quantity_purchased', v_month_qty,
+    'avg_purchase_duration_days', v_avg_duration
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_all_stock_forecasts()
+RETURNS jsonb LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_uid    uuid := public.app_current_user_id();
+  v_result jsonb;
+BEGIN
+  SELECT coalesce(jsonb_agg(item ORDER BY (item->>'days_remaining')::int ASC), '[]'::jsonb)
+  INTO v_result
+  FROM (
+    SELECT public.get_stock_forecast(m.id) AS item
+    FROM public.medicamentos m
+    WHERE (v_uid IS NULL OR m.user_id = v_uid)
+      AND m.ativo = true
+      AND coalesce(m.treatment_type, 'continuous') <> 'sos'
+  ) sub
+  WHERE item IS NOT NULL;
+
+  RETURN coalesce(v_result, '[]'::jsonb);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.accept_caregiver_invite(p_token text)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_uid uuid := public.app_current_user_id();
+  v_rel public.caregiver_relationships%rowtype;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Autenticação necessária para aceitar o convite.');
+  END IF;
+
+  SELECT * INTO v_rel
+  FROM public.caregiver_relationships
+  WHERE invite_token = p_token
+    AND status = 'pending'
+    AND (invite_expires_at IS NULL OR invite_expires_at > now())
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Convite inválido ou expirado.');
+  END IF;
+
+  IF v_rel.patient_id = v_uid THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Você não pode aceitar seu próprio convite.');
+  END IF;
+
+  UPDATE public.caregiver_relationships
+  SET caregiver_id = v_uid,
+      status = 'active',
+      accepted_at = now(),
+      updated_at = now()
+  WHERE id = v_rel.id;
+
+  INSERT INTO public.cuidadores (paciente_id, cuidador_id, nivel_acesso, status)
+  VALUES (
+    v_rel.patient_id,
+    v_uid,
+    CASE WHEN v_rel.permission_level = 'admin' THEN 'total' ELSE 'leitura' END,
+    'ativo'
+  )
+  ON CONFLICT (paciente_id, cuidador_id) DO UPDATE
+    SET status = 'ativo',
+        nivel_acesso = EXCLUDED.nivel_acesso;
+
+  INSERT INTO public.caregiver_audit_log (relationship_id, actor_id, action, details)
+  VALUES (v_rel.id, v_uid, 'invite_accepted', jsonb_build_object('patient_id', v_rel.patient_id));
+
+  RETURN jsonb_build_object('success', true, 'relationship_id', v_rel.id, 'patient_id', v_rel.patient_id);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.revoke_caregiver(p_relationship_id uuid)
+RETURNS boolean LANGUAGE plpgsql AS $$
+DECLARE
+  v_uid uuid := public.app_current_user_id();
+  v_rel public.caregiver_relationships%rowtype;
+BEGIN
+  SELECT * INTO v_rel
+  FROM public.caregiver_relationships
+  WHERE id = p_relationship_id
+    AND (v_uid IS NULL OR patient_id = v_uid OR caregiver_id = v_uid)
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
+
+  UPDATE public.caregiver_relationships
+  SET status = 'revoked',
+      revoked_at = now(),
+      updated_at = now()
+  WHERE id = p_relationship_id;
+
+  IF v_rel.caregiver_id IS NOT NULL THEN
+    UPDATE public.cuidadores
+    SET status = 'recusado'
+    WHERE paciente_id = v_rel.patient_id AND cuidador_id = v_rel.caregiver_id;
+  END IF;
+
+  INSERT INTO public.caregiver_audit_log (relationship_id, actor_id, action)
+  VALUES (p_relationship_id, v_uid, 'access_revoked');
+
+  RETURN true;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_patient_summary(p_patient_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_actor      uuid := public.app_current_user_id();
+  v_profile    record;
+  v_meds_count int;
+  v_last_dose  record;
+BEGIN
+  IF v_actor IS NOT NULL AND v_actor <> p_patient_id AND NOT public.caregiver_has_permission(p_patient_id, 'viewer') THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT id, nome, email, role, foto_url INTO v_profile
+  FROM public.profiles
+  WHERE id = p_patient_id;
+
+  SELECT count(*)::int INTO v_meds_count
+  FROM public.medicamentos
+  WHERE user_id = p_patient_id AND ativo = true;
+
+  SELECT hora, created_at AS at, status INTO v_last_dose
+  FROM public.historico_doses
+  WHERE user_id = p_patient_id AND status = 'confirmed'
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  RETURN jsonb_build_object(
+    'profile', to_jsonb(v_profile),
+    'meds_count', coalesce(v_meds_count, 0),
+    'last_dose', CASE WHEN v_last_dose IS NOT NULL THEN to_jsonb(v_last_dose) ELSE null END
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.repeat_treatment(
+  p_med_id         uuid,
+  p_new_start_date date
+) RETURNS uuid LANGUAGE plpgsql AS $$
+DECLARE
+  v_med    public.medicamentos%rowtype;
+  v_days   int;
+  v_end    date;
+  v_new_id uuid;
+BEGIN
+  SELECT * INTO v_med
+  FROM public.medicamentos
+  WHERE id = p_med_id
+    AND (public.app_current_user_id() IS NULL OR user_id = public.app_current_user_id());
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Medicamento original não encontrado.';
+  END IF;
+
+  v_days := coalesce(v_med.treatment_days, 7);
+  v_end  := p_new_start_date + greatest(0, v_days - 1);
+
+  INSERT INTO public.medicamentos (
+    user_id, nome, principio_ativo, fabricante, dosagem, quantidade,
+    unidade, cor, observacoes, horarios, dias_semana, ativo,
+    treatment_type, start_date, end_date, treatment_days, status
+  ) VALUES (
+    v_med.user_id, v_med.nome, v_med.principio_ativo, v_med.fabricante, v_med.dosagem, v_med.quantidade,
+    v_med.unidade, v_med.cor, v_med.observacoes, v_med.horarios, v_med.dias_semana, true,
+    'temporary', p_new_start_date, v_end, v_days, 'ativo'
+  ) RETURNING id INTO v_new_id;
+
+  RETURN v_new_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_treatment_dashboard()
+RETURNS jsonb LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_uid                 uuid := public.app_current_user_id();
+  v_continuous_count    int;
+  v_active_treatments   int;
+  v_finished_treatments int;
+  v_sos_uses_this_month int;
+BEGIN
+  SELECT count(*)::int INTO v_continuous_count
+  FROM public.medicamentos
+  WHERE (v_uid IS NULL OR user_id = v_uid)
+    AND coalesce(treatment_type, 'continuous') = 'continuous'
+    AND ativo = true;
+
+  SELECT count(*)::int INTO v_active_treatments
+  FROM public.medicamentos
+  WHERE (v_uid IS NULL OR user_id = v_uid)
+    AND treatment_type = 'temporary'
+    AND status = 'ativo';
+
+  SELECT count(*)::int INTO v_finished_treatments
+  FROM public.medicamentos
+  WHERE (v_uid IS NULL OR user_id = v_uid)
+    AND treatment_type = 'temporary'
+    AND status = 'concluido';
+
+  SELECT count(*)::int INTO v_sos_uses_this_month
+  FROM public.historico_doses hd
+  JOIN public.medicamentos m ON m.id = hd.med_id
+  WHERE (v_uid IS NULL OR hd.user_id = v_uid)
+    AND m.treatment_type = 'sos'
+    AND date_trunc('month', hd.created_at) = date_trunc('month', now());
+
+  RETURN jsonb_build_object(
+    'continuous_count', coalesce(v_continuous_count, 0),
+    'active_treatments', coalesce(v_active_treatments, 0),
+    'finished_treatments', coalesce(v_finished_treatments, 0),
+    'sos_uses_this_month', coalesce(v_sos_uses_this_month, 0)
+  );
+END;
+$$;
+

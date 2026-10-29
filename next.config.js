@@ -27,6 +27,18 @@ const nextConfig = {
       },
     ];
   },
+  async rewrites() {
+    return [
+      {
+        source: '/rest/v1/:path*',
+        destination: '/api/rest/v1/:path*',
+      },
+      {
+        source: '/auth/v1/:path*',
+        destination: '/api/auth/v1/:path*',
+      },
+    ];
+  },
   async headers() {
     return [
       {
