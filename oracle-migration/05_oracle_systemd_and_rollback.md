@@ -43,7 +43,7 @@ WantedBy=multi-user.target
 ---
 
 ## 3. Agendador Nativo de Lembretes e Tratamentos (`/etc/systemd/system/medicare-reminders.timer`)
-Substitui o `pg_cron` + Edge Function do Supabase com consumo quase zero de RAM:
+Executa o worker de lembretes a cada minuto com consumo quase zero de RAM:
 
 ```ini
 # /etc/systemd/system/medicare-reminders.service

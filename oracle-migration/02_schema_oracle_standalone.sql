@@ -1,9 +1,8 @@
 -- =============================================================================
 -- MediCare — Schema PostgreSQL Standalone para Servidor Oracle Cloud (medicare_db)
 -- =============================================================================
--- Substitui 100% das dependências proprietárias do Supabase (auth.users,
--- auth.uid(), auth.role(), storage.buckets, pg_cron) mantendo compatibilidade
--- integral de UUIDs, FKs, Views, Triggers, RBAC e Funções RPC.
+-- Implementação PostgreSQL standalone com compatibilidade integral de UUIDs,
+-- FKs, Views, Triggers, RBAC e Funções RPC.
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -27,7 +26,7 @@ $$;
 CREATE TABLE IF NOT EXISTS public.app_users (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email               text NOT NULL UNIQUE,
-  password_hash       text NOT NULL, -- Compatível com bcrypt ($2a$/$2b$) migrado do Supabase ou scrypt/pbkdf2
+  password_hash       text NOT NULL, -- Compatível com bcrypt ($2a$/$2b$) ou scrypt/pbkdf2
   raw_user_meta_data  jsonb DEFAULT '{}'::jsonb,
   email_confirmed_at  timestamptz DEFAULT now(),
   last_sign_in_at     timestamptz,
@@ -528,7 +527,7 @@ SELECT
 FROM public.historico_doses hd
 LEFT JOIN public.profiles prof ON prof.id = hd.performed_by;
 
--- ─── 12. Funções RPC Migradas (Sem dependência de auth.uid() do Supabase) ────
+-- ─── 12. Funções RPC Standalone (Contexto app_current_user_id()) ─────────────
 CREATE OR REPLACE FUNCTION public.caregiver_has_permission(
   p_patient_id uuid,
   p_permission text

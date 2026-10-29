@@ -1,19 +1,18 @@
 'use client';
 
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { SupaPush } from '@/lib/supabase';
+import { pushSubscriptionService } from '@/lib/databaseClient';
 import { subscribeToPush, unsubscribeFromPush } from '@/lib/webPush';
 
 /**
  * Hook de notificações — versão Web Push (VAPID).
  *
  * Toda a lógica de "agendar" lembretes é feita no servidor. Quem decide quando
- * notificar é a Edge Function `send-medication-reminders`, disparada a cada
- * minuto via pg_cron no servidor (Supabase).
+ * notificar é o worker de lembretes disparado a cada minuto no servidor.
  * 
  * Este hook cuida apenas de: registrar o SW, garantir que existe uma
  * inscrição de push válida para este dispositivo, e mantê-la salva no
- * Supabase (tabela push_subscriptions).
+ * banco de dados (tabela push_subscriptions).
  */
 export function useNotifications(_doses, userId) {
   const subscribed = useRef(false);
@@ -30,15 +29,15 @@ export function useNotifications(_doses, userId) {
     let subscription = await subscribeToPush();
     if (subscription) {
       try {
-        await SupaPush.saveSubscription(userId, subscription);
+        await pushSubscriptionService.saveSubscription(userId, subscription);
         subscribed.current = true;
         setIsSubscribed(true);
       } catch (err) {
-        console.warn('[MediCare] Falha ao salvar subscription (possível conflito de RLS/usuário antigo). Renovando...', err);
+        console.warn('[MediCare] Falha ao salvar subscription. Renovando...', err);
         await unsubscribeFromPush();
         subscription = await subscribeToPush();
         if (subscription) {
-          await SupaPush.saveSubscription(userId, subscription);
+          await pushSubscriptionService.saveSubscription(userId, subscription);
           subscribed.current = true;
           setIsSubscribed(true);
         } else {
@@ -64,13 +63,13 @@ export function useNotifications(_doses, userId) {
     if (!subscription) return false;
     
     try {
-      await SupaPush.saveSubscription(userId, subscription);
+      await pushSubscriptionService.saveSubscription(userId, subscription);
     } catch (err) {
       console.warn('[MediCare] setup: Falha ao salvar subscription. Renovando...', err);
       await unsubscribeFromPush();
       subscription = await subscribeToPush();
       if (!subscription) return false;
-      await SupaPush.saveSubscription(userId, subscription);
+      await pushSubscriptionService.saveSubscription(userId, subscription);
     }
 
     subscribed.current = true;
@@ -82,7 +81,7 @@ export function useNotifications(_doses, userId) {
   const disable = useCallback(async () => {
     const endpoint = await unsubscribeFromPush();
     if (endpoint) {
-      await SupaPush.removeSubscription(endpoint);
+      await pushSubscriptionService.removeSubscription(endpoint);
     }
     subscribed.current = false;
     setIsSubscribed(false);

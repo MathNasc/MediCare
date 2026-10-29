@@ -11,7 +11,7 @@ import { AuthScreen }       from '@/components/AuthScreen';
 import { BottomNav }        from '@/components/BottomNav';
 import { Toasts }           from '@/components/ui/Toasts';
 import { PWAInstallBanner } from '@/components/PWAInstallBanner';
-import { CaregiverDB }      from '@/lib/supabaseCaregiver';
+import { CaregiverDB }      from '@/lib/caregiverService';
 import { PERMISSION_LEVELS } from '@/hooks/useCaregiver';
 
 // ── Lazy-loaded screens ──────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ function useCaregiverInvite() {
 
     CaregiverDB.getInviteByToken(found).then((data) => {
       setInvite(data);
-      setStatus('ready'); // Supabase RLS may block preview read, assume valid until RPC acceptance
+      setStatus('ready'); // Assume valid until RPC acceptance
     });
   }, []);
 

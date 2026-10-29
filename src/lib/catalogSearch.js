@@ -2,11 +2,11 @@
 // ─── Pesquisa inteligente no catálogo de medicamentos ─────────────────────────
 // 1. Normaliza o texto (remove acentos, lowercase)
 // 2. Busca local no dataset estático (< 50ms)
-// 3. Fallback para Supabase fulltext se disponível
+// 3. Fallback para busca fulltext no banco remoto se disponível
 // 4. Inclui medicamentos personalizados do usuário
 
 import MEDICATION_CATALOG from '@/data/medicationCatalog';
-import { supabase } from './supabase';
+import { databaseClient } from './databaseClient';
 
 // ─── Normalização ─────────────────────────────────────────────────────────────
 export function normalize(str = '') {
@@ -57,7 +57,7 @@ export function searchLocal(query, limit = 20) {
   return results;
 }
 
-// ─── Pesquisa híbrida: local + Supabase + medicamentos personalizados ──────────
+// ─── Pesquisa híbrida: local + banco remoto + medicamentos personalizados ─────
 export async function searchCatalog(query, userId = null, limit = 20) {
   if (!query || query.trim().length < 2) return [];
 
@@ -66,9 +66,9 @@ export async function searchCatalog(query, userId = null, limit = 20) {
 
   // Busca medicamentos personalizados do usuário
   let customResults = [];
-  if (userId && supabase) {
+  if (userId && databaseClient) {
     try {
-      const { data } = await supabase
+      const { data } = await databaseClient
         .from('custom_medications')
         .select('*')
         .eq('user_id', userId)
@@ -78,11 +78,11 @@ export async function searchCatalog(query, userId = null, limit = 20) {
     } catch {}
   }
 
-  // Busca no Supabase se disponível (complementa resultados locais)
+  // Busca no banco remoto se disponível (complementa resultados locais)
   let dbResults = [];
-  if (supabase && localResults.length < 5) {
+  if (databaseClient && localResults.length < 5) {
     try {
-      const { data } = await supabase
+      const { data } = await databaseClient
         .rpc('search_medications', { query, result_limit: limit });
       dbResults = data || [];
     } catch {}

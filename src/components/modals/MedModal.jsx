@@ -28,7 +28,7 @@ import { MedicationSearchInput } from '@/components/medications/MedicationSearch
 import { TREATMENT_TYPES, computeEndDate, calcTreatmentDays } from '@/lib/treatmentTypes';
 import { StockMovementModal } from '@/components/modals/StockMovementModal';
 import { useApp } from '@/context/AppContext';
-import { supabase } from '@/lib/supabase';
+import { databaseClient } from '@/lib/databaseClient';
 
 const STEPS = { SEARCH: 'search', TREATMENT: 'treatment', FORM: 'form' };
 
@@ -193,9 +193,9 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   const commitSave = async (payload, movementDetails = null) => {
     setSaving(true);
 
-    if (selectedCatalog?.is_custom && supabase && userId && !isEditing) {
+    if (selectedCatalog?.is_custom && databaseClient && userId && !isEditing) {
       try {
-        await supabase.from('custom_medications').upsert({
+        await databaseClient.from('custom_medications').upsert({
           id: selectedCatalog.id !== String(Date.now()) ? selectedCatalog.id : undefined,
           user_id: userId, commercial_name: form.nome,
           active_ingredient: form._activeIngredient, dosage: form.dosagem,

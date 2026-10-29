@@ -9,7 +9,7 @@ import {
   CaregiverDashDB,
   CaregiverNotesDB,
   PERMISSION_LEVELS,
-} from '@/lib/supabaseCaregiver';
+} from '@/lib/caregiverService';
 
 // ─── Hook: tela do paciente (gerencia seus cuidadores) ────────────────────────
 export function useMyCaregivers(userId) {
@@ -127,12 +127,12 @@ export function usePatientDashboard(patientId) {
   }, []);
 
   const updateMed = useCallback(async (medId, updates) => {
-    const { supabase } = await import('@/lib/supabase');
-    if (supabase) {
-      const { data: { user } } = await supabase.auth.getUser();
+    const { databaseClient } = await import('@/lib/databaseClient');
+    if (databaseClient) {
+      const { data: { user } } = await databaseClient.auth.getUser();
       if (user) {
-        // Garante que o vínculo exista na tabela legada cuidadores para RLS
-        await supabase.from('cuidadores').upsert({
+        // Garante que o vínculo exista na tabela cuidadores
+        await databaseClient.from('cuidadores').upsert({
           paciente_id: patientId,
           cuidador_id: user.id,
           status: 'ativo',

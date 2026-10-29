@@ -329,7 +329,7 @@ function RoleSwapView({ user, T, scale, setActiveView, logout }) {
 
   useEffect(() => {
     if (user?.role === 'paciente') {
-      import('@/lib/supabaseCaregiver').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
+      import('@/lib/caregiverService').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
     }
   }, [user]);
 
@@ -456,14 +456,14 @@ function DisablePushModal({ user, onClose, onConfirm, T, scale }) {
 
   useEffect(() => {
     if (user?.id) {
-      import('@/lib/supabaseCaregiver').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
+      import('@/lib/caregiverService').then(m => m.CaregiverDB.listMyCaregivers(user.id)).then(setCaregivers);
     }
   }, [user?.id]);
 
   useEffect(() => {
      if (caregivers.length > 0 && !notified.current && user?.id) {
         notified.current = true;
-        import('@/lib/supabaseCaregiver').then(m => {
+        import('@/lib/caregiverService').then(m => {
            caregivers.forEach(c => {
               if (c.status === 'active') {
                  m.CaregiverDB.add({ relationshipId: c.id, patientId: user.id, caregiverId: c.caregiver_id, title: 'Solicitação de Desativação', description: 'O paciente deseja desativar as notificações. Informe o PIN de liberação para ele caso você aprove.' }).catch(() => {});

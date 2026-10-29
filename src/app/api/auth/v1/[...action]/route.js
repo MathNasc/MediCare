@@ -88,7 +88,7 @@ export async function POST(req, { params }) {
       const meta = { nome, role };
 
       await client.query('BEGIN');
-      // Usa pgcrypto crypt(..., gen_salt('bf', 10)) compatível com bcrypt do Supabase GoTrue
+      // Usa pgcrypto crypt(..., gen_salt('bf', 10)) compatível com bcrypt ($2a$/$2b$)
       const insertUser = await client.query(
         `INSERT INTO app_users (id, email, password_hash, raw_user_meta_data)
          VALUES ($1, $2, crypt($3, gen_salt('bf', 10)), $4::jsonb)
@@ -157,7 +157,7 @@ export async function POST(req, { params }) {
         return NextResponse.json(newSession, { status: 200, headers: corsHeaders });
       }
 
-      // grant_type=password (compatível com hashes bcrypt migrados do Supabase!)
+      // grant_type=password (compatível com hashes bcrypt)
       const email = (body.email || '').trim().toLowerCase();
       const password = body.password || '';
 

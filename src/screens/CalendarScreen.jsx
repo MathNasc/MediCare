@@ -5,7 +5,7 @@ import { useBackButton } from '@/hooks/useBackButton';
 import { useApp } from '@/context/AppContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { C } from '@/lib/theme';
-import { NotesDB, EventsDB, ObsDB } from '@/lib/supabaseCalendar';
+import { NotesDB, EventsDB, ObsDB } from '@/lib/calendarService';
 import { RetroactiveConfirmModal } from '@/components/modals/RetroactiveConfirmModal';
 import { CaregiverBadge } from '@/components/ui/CaregiverBadge';
 import { BrDateInput } from '@/components/ui/BrDateInput';

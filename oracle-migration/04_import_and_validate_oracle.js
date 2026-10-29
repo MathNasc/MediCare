@@ -1,14 +1,14 @@
 /**
- * MediCare — Fase 4, 6 & 17: Migração Completa + Validação Obrigatória de Dados
- * (Supabase Origem -> Oracle Cloud PostgreSQL Isolado medicare_db na porta 5436)
+ * MediCare — Migração e Validação de Integridade de Dados
+ * (PostgreSQL Origem -> Oracle Cloud PostgreSQL Isolado medicare_db na porta 5436)
  *
  * Modos de uso:
- * 1) Migrar todos os dados (auth.users + 19 tabelas public) e validar em seguida:
- *    SUPABASE_DB_URL="postgresql://..." ORACLE_DB_URL="postgresql://medicare_app:SENHA@127.0.0.1:5436/medicare_db" \
+ * 1) Migrar todos os dados e validar em seguida:
+ *    SOURCE_DB_URL="postgresql://..." ORACLE_DB_URL="postgresql://medicare_app:SENHA@127.0.0.1:5436/medicare_db" \
  *    node oracle-migration/04_import_and_validate_oracle.js --migrate
  *
- * 2) Apenas validar paridade (Read-Only):
- *    SUPABASE_DB_URL="postgresql://..." ORACLE_DB_URL="postgresql://medicare_app:SENHA@127.0.0.1:5436/medicare_db" \
+ * 2) Apenas validar integridade (Read-Only):
+ *    ORACLE_DB_URL="postgresql://medicare_app:SENHA@127.0.0.1:5436/medicare_db" \
  *    node oracle-migration/04_import_and_validate_oracle.js
  */
 
@@ -51,8 +51,8 @@ async function getTableColumns(pool, schema, table) {
   return res.rows.map((r) => r.column_name);
 }
 
-async function migrateUsersFromSupabase(originPool, targetPool) {
-  console.log('\n[1/2] Migrando usuários de auth.users -> public.app_users (preservando UUIDs e hashes bcrypt)...');
+async function migrateUsersFromSource(originPool, targetPool) {
+  console.log('\n[1/2] Migrando usuários para public.app_users (preservando UUIDs e hashes bcrypt)...');
   const usersRes = await originPool.query(`
     SELECT
       id,
@@ -154,7 +154,7 @@ async function migratePublicTables(originPool, targetPool) {
 
 async function runValidation() {
   const shouldMigrate = process.argv.includes('--migrate');
-  const originUrl = process.env.SUPABASE_DB_URL;
+  const originUrl = process.env.SOURCE_DB_URL;
   const targetUrl = process.env.ORACLE_DB_URL || process.env.DATABASE_URL;
 
   if (!targetUrl) {
@@ -163,7 +163,7 @@ async function runValidation() {
   }
 
   if (shouldMigrate && !originUrl) {
-    console.error('ERRO: Para executar --migrate, defina SUPABASE_DB_URL com a string de conexão PostgreSQL do Supabase.');
+    console.error('ERRO: Para executar --migrate, defina SOURCE_DB_URL com a string de conexão PostgreSQL de origem.');
     process.exit(1);
   }
 
@@ -182,7 +182,7 @@ async function runValidation() {
 
   try {
     if (shouldMigrate && originPool) {
-      await migrateUsersFromSupabase(originPool, targetPool);
+      await migrateUsersFromSource(originPool, targetPool);
       await migratePublicTables(originPool, targetPool);
     }
 
@@ -253,7 +253,7 @@ async function runValidation() {
 
     if (originPool) {
       const originSem = (await originPool.query(semanticSql)).rows[0];
-      report.semanticChecks.supabaseOrigin = originSem;
+      report.semanticChecks.sourceOrigin = originSem;
       for (const key of Object.keys(originSem)) {
         if (originSem[key] !== targetSem[key]) {
           report.status = 'FAIL';
@@ -278,22 +278,7 @@ async function runValidation() {
 
 if (require.main === module) {
   runValidation().catch((err) => {
-    if (err.code === 'ENETUNREACH' || (err.message && err.message.includes('ENETUNREACH'))) {
-      console.error('\n======================================================================');
-      console.error('❌ ERRO DE ROTA IPV6 (ENETUNREACH):');
-      console.error('O host direto do Supabase (db.xxx.supabase.co) opera exclusivamente em IPv6.');
-      console.error('O seu servidor Oracle Cloud opera em rede IPv4.');
-      console.error('');
-      console.error('SOLUÇÃO OBRIGATÓRIA (Compatível com IPv4):');
-      console.error('1. Acesse o Supabase Dashboard -> Project Settings -> Database');
-      console.error('2. Na seção "Connection string", selecione a opção "Connection Pooling" (ou "Pooler")');
-      console.error('3. Escolha o modo "Session" (porta 5432) ou "Transaction" (porta 6543)');
-      console.error('4. Copie a URI gerada (terá o formato:');
-      console.error('   postgresql://postgres.[REF]:[SENHA]@aws-0-[REGIAO].pooler.supabase.com:5432/postgres');
-      console.error('======================================================================\n');
-    } else {
-      console.error('Erro na migração/validação:', err);
-    }
+    console.error('Erro na migração/validação:', err);
     process.exit(1);
   });
 }

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Ring } from '@/components/ui/Ring';
 import { StockBar } from '@/components/Dashboard';
-import { StockDB } from '@/lib/supabaseStock';
+import { StockDB } from '@/lib/stockService';
 import { C, WEEK } from '@/lib/theme';
 
 // ─── Indicadores de tratamento (contínuos, ativos, concluídos, SOS do mês) ────

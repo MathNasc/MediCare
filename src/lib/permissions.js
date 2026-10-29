@@ -1,8 +1,8 @@
 // src/lib/permissions.js
 // ─── Espelho client-side do RBAC ──────────────────────────────────────────────
 // IMPORTANTE: isto é usado APENAS para ocultar/mostrar opções na interface.
-// A validação real e obrigatória acontece no Supabase via RLS e funções
-// security definer (ver migration 006_rbac_and_audit.sql). Nunca confiar
+// A validação real e obrigatória acontece no banco PostgreSQL via funções
+// RPC (ver schema Oracle standalone). Nunca confiar
 // apenas nestas checagens para decisões de segurança.
 
 export const ROLES = {

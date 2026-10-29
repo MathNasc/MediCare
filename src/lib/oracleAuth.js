@@ -117,7 +117,7 @@ export async function withAuthenticatedPg(req, handler) {
 
 /**
  * Verifica se o usuário autenticado (`actorId`) pode acessar ou modificar dados do `targetPatientId`.
- * Substitui as policies RLS do Supabase com validação explícita no backend e no PostgreSQL.
+ * Validação explícita de acesso a dados de pacientes no backend e no PostgreSQL.
  */
 export async function canAccessPatientData(client, actorId, targetPatientId, requiredLevel = 'viewer') {
   if (!actorId || !targetPatientId) return false;

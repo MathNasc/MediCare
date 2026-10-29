@@ -2,7 +2,7 @@
 // src/hooks/usePermissions.js
 // Hook central de RBAC no cliente. Fornece o papel do usuário logado
 // e uma função `can(permission)` para gating de UI.
-// A validação definitiva sempre ocorre no Supabase (RLS + RPCs).
+// A validação definitiva sempre ocorre no banco de dados PostgreSQL (RPCs).
 
 import { useMemo } from 'react';
 import { useApp } from '@/context/AppContext';

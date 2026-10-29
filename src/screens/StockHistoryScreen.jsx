@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '@/context/AppContext';
-import { StockDB, getMovementMeta } from '@/lib/supabaseStock';
+import { StockDB, getMovementMeta } from '@/lib/stockService';
 import { C } from '@/lib/theme';
 
 // ─── Card de estatística individual ────────────────────────────────────────────

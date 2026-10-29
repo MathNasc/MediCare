@@ -33,7 +33,7 @@
 //
 // `dose.record` (se existir) deve conter os campos vindos de historico_doses:
 // { status, performed_by, is_retroactive, corrected_at, created_at }.
-// Isso já é o formato retornado por HistDB.list / SupaHist.list.
+// Isso já é o formato retornado por HistDB.list / historyService.list.
 
 import { useState } from 'react';
 import { getLocalDateISO } from '@/lib/dateUtils';

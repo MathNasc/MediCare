@@ -1,210 +1,520 @@
 /**
- * databaseClient.js
+ * databaseClient.js — Camada de Abstração de Banco de Dados e Autenticação
  *
- * Camada de abstração e cliente de banco de dados e autenticação.
- * A implementação atual utiliza @supabase/supabase-js como driver de acesso ao PostgreSQL e Auth.
+ * Isola o acesso remoto ao PostgreSQL (Oracle Cloud / API REST e Auth v1)
+ * para toda a aplicação web.
  */
 
-import { createClient } from '@supabase/supabase-js';
+const databaseUrl = process.env.NEXT_PUBLIC_DATABASE_URL || process.env.NEXT_PUBLIC_APP_URL || '';
+const databaseApiKey = process.env.NEXT_PUBLIC_DATABASE_KEY || '';
 
-const databaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const databaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+export const isDatabaseConfigured = Boolean(databaseUrl && databaseApiKey);
 
-export const databaseClient = databaseUrl && databaseAnonKey
-  ? createClient(databaseUrl, databaseAnonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
-    })
-  : null;
+const SESSION_STORAGE_KEY = 'mc_auth_session';
 
-// Alias para compatibilidade técnica com módulos internos
-export const supabase = databaseClient;
-
-export const isDatabaseConfigured = Boolean(databaseClient);
-export const isSupabaseEnabled = isDatabaseConfigured;
-
-if (typeof window !== 'undefined' && !isDatabaseConfigured) {
-  console.info('[MediCare] Modo de armazenamento local ativo.');
+function getStoredSession() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
-// ─── Auth Service ─────────────────────────────────────────────────────────────
-export const authService = {
-  async signUp(email, password, nome) {
-    if (!databaseClient) return { error: 'Serviço de autenticação remota não configurado' };
-    const { data, error } = await databaseClient.auth.signUp({
-      email, password, options: { data: { nome } },
-    });
-    if (!error && data.user && data.session) {
-      await databaseClient.from('profiles').upsert({ id: data.user.id, nome, email });
+function setStoredSession(session) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (session) {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    } else {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
     }
-    return { data, error };
-  },
-  async signIn(email, password) {
-    if (!databaseClient) return { error: 'Serviço de autenticação remota não configurado' };
-    return databaseClient.auth.signInWithPassword({ email, password });
-  },
-  async signOut() {
-    if (databaseClient) await databaseClient.auth.signOut();
-  },
-  async resetPassword(email) {
-    if (!databaseClient) return { error: 'Serviço de autenticação remota não configurado' };
-    return databaseClient.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || ''}/reset-password`,
-    });
-  },
-  async getProfileRole(userId) {
-    if (!databaseClient) return 'independente';
+  } catch {}
+}
+
+function getAuthHeaders(extra = {}) {
+  const session = getStoredSession();
+  const token = session?.access_token || databaseApiKey;
+  return {
+    'Content-Type': 'application/json',
+    ...(databaseApiKey ? { apikey: databaseApiKey } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
+
+class QueryBuilder {
+  constructor(baseUrl, table) {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.table = table;
+    this.method = 'GET';
+    this.selectCols = '*';
+    this.filters = [];
+    this.orderClause = null;
+    this.limitVal = null;
+    this.bodyData = null;
+    this.expectSingle = false;
+    this.maybeSingleFlag = false;
+    this.returnRepresentation = false;
+  }
+
+  select(cols = '*') {
+    this.selectCols = cols;
+    if (this.method !== 'GET') {
+      this.returnRepresentation = true;
+    }
+    return this;
+  }
+
+  insert(payload) {
+    this.method = 'POST';
+    this.bodyData = payload;
+    return this;
+  }
+
+  update(payload) {
+    this.method = 'PATCH';
+    this.bodyData = payload;
+    return this;
+  }
+
+  upsert(payload) {
+    this.method = 'POST';
+    this.bodyData = payload;
+    this.isUpsert = true;
+    return this;
+  }
+
+  delete() {
+    this.method = 'DELETE';
+    return this;
+  }
+
+  eq(col, val) {
+    if (val !== undefined) this.filters.push([col, `eq.${val}`]);
+    return this;
+  }
+
+  in(col, vals) {
+    if (Array.isArray(vals)) this.filters.push([col, `in.(${vals.join(',')})`]);
+    return this;
+  }
+
+  gte(col, val) {
+    this.filters.push([col, `gte.${val}`]);
+    return this;
+  }
+
+  lte(col, val) {
+    this.filters.push([col, `lte.${val}`]);
+    return this;
+  }
+
+  or(expr) {
+    this.filters.push(['or', `(${expr})`]);
+    return this;
+  }
+
+  textSearch(col, query) {
+    this.filters.push([col, `fts.${query}`]);
+    return this;
+  }
+
+  order(col, { ascending = true } = {}) {
+    this.orderClause = `${col}.${ascending ? 'asc' : 'desc'}`;
+    return this;
+  }
+
+  limit(n) {
+    this.limitVal = n;
+    return this;
+  }
+
+  single() {
+    this.expectSingle = true;
+    return this;
+  }
+
+  maybeSingle() {
+    this.maybeSingleFlag = true;
+    return this;
+  }
+
+  async execute() {
     try {
-      const { data, error } = await databaseClient.from('profiles').select('role').eq('id', userId).single();
-      if (error) {
-        console.error('getProfileRole error:', error);
-        return 'independente';
+      const params = new URLSearchParams();
+      if (this.selectCols) params.set('select', this.selectCols);
+      for (const [k, v] of this.filters) params.append(k, v);
+      if (this.orderClause) params.set('order', this.orderClause);
+      if (this.limitVal != null) params.set('limit', String(this.limitVal));
+
+      const prefer = [];
+      if (this.returnRepresentation) prefer.push('return=representation');
+      if (this.isUpsert) prefer.push('resolution=merge-duplicates');
+
+      const res = await fetch(`${this.baseUrl}/rest/v1/${this.table}?${params.toString()}`, {
+        method: this.method,
+        headers: getAuthHeaders(prefer.length ? { Prefer: prefer.join(',') } : {}),
+        body: this.bodyData !== null ? JSON.stringify(this.bodyData) : undefined,
+      });
+
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : null;
+
+      if (!res.ok) {
+        return { data: null, error: new Error(json?.message || json?.error || `HTTP ${res.status}`) };
       }
-      return data?.role || 'independente';
-    } catch {
-      return 'independente';
+
+      if (this.expectSingle || this.maybeSingleFlag) {
+        const item = Array.isArray(json) ? (json[0] ?? null) : json;
+        if (this.expectSingle && !item) {
+          return { data: null, error: new Error('Registro não encontrado') };
+        }
+        return { data: item, error: null };
+      }
+
+      return { data: json, error: null };
+    } catch (error) {
+      return { data: null, error };
     }
+  }
+
+  then(resolve, reject) {
+    return this.execute().then(resolve, reject);
+  }
+}
+
+function createNativeDatabaseClient(baseUrl) {
+  const cleanUrl = baseUrl.replace(/\/$/, '');
+
+  return {
+    from(table) {
+      return new QueryBuilder(cleanUrl, table);
+    },
+    async rpc(fnName, args = {}) {
+      try {
+        const res = await fetch(`${cleanUrl}/rest/v1/rpc/${fnName}`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(args),
+        });
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : null;
+        if (!res.ok) {
+          return { data: null, error: new Error(data?.message || data?.error || `RPC ${fnName} failed`) };
+        }
+        return { data, error: null };
+      } catch (error) {
+        return { data: null, error };
+      }
+    },
+    auth: {
+      async signUp({ email, password, options }) {
+        try {
+          const res = await fetch(`${cleanUrl}/api/auth/v1/signup`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ email, password, data: options?.data || {} }),
+          });
+          const data = await res.json();
+          if (!res.ok) return { data: null, error: new Error(data.msg || data.error_description || 'Falha no cadastro') };
+          if (data.access_token) setStoredSession(data);
+          return { data: { user: data.user || data, session: data }, error: null };
+        } catch (error) {
+          return { data: null, error };
+        }
+      },
+      async signInWithPassword({ email, password }) {
+        try {
+          const res = await fetch(`${cleanUrl}/api/auth/v1/token?grant_type=password`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ email, password }),
+          });
+          const data = await res.json();
+          if (!res.ok) return { data: null, error: new Error(data.error_description || data.msg || 'Credenciais inválidas') };
+          setStoredSession(data);
+          return { data: { user: data.user, session: data }, error: null };
+        } catch (error) {
+          return { data: null, error };
+        }
+      },
+      async signOut() {
+        try {
+          await fetch(`${cleanUrl}/api/auth/v1/logout`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+        } catch {}
+        setStoredSession(null);
+        return { error: null };
+      },
+      async getSession() {
+        const session = getStoredSession();
+        return { data: { session }, error: null };
+      },
+      async getUser() {
+        const session = getStoredSession();
+        if (!session?.access_token) return { data: { user: null }, error: null };
+        try {
+          const res = await fetch(`${cleanUrl}/api/auth/v1/user`, {
+            headers: getAuthHeaders(),
+          });
+          if (!res.ok) return { data: { user: session.user || null }, error: null };
+          const user = await res.json();
+          return { data: { user }, error: null };
+        } catch {
+          return { data: { user: session.user || null }, error: null };
+        }
+      },
+      async updateUser(payload) {
+        try {
+          const res = await fetch(`${cleanUrl}/api/auth/v1/user`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!res.ok) return { data: null, error: new Error(data.msg || 'Erro ao atualizar usuário') };
+          return { data: { user: data }, error: null };
+        } catch (error) {
+          return { data: null, error };
+        }
+      },
+      async resetPasswordForEmail(email) {
+        try {
+          const res = await fetch(`${cleanUrl}/api/auth/v1/recover`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ email }),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            return { error: new Error(data.msg || 'Erro ao solicitar recuperação de senha') };
+          }
+          return { error: null };
+        } catch (error) {
+          return { error };
+        }
+      },
+    },
+    storage: {
+      from(bucket) {
+        return {
+          async upload(path, file) {
+            try {
+              const reader = new FileReader();
+              const dataUrl = await new Promise((resolve, reject) => {
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+              this._lastDataUrl = dataUrl;
+              return { data: { path }, error: null };
+            } catch (error) {
+              return { data: null, error };
+            }
+          },
+          getPublicUrl(path) {
+            return { data: { publicUrl: this._lastDataUrl || `/storage/${bucket}/${path}` } };
+          },
+        };
+      },
+    },
+    functions: {
+      async invoke(fnName, { body } = {}) {
+        try {
+          const res = await fetch(`/api/v1/jobs/${fnName}`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const data = await res.json().catch(() => null);
+          return { data, error: res.ok ? null : new Error(`Function ${fnName} error`) };
+        } catch (error) {
+          return { data: null, error };
+        }
+      },
+    },
+  };
+}
+
+export const databaseClient = isDatabaseConfigured
+  ? createNativeDatabaseClient(databaseUrl)
+  : null;
+
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
+export const authService = {
+  async signUp({ email, password, nome, role = 'independente' }) {
+    const { data, error } = await databaseClient.auth.signUp({
+      email,
+      password,
+      options: { data: { nome, role } },
+    });
+    if (error) throw error;
+    return data.user;
   },
+
+  async signIn({ email, password }) {
+    const { data, error } = await databaseClient.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data.user;
+  },
+
+  async signOut() {
+    const { error } = await databaseClient.auth.signOut();
+    if (error) throw error;
+  },
+
   async getSession() {
-    if (!databaseClient) return null;
     const { data } = await databaseClient.auth.getSession();
     return data.session;
   },
-  onAuthStateChange(cb) {
-    if (!databaseClient) return { data: { subscription: { unsubscribe: () => {} } } };
-    return databaseClient.auth.onAuthStateChange(cb);
-  },
-};
 
-export const SupabaseAuth = authService;
-
-// ─── Medication Service ───────────────────────────────────────────────────────
-export const medicationService = {
-  async list(userId) {
-    if (!databaseClient) return [];
-    const { data } = await databaseClient.from('medicamentos').select('*')
-      .eq('user_id', userId).order('created_at');
-    return data || [];
-  },
-  async add(med) {
-    if (!databaseClient) return null;
-    const { data, error } = await databaseClient.from('medicamentos').insert(med).select().single();
-    if (error) throw error;
+  async getProfile(userId) {
+    const { data, error } = await databaseClient
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+    if (error) return null;
     return data;
   },
-  async update(id, updates) {
-    if (!databaseClient) return;
-    await databaseClient.from('medicamentos').update(updates).eq('id', id);
-  },
-  async delete(id) {
-    if (!databaseClient) return;
-    await databaseClient.from('medicamentos').delete().eq('id', id);
-  },
-  subscribe(userId, callback) {
-    if (!databaseClient) return null;
-    return databaseClient.channel('meds')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'medicamentos', filter: `user_id=eq.${userId}` }, callback)
-      .subscribe();
-  },
-};
 
-export const SupaMeds = medicationService;
+  async updateRole(userId, role) {
+    const { error } = await databaseClient.from('profiles').update({ role }).eq('id', userId);
+    const { error: authError } = await databaseClient.auth.updateUser({ data: { role } });
+    return !error && !authError;
+  },
 
-// ─── History Service ──────────────────────────────────────────────────────────
-export const historyService = {
-  async list(userId, limit = 500) {
-    if (!databaseClient) return [];
-    const { data } = await databaseClient.from('historico_doses').select('*')
-      .eq('user_id', userId).order('created_at', { ascending: false }).limit(limit);
-    return data || [];
-  },
-  async add(row) {
-    if (!databaseClient) return null;
-    // Idempotency guard
-    if (row.hora && row.med_id && row.created_at) {
-      const d = new Date(row.created_at);
-      const start = new Date(d); start.setHours(0, 0, 0, 0);
-      const end = new Date(d); end.setHours(23, 59, 59, 999);
-      const { data: existing } = await databaseClient.from('historico_doses')
-        .select('*')
-        .eq('user_id', row.user_id)
-        .eq('med_id', row.med_id)
-        .eq('hora', row.hora)
-        .gte('created_at', start.toISOString())
-        .lte('created_at', end.toISOString())
-        .limit(1);
-      if (existing && existing.length > 0) {
-        if (existing[0].status === 'confirmed') return existing[0];
-        const { data, error } = await databaseClient.from('historico_doses').update(row).eq('id', existing[0].id).select().single();
-        if (error) throw error;
-        return data;
-      }
-    }
-    const { data, error } = await databaseClient.from('historico_doses').insert(row).select().single();
-    if (error) throw error;
-    return data;
-  },
-  async delete(id) {
-    if (!databaseClient) return false;
-    const { error } = await databaseClient.from('historico_doses').update({ status: 'pending' }).eq('id', id);
+  async resetPassword(email) {
+    const { error } = await databaseClient.auth.resetPasswordForEmail(email);
     if (error) throw error;
     return true;
-  }
-};
-
-export const SupaHist = historyService;
-
-// ─── Caregivers Legacy Service ────────────────────────────────────────────────
-export const caregiverRelationshipService = {
-  async list(patientId) {
-    if (!databaseClient) return [];
-    const { data } = await databaseClient.from('cuidadores').select('*, profiles(*)')
-      .eq('paciente_id', patientId);
-    return data || [];
-  },
-  async invite(patientId, email) {
-    if (!databaseClient) return { error: 'Serviço de banco remoto não configurado' };
-    const { data: p } = await databaseClient.from('profiles').select('id').eq('email', email).single();
-    if (!p) return { error: 'Usuário não encontrado' };
-    return databaseClient.from('cuidadores').insert({ paciente_id: patientId, cuidador_id: p.id, nivel_acesso: 'leitura', status: 'pendente' });
-  },
-  async getPatients(caregiverId) {
-    if (!databaseClient) return [];
-    const { data } = await databaseClient.from('cuidadores').select('*, profiles!paciente_id(*)')
-      .eq('cuidador_id', caregiverId).eq('status', 'ativo');
-    return data || [];
   },
 };
 
-export const SupaCaregivers = caregiverRelationshipService;
+// ─── Medicamentos ─────────────────────────────────────────────────────────────
+export const medicationService = {
+  async list(userId) {
+    const { data, error } = await databaseClient
+      .from('medicamentos')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
 
-// ─── Push Subscriptions Service ───────────────────────────────────────────────
-export const pushSubscriptionService = {
-  async saveSubscription(userId, subscription) {
-    if (!databaseClient || !subscription?.endpoint) return;
-    const { endpoint, keys } = subscription;
-    const { error } = await databaseClient.from('push_subscriptions').upsert(
-      {
-        user_id:    userId,
-        endpoint,
-        p256dh:     keys?.p256dh,
-        auth:       keys?.auth,
-        timezone:   Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
-        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'endpoint' }
-    );
+  async create(med) {
+    const { data, error } = await databaseClient
+      .from('medicamentos')
+      .insert(med)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id, fields) {
+    const { data, error } = await databaseClient
+      .from('medicamentos')
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async remove(id) {
+    const { error } = await databaseClient
+      .from('medicamentos')
+      .delete()
+      .eq('id', id);
     if (error) throw error;
   },
+};
+
+// ─── Histórico de doses ───────────────────────────────────────────────────────
+export const historyService = {
+  async list(userId, limit = 100) {
+    const { data, error } = await databaseClient
+      .from('historico_doses')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data || [];
+  },
+
+  async add(entry) {
+    const { data, error } = await databaseClient
+      .from('historico_doses')
+      .insert(entry)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async remove(id) {
+    const { error } = await databaseClient
+      .from('historico_doses')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+};
+
+// ─── Cuidadores ───────────────────────────────────────────────────────────────
+export const caregiverRelationshipService = {
+  async listForPatient(pacienteId) {
+    const { data, error } = await databaseClient
+      .from('caregiver_relationships')
+      .select('*')
+      .eq('patient_id', pacienteId)
+      .eq('status', 'active');
+    if (error) return [];
+    return data || [];
+  },
+
+  async invite({ pacienteId, email }) {
+    const { data, error } = await databaseClient
+      .from('cuidadores')
+      .insert({ paciente_id: pacienteId, cuidador_email: email })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async remove(id) {
+    const { error } = await databaseClient.from('cuidadores').delete().eq('id', id);
+    if (error) throw error;
+  },
+};
+
+// ─── Web Push Subscriptions ───────────────────────────────────────────────────
+export const pushSubscriptionService = {
+  async saveSubscription(userId, sub) {
+    if (!databaseClient || !sub?.endpoint) return;
+    const keys = sub.toJSON?.()?.keys || sub.keys || {};
+    await databaseClient.from('push_subscriptions').upsert({
+      user_id:    userId,
+      endpoint:   sub.endpoint,
+      p256dh:     keys.p256dh || '',
+      auth:       keys.auth   || '',
+      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : '',
+      timezone:   Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
+      updated_at: new Date().toISOString(),
+    });
+  },
+
   async removeSubscription(endpoint) {
     if (!databaseClient || !endpoint) return;
     await databaseClient.from('push_subscriptions').delete().eq('endpoint', endpoint);
   },
-  async list(userId) {
-    if (!databaseClient) return [];
-    const { data } = await databaseClient.from('push_subscriptions').select('*').eq('user_id', userId);
-    return data || [];
-  },
 };
-
-export const SupaPush = pushSubscriptionService;

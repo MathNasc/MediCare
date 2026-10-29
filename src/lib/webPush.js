@@ -22,7 +22,7 @@ export const isPushSupported = () =>
 /**
  * Pede permissão de notificação (se necessário) e inscreve o dispositivo
  * atual no Web Push. Retorna a subscription em formato JSON simples
- * ({ endpoint, keys: { p256dh, auth } }) pronta para salvar no Supabase,
+ * ({ endpoint, keys: { p256dh, auth } }) pronta para salvar no banco de dados,
  * ou null se não suportado / permissão negada.
  */
 export async function subscribeToPush() {

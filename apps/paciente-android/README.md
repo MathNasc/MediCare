@@ -11,11 +11,10 @@ Este diretório (`/apps/paciente-android`) contém o projeto Android **100% nati
 3. Crie (opcionalmente) o arquivo `/apps/paciente-android/local.properties` na raiz do projeto Android para apontar para o banco de dados compartilhado sem versionar credenciais:
    ```properties
    sdk.dir=/caminho/para/seu/Android/Sdk
-   MEDICARE_BACKEND_URL=https://nmtgmulqvacdgniqfrjw.supabase.co
-   MEDICARE_ANON_KEY=sua_anon_key_publica_aqui
-   MEDICARE_AI_PROXY_URL=https://medicare-amber-five.vercel.app
+   MEDICARE_BACKEND_URL=http://163.176.252.207:3009
+   MEDICARE_AI_PROXY_URL=http://163.176.252.207:3009
    ```
-   > **Segurança:** Nunca insira `SUPABASE_SERVICE_ROLE_KEY` ou `GEMINI_API_KEY` no projeto Android. O assistente de IA consome a rota `/api/ai` do servidor e os dados do paciente são protegidos por **Row Level Security (RLS)** via token JWT individual do usuário autenticado.
+   > **Segurança:** Nunca insira senhas do banco de dados ou `GEMINI_API_KEY` no projeto Android. O assistente de IA consome a rota `/api/ai` do servidor e os dados do paciente são sincronizados de forma segura com o PostgreSQL via API no servidor Oracle Cloud.
 
 ---
 
