@@ -1,98 +1,109 @@
-# 💊 MediCare — Controle Inteligente de Saúde e Medicamentos
+# 💊 MediCare — Monorepo de Saúde
 
-O **MediCare** é um ecossistema completo e intuitivo para o gerenciamento de saúde, focado no controle rigoroso da adesão medicamentosa. Composto por um aplicativo **Android nativo (`MediCare-Paciente.apk`)** e uma plataforma **Web/PWA**, ele oferece notificações inteligentes, acompanhamento de estoque, agendas médicas e uma estrutura dupla de perfis para **Pacientes** e **Cuidadores** integrada ao **PostgreSQL na Oracle Cloud**.
+O **MediCare** é uma solução completa de saúde focada no controle de adesão medicamentosa e cuidado compartilhado.
 
----
-
-## ✨ Principais Funcionalidades
-
-- 🧑‍🤝‍🧑 **Perfis de Usuário & Modo Cuidador:**
-  - **Pacientes:** Controle total sobre os próprios medicamentos, eventos, cartão de emergência e histórico de saúde.
-  - **Cuidadores:** Módulo seguro de delegação. O cuidador (após aceitar um convite) recebe uma visão em tempo real da aderência do paciente, podendo registrar doses retroativamente em nome do paciente caso este se esqueça de usar o aplicativo.
-- 💊 **Gestão de Tratamentos Completa:**
-  - **Uso Contínuo:** Para tratamentos sem data de término.
-  - **Uso Temporário:** Definição de data de início e duração em dias. A prescrição encerra automaticamente ao fim do período e vai para o histórico.
-  - **Sob Demanda (SOS):** Medicamentos para controle de sintomas pontuais, registrados no momento do uso, sem interferir na adesão calculada do paciente.
-- 📅 **Controle de Eventos, Notas e Consultas:**
-  - Lembretes agendados para consultas médicas, exames, anotações diárias e reabastecimentos de estoque.
-- 🔔 **Notificações Confiáveis (AlarmManager Android & Web Push):**
-  - **Android Nativo:** Utiliza `AlarmManager.setExactAndAllowWhileIdle` com som, vibração e repetição automática a cada 15 minutos até a confirmação.
-  - **Web Push:** Integração via VAPID Push API com worker agendado a cada minuto no servidor Oracle Cloud (`/api/v1/jobs/reminders`).
-  - Alertas escalonados (Hora da dose, +10min, +20min) e Alerta de Estoque Baixo (quando ≤ 5 unidades).
-- 📊 **Dashboard & Adesão:**
-  - Acompanhamento diário e mensal de aderência ao tratamento, visualização em timeline e registro detalhado de sintomas.
-- 🔐 **Segurança e Privacidade:**
-  - Arquitetura segura com autenticação JWT/Sessão própria e banco de dados PostgreSQL isolado na Oracle Cloud (`medicare_db`), com rastreabilidade completa (Audit Logs).
+A aplicação principal e ativa em desenvolvimento é o **MediCare Paciente Android**, integrada a um backend robusto em **Next.js API Routes** e banco de dados **PostgreSQL na Oracle Cloud**. A estrutura do monorepo está preparada para a implementação do **MediCare Cuidador Web**.
 
 ---
 
-## 🛠️ Stack Tecnológica
+## 🏛️ Estrutura do Monorepo
 
-- **App Android Nativo:** Java/Android SDK (`src-apk/`), APK compilado na raiz (`MediCare-Paciente.apk`)
-- **Front-end Web:** Next.js 14, React 18
-- **Estilização:** Tailwind CSS, PostCSS, Componentes customizados
-- **Backend & Database:** Next.js API Routes + PostgreSQL 16 (Oracle Cloud)
-- **Autenticação:** Auth Service nativo (`/api/auth/v1/*` com `pgcrypto` bcrypt)
-- **Notificações:** Android `AlarmManager` + Web Push API (VAPID) + Service Workers (`sw.js`)
+```text
+MediCare/
+├── apps/
+│   ├── paciente-android/       # Aplicativo Android nativo (Kotlin / Jetpack Compose) [ATIVO]
+│   └── cuidador-web/           # Futura aplicação PWA Cuidador (Etapas 2, 3 e 4)
+├── src-apk/                    # Código Java, Manifesto e Recursos de empacotamento Android
+├── src/
+│   ├── app/
+│   │   ├── api/                # Endpoints REST compartilhados (/v1, /auth, /apk, /ai)
+│   │   ├── layout.jsx          # Layout do portal de status e distribuição
+│   │   └── page.jsx            # Portal de distribuição e download do APK
+│   ├── lib/                    # Serviços de domínio, banco de dados e utilitários
+│   ├── data/                   # Catálogo de medicamentos
+│   └── __tests__/              # Testes automatizados de regras de negócio (Jest)
+├── database/
+│   └── migrations/             # Esquemas SQL e migrações do PostgreSQL
+├── oracle-migration/           # Scripts de infraestrutura, Docker e deploy na Oracle Cloud
+├── docs/                       # Documentação técnica e planos de arquitetura
+│   ├── ARCHITECTURE.md         # Arquitetura e separação de responsabilidades
+│   ├── DEVELOPMENT.md          # Guia de desenvolvimento e comandos
+│   └── MEDICARE_CUIDADOR_PLAN.md # Visão e roadmap do MediCare Cuidador
+├── scripts/
+│   └── rebuild_and_sign_apk.sh # Script automatizado de compilação e assinatura do APK
+├── public/                     # Ícones e imagens base do aplicativo
+├── MediCare-Paciente.apk       # Instalador APK de debug final, validado e assinado na raiz
+├── AGENTS.md                   # Regras de desenvolvimento para agentes de IA
+└── README.md                   # Visão geral do repositório
+```
 
 ---
 
-## 🚀 Como Executar o Projeto Localmente
+## 📱 Compilando o MediCare Paciente (APK)
 
-### 1. Pré-requisitos
-- [Node.js](https://nodejs.org/en/) (Versão 18+)
-- Banco de dados PostgreSQL configurado (local ou servidor Oracle Cloud)
-
-### 2. Instalação
+O pipeline automatizado compila os fontes nativos, gera o bytecode Dalvik (`classes.dex`), alinha em 4 bytes com `zipalign` e assina o pacote com esquemas v1, v2 e v3 via `apksigner`:
 
 ```bash
-git clone <url-do-repositorio> medicare
-cd medicare
+bash scripts/rebuild_and_sign_apk.sh
+```
+
+O arquivo `MediCare-Paciente.apk` atualizado e validado é gerado diretamente na raiz do repositório.
+
+---
+
+## 🚀 Executando o Backend Localmente
+
+### 1. Instalação de Dependências
+
+```bash
 npm install
 ```
 
-### 3. Variáveis de Ambiente
+### 2. Variáveis de Ambiente
 
-Copie o arquivo de exemplo de variáveis de ambiente:
-
-```bash
-cp .env.example .env.local
-```
-
-Configure a conexão com o PostgreSQL no arquivo `.env.local`:
+Configure o `.env.local` na raiz com base no `.env.example`:
 
 ```env
 DATABASE_URL=postgresql://medicare_app:sua_senha@127.0.0.1:5436/medicare_db
-NEXT_PUBLIC_VAPID_PUBLIC_KEY=sua-chave-publica-vapid
-GEMINI_API_KEY=sua-chave-gemini
+GEMINI_API_KEY=sua-chave-api-gemini
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-### 4. Executando o App Localmente
+### 3. Iniciar Servidor de Desenvolvimento
 
 ```bash
 npm run dev
 ```
 
-Acesse [http://localhost:3000](http://localhost:3000) no seu navegador.
+Acesse [http://localhost:3000](http://localhost:3000) para conferir o status da API e realizar o download do APK.
 
 ---
 
-## 📱 Aplicativo Android (`MediCare-Paciente.apk`)
-
-O instalador atualizado do aplicativo Android fica disponível diretamente na raiz do repositório:
-- **Arquivo:** `/MediCare-Paciente.apk`
-- **Script de compilação e assinatura automática:**
-  ```bash
-  bash scripts/rebuild_and_sign_apk.sh
-  ```
-
----
-
-## 🧪 Testes Unitários
-
-O projeto utiliza o Jest. Para executar a suíte de testes de regras de negócios:
+## 🧪 Testes Automatizados
 
 ```bash
-npm run test
-npm run test:coverage
+npm test
 ```
+
+---
+
+## 📌 Plano de Desenvolvimento (Roadmap)
+
+- **Etapa 0 (Concluída):** Preparação do monorepo, auditoria, reorganização e documentação técnica.
+- **Etapa 1 (Próxima):** Auditoria técnica aprofundada e especificação do contrato da API (`docs/API_CONTRACT.md`, `docs/DATA_MODEL.md`).
+- **Etapa 2:** Fundação do MediCare Cuidador Web (React, Vite, PWA, Tailwind, shadcn/ui).
+- **Etapa 3:** Implementação das funcionalidades do MVP (Central de Administração, Pacientes, Tratamentos, Agenda, Indicadores).
+- **Etapa 4:** Testes de segurança, validação de integridade e implantação no servidor Oracle Cloud.
+
+---
+
+## ⚠️ Diretrizes Permanentes de Desenvolvimento
+
+1. O **MediCare Paciente Android** é a única aplicação ativa em desenvolvimento até nova autorização.
+2. Todo o desenvolvimento atual deve ocorrer no aplicativo Android.
+3. Não implementar funcionalidades no frontend web legado (removido).
+4. Código web legado não deve ser recriado sem autorização.
+5. MediCare Cuidador é um projeto futuro, a ser implementado estritamente conforme as etapas do plano.
+6. Backend e banco de dados só devem ser alterados quando necessário ao Android ou expressamente especificado no plano.
+7. O APK `MediCare-Paciente.apk` deve ser mantido atualizado na raiz após cada alteração relevante.
+8. Antes de qualquer alteração, consultar e respeitar essas diretrizes.

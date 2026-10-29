@@ -1,23 +1,13 @@
-import '@/styles/globals.css';
-
-console.log('NEXT_PUBLIC_APP_URL =', process.env.NEXT_PUBLIC_APP_URL);
-
 export const metadata = {
   metadataBase: new URL('https://medicare-amber-five.vercel.app'),
   title: {
-    default: 'MediCare – Controle de Medicamentos',
+    default: 'MediCare — Servidor & Paciente Android',
     template: '%s | MediCare',
   },
   description:
-    'Gerencie seus medicamentos com lembretes inteligentes, confirmação de doses e acompanhamento por cuidadores.',
-  keywords: ['medicamentos', 'saúde', 'lembretes', 'doses', 'tratamento'],
-  authors: [{ name: 'MediCare' }],
-  manifest: '/manifest.json',
-  appleWebApp: {
-    capable: false,
-    statusBarStyle: 'black-translucent',
-    title: 'MediCare',
-  },
+    'MediCare Paciente Android — Servidor de API, sincronização em tempo real e distribuição do APK oficial.',
+  keywords: ['medicare', 'android', 'apk', 'saude', 'medicamentos', 'api'],
+  authors: [{ name: 'MediCare Team' }],
   icons: {
     icon: [
       { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
@@ -29,8 +19,8 @@ export const metadata = {
   openGraph: {
     type: 'website',
     siteName: 'MediCare',
-    title: 'MediCare – Controle de Medicamentos',
-    description: 'Gerencie seus medicamentos com lembretes inteligentes.',
+    title: 'MediCare — Servidor & Paciente Android',
+    description: 'Serviços de backend e distribuição do APK oficial do MediCare Paciente.',
     images: [
       {
         url: '/icon-512.png',
@@ -41,51 +31,41 @@ export const metadata = {
   },
 };
 
-// Separate viewport export (Next.js 14 requirement)
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  viewportFit: 'cover',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#3b82f6' },
-    { media: '(prefers-color-scheme: dark)', color: '#0d1117' },
-  ],
+  themeColor: '#0a0e1a',
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="pt-BR">
       <head>
-        <meta name="mobile-web-app-capable" content="yes" />
-        <script dangerouslySetInnerHTML={{ __html: `
-          if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js').then(function(registration) {
-                console.log('ServiceWorker registration successful with scope: ', registration.scope);
-              }, function(err) {
-                console.log('ServiceWorker registration failed: ', err);
-              });
-            });
-          }
-        `}} />
-        <meta name="msapplication-TileColor" content="#3b82f6" />
-        <meta name="msapplication-TileImage" content="/icon-144.png" />
-
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
+        <style dangerouslySetInnerHTML={{ __html: `
+          *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+          }
+          html, body {
+            background-color: #0b1120;
+            color: #f1f5f9;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+          }
+          a {
+            color: inherit;
+            text-decoration: none;
+          }
+        `}} />
       </head>
       <body>{children}</body>
     </html>
