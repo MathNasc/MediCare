@@ -1351,7 +1351,9 @@ public class MainActivity extends Activity {
                 this.calNotes = new JSONObject(this.prefs.getString("cal_notes", "{}"));
                 this.calNotesList = new JSONArray(this.prefs.getString("cal_notes_list", "[]"));
                 this.stockMovements = new JSONArray(this.prefs.getString("stock_movements", "[]"));
-                if (migrateStockEventsFromEvents()) {
+                boolean migrated = migrateStockEventsFromEvents();
+                boolean deduped = deduplicateStockMovements();
+                if (migrated || deduped) {
                     this.prefs.edit()
                         .putString("events", this.events.toString())
                         .putString("stock_movements", this.stockMovements.toString())
@@ -5692,7 +5694,12 @@ public class MainActivity extends Activity {
     private String getStockMovementTime(JSONObject sm) {
         if (sm == null) return "";
         String tm = sm.optString("time", sm.optString("hora", "")).trim();
-        if (!tm.isEmpty()) return tm;
+        if (!tm.isEmpty()) {
+            if (tm.length() >= 5 && tm.charAt(2) == ':') {
+                return tm.substring(0, 5);
+            }
+            return tm;
+        }
         String dataStr = sm.optString("data", "").trim();
         if (dataStr.length() >= 16 && dataStr.charAt(10) == ' ') {
             return dataStr.substring(11, 16);
@@ -5755,6 +5762,9 @@ public class MainActivity extends Activity {
                 changed = true;
                 String evDate = ev.optString("date", ev.optString("data", "")).trim();
                 String evTime = ev.optString("time", ev.optString("hora", "")).trim();
+                if (evTime.length() >= 5 && evTime.charAt(2) == ':') {
+                    evTime = evTime.substring(0, 5);
+                }
                 String evTitle = ev.optString("title", ev.optString("titulo", "")).trim();
                 boolean alreadyInStock = false;
                 for (int j = 0; j < this.stockMovements.length(); j++) {
@@ -5762,7 +5772,7 @@ public class MainActivity extends Activity {
                     if (sm != null && isCalendarStockMovement(sm)) {
                         String smDate = getStockMovementDate(sm);
                         String smTime = getStockMovementTime(sm);
-                        if (evDate.equals(smDate) && (evTime.isEmpty() || evTime.equals(smTime))) {
+                        if (evDate.equals(smDate) && (evTime.isEmpty() || smTime.isEmpty() || evTime.equals(smTime))) {
                             alreadyInStock = true;
                             break;
                         }
@@ -5806,6 +5816,70 @@ public class MainActivity extends Activity {
         return changed;
     }
 
+    private boolean deduplicateStockMovements() {
+        if (this.stockMovements == null || this.stockMovements.length() == 0) return false;
+        boolean changed = false;
+        JSONArray clean = new JSONArray();
+        for (int i = 0; i < this.stockMovements.length(); i++) {
+            JSONObject sm = this.stockMovements.optJSONObject(i);
+            if (sm == null) continue;
+            String rawTime = sm.optString("time", "").trim();
+            if (rawTime.length() > 5 && rawTime.charAt(2) == ':') {
+                try {
+                    sm.put("time", rawTime.substring(0, 5));
+                    sm.put("hora", rawTime.substring(0, 5));
+                    changed = true;
+                } catch (Exception ignored) {}
+            }
+            if (!isCalendarStockMovement(sm)) {
+                clean.put(sm);
+                continue;
+            }
+            String smDate = getStockMovementDate(sm);
+            String smTime = getStockMovementTime(sm);
+            int smDelta = getStockMovementDelta(sm);
+            String smCardText = formatStockMovementCardText(sm).trim().toLowerCase(Locale.ROOT);
+            boolean isMigrated = sm.optString("id", "").startsWith("sm-ev-") || sm.optString("med_nome", "").trim().isEmpty();
+
+            int duplicateIdx = -1;
+            for (int j = 0; j < clean.length(); j++) {
+                JSONObject existing = clean.optJSONObject(j);
+                if (existing == null || !isCalendarStockMovement(existing)) continue;
+                String exDate = getStockMovementDate(existing);
+                if (!smDate.equals(exDate)) continue;
+                String exCardText = formatStockMovementCardText(existing).trim().toLowerCase(Locale.ROOT);
+                if (smCardText.equals(exCardText)) {
+                    duplicateIdx = j;
+                    break;
+                }
+                String exTime = getStockMovementTime(existing);
+                int exDelta = getStockMovementDelta(existing);
+                boolean exIsMigrated = existing.optString("id", "").startsWith("sm-ev-") || existing.optString("med_nome", "").trim().isEmpty();
+                if (smDelta == exDelta && (!smTime.isEmpty() && smTime.equals(exTime)) && (isMigrated || exIsMigrated)) {
+                    duplicateIdx = j;
+                    break;
+                }
+            }
+            if (duplicateIdx >= 0) {
+                changed = true;
+                JSONObject existing = clean.optJSONObject(duplicateIdx);
+                boolean exHasMed = existing != null && !existing.optString("med_nome", "").trim().isEmpty();
+                boolean smHasMed = !sm.optString("med_nome", "").trim().isEmpty();
+                if (smHasMed && !exHasMed) {
+                    try {
+                        clean.put(duplicateIdx, sm);
+                    } catch (Exception ignored) {}
+                }
+            } else {
+                clean.put(sm);
+            }
+        }
+        if (changed) {
+            this.stockMovements = clean;
+        }
+        return changed;
+    }
+
     private boolean hasEventOnDate(String dateStr) {
         for (int i = 0; i < this.events.length(); i++) {
             JSONObject ev = this.events.optJSONObject(i);
@@ -5823,35 +5897,66 @@ public class MainActivity extends Activity {
     }
 
     private void showDayPanelDialog(final String dateStr) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        if (migrateStockEventsFromEvents() | deduplicateStockMovements()) {
+            saveAll();
+        }
+        final AlertDialog dlg = new AlertDialog.Builder(this).create();
+
+        LinearLayout modalCard = new LinearLayout(this);
+        modalCard.setOrientation(1);
+        modalCard.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+
         ScrollView sv = new ScrollView(this);
+        sv.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(1);
-        root.setPadding(dp(20), dp(20), dp(20), dp(20));
-        root.setBackgroundColor(this.cSurface);
-
-        sv.addView(root);
-        b.setView(sv);
-        b.setNegativeButton("Fechar", null);
-        final AlertDialog dlg = b.create();
+        root.setPadding(dp(20), dp(20), dp(20), dp(16));
 
         boolean isToday = dateStr.equals(todayIso());
         boolean isPast = dateStr.compareTo(todayIso()) < 0;
 
+        LinearLayout topHdr = new LinearLayout(this);
+        topHdr.setOrientation(0);
+        topHdr.setGravity(16);
+        topHdr.setPadding(0, 0, 0, dp(12));
+
+        LinearLayout dateCol = new LinearLayout(this);
+        dateCol.setOrientation(1);
+        dateCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
         TextView tvSub = new TextView(this);
         tvSub.setText(isToday ? "✨ Hoje" : (isPast ? "📅 Dia anterior" : "🔮 Dia futuro"));
         tvSub.setTextColor(this.cPrimary);
-        tvSub.setTextSize(sp(11.0f));
+        tvSub.setTextSize(sp(11.5f));
         tvSub.setTypeface(null, 1);
-        root.addView(tvSub);
+        dateCol.addView(tvSub);
 
         TextView tvDate = new TextView(this);
         tvDate.setText(dateStr);
         tvDate.setTextColor(this.cTextMain);
-        tvDate.setTextSize(sp(18.0f));
+        tvDate.setTextSize(sp(19.0f));
         tvDate.setTypeface(null, 1);
-        tvDate.setPadding(0, dp(2), 0, dp(12));
-        root.addView(tvDate);
+        tvDate.setPadding(0, dp(2), 0, 0);
+        dateCol.addView(tvDate);
+        topHdr.addView(dateCol);
+
+        TextView btnCloseX = new TextView(this);
+        btnCloseX.setText("✕");
+        btnCloseX.setTextColor(this.cTextMuted);
+        btnCloseX.setTextSize(sp(15.0f));
+        btnCloseX.setTypeface(null, 1);
+        btnCloseX.setGravity(17);
+        btnCloseX.setBackground(shape(this.cSurfaceHover, 18, 0, 0));
+        btnCloseX.setLayoutParams(new LinearLayout.LayoutParams(dp(36), dp(36)));
+        btnCloseX.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dlg.dismiss();
+            }
+        });
+        topHdr.addView(btnCloseX);
+        root.addView(topHdr);
 
         // Quick Add buttons inside DayPanel
         LinearLayout addRow = new LinearLayout(this);
@@ -5861,14 +5966,14 @@ public class MainActivity extends Activity {
         addRow.setLayoutParams(arLp);
 
         TextView btnAddN = createButton("📝 + Anotação", this.cBgMain, this.cTextMain);
-        btnAddN.setPadding(dp(10), dp(8), dp(10), dp(8));
+        btnAddN.setPadding(dp(10), dp(10), dp(10), dp(10));
         LinearLayout.LayoutParams anLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
         anLp.rightMargin = dp(6);
         btnAddN.setLayoutParams(anLp);
         addRow.addView(btnAddN);
 
         TextView btnAddE = createButton("📅 + Evento", this.cBgMain, this.cTextMain);
-        btnAddE.setPadding(dp(10), dp(8), dp(10), dp(8));
+        btnAddE.setPadding(dp(10), dp(10), dp(10), dp(10));
         LinearLayout.LayoutParams aeLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
         aeLp.leftMargin = dp(6);
         btnAddE.setLayoutParams(aeLp);
@@ -6129,23 +6234,44 @@ public class MainActivity extends Activity {
             }
         });
 
+        sv.addView(root);
+        modalCard.addView(sv);
+
+        View botDiv = new View(this);
+        botDiv.setBackgroundColor(this.cBorder);
+        botDiv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        modalCard.addView(botDiv);
+
+        LinearLayout footerBar = new LinearLayout(this);
+        footerBar.setOrientation(1);
+        footerBar.setPadding(dp(20), dp(12), dp(20), dp(16));
+
+        TextView btnCloseFooter = new TextView(this);
+        btnCloseFooter.setText("Fechar");
+        btnCloseFooter.setTextColor(this.cTextMain);
+        btnCloseFooter.setTextSize(sp(14.5f));
+        btnCloseFooter.setTypeface(null, 1);
+        btnCloseFooter.setGravity(17);
+        btnCloseFooter.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+        btnCloseFooter.setPadding(dp(16), dp(13), dp(16), dp(13));
+        btnCloseFooter.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+        btnCloseFooter.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dlg.dismiss();
+            }
+        });
+        footerBar.addView(btnCloseFooter);
+        modalCard.addView(footerBar);
+
+        dlg.setView(modalCard);
         dlg.show();
+        styleDialogWindow(dlg);
     }
 
     private void showNoteModal(final String defaultDate, final JSONObject existing, final int editIdx) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(1);
-        l.setPadding(dp(20), dp(20), dp(20), dp(12));
-        l.setBackgroundColor(this.cSurface);
-
-        TextView tvT = new TextView(this);
-        tvT.setText(existing == null ? "📝 Nova anotação" : "📝 Editar anotação");
-        tvT.setTextColor(this.cTextMain);
-        tvT.setTextSize(sp(18.0f));
-        tvT.setTypeface(null, 1);
-        tvT.setPadding(0, 0, 0, dp(12));
-        l.addView(tvT);
 
         final EditText inDate = createInput("Data (AAAA-MM-DD)", existing != null ? existing.optString("date", defaultDate) : defaultDate);
         final EditText inCat = createInput("Categoria (Sintoma, Dúvida médica, Efeito colateral, Geral)", existing != null ? existing.optString("category", "Geral") : "Sintoma");
@@ -6154,51 +6280,45 @@ public class MainActivity extends Activity {
         l.addView(inDate);
         l.addView(inCat);
         l.addView(inText);
-        b.setView(l);
-        b.setPositiveButton("Salvar anotação", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                try {
-                    String txt = inText.getText().toString().trim();
-                    if (txt.isEmpty()) return;
-                    String dt = inDate.getText().toString().trim();
-                    if (dt.isEmpty()) dt = defaultDate;
-                    JSONObject obj = existing != null ? existing : new JSONObject();
-                    if (existing == null) obj.put("id", "note-" + System.currentTimeMillis());
-                    obj.put("date", dt);
-                    obj.put("category", inCat.getText().toString().trim());
-                    obj.put("text", txt);
-                    if (editIdx >= 0) {
-                        MainActivity.this.calNotesList.put(editIdx, obj);
-                    } else {
-                        MainActivity.this.calNotesList.put(obj);
-                    }
-                    MainActivity.this.calNotes.put(dt, txt);
-                    saveAll();
-                    render();
-                    Toast.makeText(MainActivity.this, "Anotação salva!", 0).show();
-                } catch (Exception ignored) {}
+
+        showStyledFormModal(
+            existing == null ? "📝 Nova anotação" : "📝 Editar anotação",
+            l,
+            "Salvar anotação",
+            "Cancelar",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String txt = inText.getText().toString().trim();
+                        if (txt.isEmpty()) return;
+                        String dt = inDate.getText().toString().trim();
+                        if (dt.isEmpty()) dt = defaultDate;
+                        JSONObject obj = existing != null ? existing : new JSONObject();
+                        if (existing == null) obj.put("id", "note-" + System.currentTimeMillis());
+                        obj.put("date", dt);
+                        obj.put("category", inCat.getText().toString().trim());
+                        obj.put("text", txt);
+                        if (editIdx >= 0) {
+                            MainActivity.this.calNotesList.put(editIdx, obj);
+                        } else {
+                            MainActivity.this.calNotesList.put(obj);
+                        }
+                        MainActivity.this.calNotes.put(dt, txt);
+                        saveAll();
+                        render();
+                        Toast.makeText(MainActivity.this, "Anotação salva!", 0).show();
+                    } catch (Exception ignored) {}
+                }
             }
-        });
-        b.setNegativeButton("Cancelar", null);
-        b.show();
+        );
     }
 
     private void showEventModal(final String defaultDate, final JSONObject existing, final int editIdx) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
         ScrollView sv = new ScrollView(this);
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(1);
-        l.setPadding(dp(20), dp(20), dp(20), dp(12));
-        l.setBackgroundColor(this.cSurface);
-
-        TextView tvT = new TextView(this);
-        tvT.setText(existing == null ? "📅 Novo evento de saúde" : "📅 Editar evento");
-        tvT.setTextColor(this.cTextMain);
-        tvT.setTextSize(sp(18.0f));
-        tvT.setTypeface(null, 1);
-        tvT.setPadding(0, 0, 0, dp(12));
-        l.addView(tvT);
 
         final EditText inType = createInput("Tipo (Consulta médica, Exame, Retorno, Receita, Lembrete)", existing != null ? existing.optString("type", "Consulta médica") : "Consulta médica");
         final EditText inTitle = createInput("Título * (Ex: Cardiologista Dr. Silva)", existing != null ? existing.optString("title", existing.optString("titulo", "")) : "");
@@ -6214,44 +6334,49 @@ public class MainActivity extends Activity {
         l.addView(inLoc);
         l.addView(inNotes);
         sv.addView(l);
-        b.setView(sv);
-        b.setPositiveButton("Salvar evento", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                try {
-                    String title = inTitle.getText().toString().trim();
-                    if (title.isEmpty()) return;
-                    String dt = inDate.getText().toString().trim();
-                    if (dt.isEmpty()) dt = defaultDate;
-                    String tm = inTime.getText().toString().trim();
-                    String loc = inLoc.getText().toString().trim();
-                    String nts = inNotes.getText().toString().trim();
-                    JSONObject obj = existing != null ? existing : new JSONObject();
-                    if (existing == null) obj.put("id", "ev-" + System.currentTimeMillis());
-                    obj.put("type", inType.getText().toString().trim());
-                    obj.put("title", title);
-                    obj.put("titulo", title);
-                    obj.put("date", dt);
-                    obj.put("data", dt);
-                    obj.put("time", tm);
-                    obj.put("hora", tm);
-                    obj.put("location", loc);
-                    obj.put("local", loc);
-                    obj.put("notes", nts);
-                    obj.put("notas", nts);
-                    if (editIdx >= 0) {
-                        MainActivity.this.events.put(editIdx, obj);
-                    } else {
-                        MainActivity.this.events.put(obj);
-                    }
-                    saveAll();
-                    render();
-                    Toast.makeText(MainActivity.this, "Evento salvo!", 0).show();
-                } catch (Exception ignored) {}
+
+        showStyledFormModal(
+            existing == null ? "📅 Novo evento de saúde" : "📅 Editar evento",
+            sv,
+            "Salvar evento",
+            "Cancelar",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String title = inTitle.getText().toString().trim();
+                        if (title.isEmpty()) return;
+                        String dt = inDate.getText().toString().trim();
+                        if (dt.isEmpty()) dt = defaultDate;
+                        String tm = inTime.getText().toString().trim();
+                        String loc = inLoc.getText().toString().trim();
+                        String nts = inNotes.getText().toString().trim();
+                        JSONObject obj = existing != null ? existing : new JSONObject();
+                        if (existing == null) obj.put("id", "ev-" + System.currentTimeMillis());
+                        obj.put("type", inType.getText().toString().trim());
+                        obj.put("title", title);
+                        obj.put("titulo", title);
+                        obj.put("date", dt);
+                        obj.put("data", dt);
+                        obj.put("time", tm);
+                        obj.put("hora", tm);
+                        obj.put("location", loc);
+                        obj.put("local", loc);
+                        obj.put("notes", nts);
+                        obj.put("notas", nts);
+                        if (editIdx >= 0) {
+                            MainActivity.this.events.put(editIdx, obj);
+                        } else {
+                            MainActivity.this.events.put(obj);
+                        }
+                        saveAll();
+                        render();
+                        Toast.makeText(MainActivity.this, "Evento salvo!", 0).show();
+                    } catch (Exception ignored) {}
+                }
             }
-        });
-        b.setNegativeButton("Cancelar", null);
-        b.show();
+        );
     }
 
     private void buildAiTab(LinearLayout linearLayout) {
@@ -9680,6 +9805,7 @@ public class MainActivity extends Activity {
                     if (eArr != null && eArr.length() > 0 && MainActivity.this.events.length() == 0) {
                         MainActivity.this.events = eArr;
                         MainActivity.this.migrateStockEventsFromEvents();
+                        MainActivity.this.deduplicateStockMovements();
                         changed = true;
                     }
                     JSONArray aArr = resp.optJSONArray("allergies");

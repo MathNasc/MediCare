@@ -671,10 +671,22 @@ private fun DayPanelDialog(
         state.healthEvents.filter { it.date == dateIso && it.type != "estoque" && !it.title.startsWith("Reposição:") }
     }
     val dayStockMovements = remember(state.stockMovements, dateIso) {
-        state.stockMovements.filter { it.createdAt.startsWith(dateIso) && it.movementType != "consumption" }
+        state.stockMovements
+            .filter { it.createdAt.startsWith(dateIso) && it.movementType != "consumption" }
+            .distinctBy { sm ->
+                val hm = if (sm.createdAt.length >= 16 && sm.createdAt[10] == 'T') sm.createdAt.substring(11, 16) else ""
+                "${sm.medicationId}|${sm.quantityDelta}|$hm"
+            }
     }
-    val dayLegacyStockEvents = remember(state.healthEvents, dateIso) {
-        state.healthEvents.filter { it.date == dateIso && (it.type == "estoque" || it.title.startsWith("Reposição:")) }
+    val dayLegacyStockEvents = remember(state.healthEvents, dayStockMovements, dateIso) {
+        state.healthEvents.filter { ev ->
+            ev.date == dateIso && (ev.type == "estoque" || ev.title.startsWith("Reposição:")) &&
+                dayStockMovements.none { sm ->
+                    val smHm = if (sm.createdAt.length >= 16 && sm.createdAt[10] == 'T') sm.createdAt.substring(11, 16) else ""
+                    val evHm = ev.time?.take(5) ?: ""
+                    evHm.isEmpty() || smHm.isEmpty() || evHm == smHm
+                }
+        }
     }
     val activeScheduledMeds = remember(state.medications) {
         state.medications.filter { it.ativo && it.treatmentType != "sos" }
@@ -684,235 +696,275 @@ private fun DayPanelDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 620.dp)
+                .heightIn(max = 640.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(tokens.bg1)
                 .border(1.dp, tokens.bdr, RoundedCornerShape(24.dp))
-                .padding(20.dp)
-                .verticalScroll(rememberScrollState())
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = "📅 Dia ${dateIso.split("-").reversed().joinToString("/")}",
-                    color = tokens.txt,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text("✕", color = tokens.muted, fontSize = 18.sp, modifier = Modifier.clickable { onDismiss() })
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                listOf(
-                    "all" to "Todos",
-                    "meds" to "💊 Medicamentos",
-                    "notes" to "📝 Notas",
-                    "events" to "📅 Consultas",
-                    "stock" to "📦 Estoque"
-                ).forEach { (id, label) ->
-                    val sel = filter == id
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "📅 Dia ${dateIso.split("-").reversed().joinToString("/")}",
+                        color = tokens.txt,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black
+                    )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(99.dp))
-                            .background(if (sel) MediCareColors.Blue else tokens.bg2)
-                            .clickable { filter = id }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(tokens.bg2)
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = if (sel) Color.White else tokens.sub, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("✕", color = tokens.muted, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (filter == "all" || filter == "meds") {
-                Text("💊 Doses do dia", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                activeScheduledMeds.forEach { med ->
-                    med.horarios.forEach { hora ->
-                        val rec = dayHist.firstOrNull { it.medId == med.id && it.hora == hora }
-                        val confirmed = rec != null
-                        val doseKey = "${dateIso}_${med.id}_$hora"
-                        val obsText = state.doseObservations.firstOrNull { it.doseKey == doseKey }?.content
-
-                        Column(
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        "all" to "Todos",
+                        "meds" to "💊 Medicamentos",
+                        "notes" to "📝 Notas",
+                        "events" to "📅 Consultas",
+                        "stock" to "📦 Estoque"
+                    ).forEach { (id, label) ->
+                        val sel = filter == id
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 8.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(tokens.bg2)
-                                .padding(12.dp)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(if (sel) MediCareColors.Blue else tokens.bg2)
+                                .clickable { filter = id }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
+                            Text(label, color = if (sel) Color.White else tokens.sub, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (filter == "all" || filter == "meds") {
+                    Text("💊 Doses do dia", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    activeScheduledMeds.forEach { med ->
+                        med.horarios.forEach { hora ->
+                            val rec = dayHist.firstOrNull { it.medId == med.id && it.hora == hora }
+                            val confirmed = rec != null
+                            val doseKey = "${dateIso}_${med.id}_$hora"
+                            val obsText = state.doseObservations.firstOrNull { it.doseKey == doseKey }?.content
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(tokens.bg2)
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("${med.nome} (${med.dosagem})", color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text("Horário: $hora", color = tokens.sub, fontSize = 12.sp)
+                                        if (rec != null) {
+                                            CaregiverBadge(rec)
+                                        }
+                                    }
+                                    if (confirmed) {
+                                        Text(
+                                            text = if (rec?.isRetroactive == true) "✓ Retroativa" else "✓ Tomada",
+                                            color = MediCareColors.Green,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "🕐 Confirmar retroativamente",
+                                            color = MediCareColors.Amber,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable { onRequestRetroactive(med, hora) }
+                                        )
+                                    }
+                                }
+                                if (!obsText.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("💬 $obsText", color = MediCareColors.Blue, fontSize = 12.sp)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (obsText.isNullOrBlank()) "+ Adicionar observação" else "✏️ Editar observação",
+                                    color = tokens.muted,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.clickable {
+                                        onRequestDoseObs(doseKey, "${med.nome} às $hora", obsText ?: "")
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (filter == "all" || filter == "events") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("📅 Consultas e Eventos", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("+ Adicionar", color = MediCareColors.Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onAddEvent() })
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (dayEvents.isEmpty()) {
+                        Text("Nenhum evento registrado neste dia.", color = tokens.muted, fontSize = 12.sp)
+                    } else {
+                        dayEvents.forEach { ev ->
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(tokens.bg2)
+                                    .padding(12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("${med.nome} (${med.dosagem})", color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    Text("Horário: $hora", color = tokens.sub, fontSize = 12.sp)
-                                    if (rec != null) {
-                                        CaregiverBadge(rec)
+                                    Text(ev.title, color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = listOfNotNull(ev.type.uppercase(), ev.time, ev.doctor, ev.location).joinToString(" · "),
+                                        color = tokens.sub,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("✏️", modifier = Modifier.clickable { onEditEvent(ev) })
+                                    Text("🗑️", modifier = Modifier.clickable { onDeleteEvent(ev.id) })
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (filter == "all" || filter == "notes") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("📝 Anotações do dia", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("+ Nova nota", color = MediCareColors.Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onAddNote() })
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (dayNotes.isEmpty()) {
+                        Text("Nenhuma anotação neste dia.", color = tokens.muted, fontSize = 12.sp)
+                    } else {
+                        dayNotes.forEach { n ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(tokens.bg2)
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(n.content, color = tokens.txt, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("✏️", modifier = Modifier.clickable { onEditNote(n) })
+                                    Text("🗑️", modifier = Modifier.clickable { onDeleteNote(n.id) })
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (filter == "all" || filter == "stock") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("📦 Estoque", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (dayStockMovements.isEmpty() && dayLegacyStockEvents.isEmpty()) {
+                        Text("Nenhuma movimentação de estoque neste dia.", color = tokens.muted, fontSize = 12.sp)
+                    } else {
+                        dayStockMovements.forEach { sm ->
+                            val medName = state.medications.find { it.id == sm.medicationId }?.nome ?: "Medicamento"
+                            val sign = if (sm.quantityDelta >= 0) "+${sm.quantityDelta}" else "${sm.quantityDelta}"
+                            val label = if (sm.quantityDelta >= 0) "Reposição: $medName ($sign)" else "Ajuste: $medName ($sign)"
+                            val timeStr = if (sm.createdAt.length >= 16 && sm.createdAt[10] == 'T') " às ${sm.createdAt.substring(11, 16)}" else ""
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(tokens.bg2)
+                                    .padding(12.dp)
+                            ) {
+                                Text("📦 $label$timeStr", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                val detail = listOfNotNull(sm.purchaseLocation, sm.notes).filter { it.isNotBlank() }.joinToString(" · ")
+                                if (detail.isNotBlank()) {
+                                    Text(detail, color = tokens.sub, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        dayLegacyStockEvents.forEach { st ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(tokens.bg2)
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("📦 ${st.title}", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    if (!st.description.isNullOrBlank()) {
+                                        Text(st.description, color = tokens.sub, fontSize = 12.sp)
                                     }
                                 }
-                                if (confirmed) {
-                                    Text(
-                                        text = if (rec?.isRetroactive == true) "✓ Retroativa" else "✓ Tomada",
-                                        color = MediCareColors.Green,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                } else {
-                                    Text(
-                                        text = "🕐 Confirmar retroativamente",
-                                        color = MediCareColors.Amber,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.clickable { onRequestRetroactive(med, hora) }
-                                    )
-                                }
-                            }
-                            if (!obsText.isNullOrBlank()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("💬 $obsText", color = MediCareColors.Blue, fontSize = 12.sp)
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (obsText.isNullOrBlank()) "+ Adicionar observação" else "✏️ Editar observação",
-                                color = tokens.muted,
-                                fontSize = 11.sp,
-                                modifier = Modifier.clickable {
-                                    onRequestDoseObs(doseKey, "${med.nome} às $hora", obsText ?: "")
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (filter == "all" || filter == "events") {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("📅 Consultas e Eventos", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("+ Adicionar", color = MediCareColors.Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onAddEvent() })
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                if (dayEvents.isEmpty()) {
-                    Text("Nenhum evento registrado neste dia.", color = tokens.muted, fontSize = 12.sp)
-                } else {
-                    dayEvents.forEach { ev ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 6.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(tokens.bg2)
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(ev.title, color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = listOfNotNull(ev.type.uppercase(), ev.time, ev.doctor, ev.location).joinToString(" · "),
-                                    color = tokens.sub,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("✏️", modifier = Modifier.clickable { onEditEvent(ev) })
-                                Text("🗑️", modifier = Modifier.clickable { onDeleteEvent(ev.id) })
+                                Text("🗑️", modifier = Modifier.clickable { onDeleteEvent(st.id) })
                             }
                         }
                     }
                 }
             }
 
-            if (filter == "all" || filter == "notes") {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("📝 Anotações do dia", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("+ Nova nota", color = MediCareColors.Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onAddNote() })
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                if (dayNotes.isEmpty()) {
-                    Text("Nenhuma anotação neste dia.", color = tokens.muted, fontSize = 12.sp)
-                } else {
-                    dayNotes.forEach { n ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 6.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(tokens.bg2)
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(n.content, color = tokens.txt, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("✏️", modifier = Modifier.clickable { onEditNote(n) })
-                                Text("🗑️", modifier = Modifier.clickable { onDeleteNote(n.id) })
-                            }
-                        }
-                    }
-                }
-            }
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(tokens.bdr)
+            )
 
-            if (filter == "all" || filter == "stock") {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("📦 Estoque", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                if (dayStockMovements.isEmpty() && dayLegacyStockEvents.isEmpty()) {
-                    Text("Nenhuma movimentação de estoque neste dia.", color = tokens.muted, fontSize = 12.sp)
-                } else {
-                    dayStockMovements.forEach { sm ->
-                        val medName = state.medications.find { it.id == sm.medicationId }?.nome ?: "Medicamento"
-                        val sign = if (sm.quantityDelta >= 0) "+${sm.quantityDelta}" else "${sm.quantityDelta}"
-                        val label = if (sm.quantityDelta >= 0) "Reposição: $medName ($sign)" else "Ajuste: $medName ($sign)"
-                        val timeStr = if (sm.createdAt.length >= 16 && sm.createdAt[10] == 'T') " às ${sm.createdAt.substring(11, 16)}" else ""
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 6.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(tokens.bg2)
-                                .padding(12.dp)
-                        ) {
-                            Text("📦 $label$timeStr", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            val detail = listOfNotNull(sm.purchaseLocation, sm.notes).filter { it.isNotBlank() }.joinToString(" · ")
-                            if (detail.isNotBlank()) {
-                                Text(detail, color = tokens.sub, fontSize = 12.sp)
-                            }
-                        }
-                    }
-                    dayLegacyStockEvents.forEach { st ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 6.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(tokens.bg2)
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("📦 ${st.title}", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                if (!st.description.isNullOrBlank()) {
-                                    Text(st.description, color = tokens.sub, fontSize = 12.sp)
-                                                                }
-                            }
-                            Text("🗑️", modifier = Modifier.clickable { onDeleteEvent(st.id) })
-                        }
-                    }
-                }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(tokens.bg2)
+                    .border(1.dp, tokens.bdr, RoundedCornerShape(14.dp))
+                    .clickable { onDismiss() }
+                    .padding(vertical = 13.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Fechar",
+                    color = tokens.txt,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
