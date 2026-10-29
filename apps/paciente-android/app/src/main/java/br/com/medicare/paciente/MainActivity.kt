@@ -3,8 +3,10 @@ package br.com.medicare.paciente
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import br.com.medicare.paciente.notifications.DoseAlarmScheduler
 import br.com.medicare.paciente.ui.components.MediCareBottomNav
@@ -28,13 +31,27 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MediCareViewModel by viewModels()
+    private var sysNotifGrantedState = mutableStateOf(true)
+    private var notifPromptDismissedState = mutableStateOf(false)
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { _ -> }
+    ) { granted ->
+        sysNotifGrantedState.value = granted && NotificationManagerCompat.from(this).areNotificationsEnabled()
+        if (granted) {
+            notifPromptDismissedState.value = true
+            viewModel.uiState.value.user?.let { u ->
+                if (!u.notificationsEnabled) {
+                    viewModel.updateProfile(u.copy(notificationsEnabled = true))
+                }
+            }
+            viewModel.showToast("✓ Notificações ativadas com sucesso!")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        refreshSystemNotificationState()
         requestNotificationPermissionIfNeeded()
         handleDeepLinkIntent(intent)
 
@@ -46,6 +63,8 @@ class MainActivity : ComponentActivity() {
             val oracleUrl by viewModel.sessionManager.oracleBackendUrl.collectAsState()
             val oracleKey by viewModel.sessionManager.oracleApiKey.collectAsState()
             val lastSyncStatus by viewModel.sessionManager.lastSyncStatus.collectAsState()
+            val sysNotifGranted by sysNotifGrantedState
+            val notifPromptDismissed by notifPromptDismissedState
 
             var currentTab by remember { mutableStateOf(PatientTab.HOME) }
             val tabHistory = remember { mutableStateListOf<PatientTab>() }
@@ -109,6 +128,7 @@ class MainActivity : ComponentActivity() {
                     )
                 } else {
                     val criticalStockCount = state.medications.count { it.ativo && it.quantidade <= 5 }
+                    val userNotifActive = state.user!!.notificationsEnabled && sysNotifGranted
 
                     Scaffold(
                         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -206,6 +226,50 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    if (!userNotifActive && !notifPromptDismissed) {
+                        AlertDialog(
+                            onDismissRequest = { notifPromptDismissedState.value = true },
+                            title = { Text("🔔 Ativar Notificações") },
+                            text = {
+                                Text(
+                                    if (sysNotifGranted)
+                                        "As notificações de lembretes estão desativadas. Ative agora para receber alertas nos horários exatos dos seus medicamentos e não esquecer nenhuma dose."
+                                    else
+                                        "Permita as notificações do MediCare no seu celular para receber alertas sonoros nos horários dos seus medicamentos e avisos de estoque."
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        notifPromptDismissedState.value = true
+                                        viewModel.updateProfile(state.user!!.copy(notificationsEnabled = true))
+                                        if (!sysNotifGranted) {
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                                ContextCompat.checkSelfPermission(
+                                                    this@MainActivity,
+                                                    Manifest.permission.POST_NOTIFICATIONS
+                                                ) != PackageManager.PERMISSION_GRANTED
+                                            ) {
+                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                            } else {
+                                                openSystemNotificationSettings()
+                                            }
+                                        } else {
+                                            viewModel.showToast("✓ Notificações ativadas com sucesso!")
+                                        }
+                                    }
+                                ) {
+                                    Text("🔔 Permitir notificações")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { notifPromptDismissedState.value = true }) {
+                                    Text("Agora não")
+                                }
+                            }
+                        )
+                    }
+
                     state.selectedDoseForModal?.let { selectedDose ->
                         QuickConfirmDialog(
                             dose = selectedDose,
@@ -218,6 +282,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshSystemNotificationState()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -241,6 +310,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshSystemNotificationState() {
+        val runtimeOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        sysNotifGrantedState.value = runtimeOk && NotificationManagerCompat.from(this).areNotificationsEnabled()
+    }
+
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val hasPerm = ContextCompat.checkSelfPermission(
@@ -251,5 +332,20 @@ class MainActivity : ComponentActivity() {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
+
+    private fun openSystemNotificationSettings() {
+        try {
+            val intent = Intent().apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                } else {
+                    action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                    data = Uri.fromParts("package", packageName, null)
+                }
+            }
+            startActivity(intent)
+        } catch (_: Exception) {}
     }
 }

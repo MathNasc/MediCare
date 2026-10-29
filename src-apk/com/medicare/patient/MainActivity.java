@@ -1,12 +1,17 @@
 package com.medicare.patient;
 
 import android.app.Activity;
+import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.TimePickerDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -23,6 +28,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -67,6 +73,10 @@ public class MainActivity extends Activity {
     private static final String EMBEDDED_BACKEND_URL = "http://144.22.160.191:3009";
     private static final int REQ_PICK_PROFILE_PHOTO = 1001;
     private static final int REQ_CAPTURE_PROFILE_PHOTO = 1002;
+    private static final int REQ_POST_NOTIFICATIONS = 1003;
+    private boolean notificationPromptDismissed = false;
+    private boolean notificationRuntimeRequested = false;
+    private AlertDialog activeNotificationPromptDialog = null;
     private JSONArray allergies;
     private JSONObject calNotes;
     private JSONArray calNotesList = new JSONArray();
@@ -135,11 +145,265 @@ public class MainActivity extends Activity {
         this.calYear = cal.get(Calendar.YEAR);
         this.calMonth = cal.get(Calendar.MONTH);
         loadOrInitData();
+        ensureNotificationChannel();
+        scheduleAllMedicationAlarms();
         FrameLayout frameLayout = new FrameLayout(this);
         this.rootContainer = frameLayout;
         setContentView(frameLayout);
         render();
         syncWithBackendSilently(false);
+    }
+
+    private void ensureNotificationChannel() {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationManager nm = (NotificationManager) getSystemService("notification");
+                if (nm != null) {
+                    NotificationChannel ch = new NotificationChannel("medicare_doses", "Lembretes de Medicamentos", 4);
+                    ch.setDescription("Alertas e alarmes nos horários programados das doses");
+                    ch.enableVibration(true);
+                    nm.createNotificationChannel(ch);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private boolean areSystemNotificationsAllowed() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                    return false;
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 24) {
+                NotificationManager nm = (NotificationManager) getSystemService("notification");
+                if (nm != null && !nm.areNotificationsEnabled()) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private boolean areNotificationsFullyActive() {
+        boolean prefOn = this.profile == null || this.profile.optBoolean("notifications_enabled", true);
+        return prefOn && areSystemNotificationsAllowed();
+    }
+
+    private void openSystemNotificationSettings() {
+        try {
+            Intent intent = new Intent();
+            if (Build.VERSION.SDK_INT >= 26) {
+                intent.setAction(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            } else {
+                intent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                intent.setData(Uri.fromParts("package", getPackageName(), null));
+            }
+            startActivity(intent);
+        } catch (Exception e) {
+            try {
+                Intent fallback = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                fallback.setData(Uri.fromParts("package", getPackageName(), null));
+                startActivity(fallback);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void scheduleAllMedicationAlarms() {
+        try {
+            AlarmManager am = (AlarmManager) getSystemService("alarm");
+            if (am == null || this.meds == null) return;
+            boolean enabled = areNotificationsFullyActive();
+            int flags = 134217728; // FLAG_UPDATE_CURRENT
+            if (Build.VERSION.SDK_INT >= 23) {
+                flags |= 67108864; // FLAG_IMMUTABLE
+            }
+            for (int i = 0; i < this.meds.length(); i++) {
+                JSONObject med = this.meds.optJSONObject(i);
+                if (med == null) continue;
+                String medId = med.optString("id", "med_" + i);
+                String medName = med.optString("nome", "Medicamento");
+                boolean medActive = med.optBoolean("ativo", true) && !"sos".equalsIgnoreCase(med.optString("treatment_type", "continuous"));
+                JSONArray horarios = med.optJSONArray("horarios");
+                if (horarios == null) continue;
+                for (int j = 0; j < horarios.length(); j++) {
+                    String hStr = horarios.optString(j, "").trim();
+                    if (!hStr.contains(":")) continue;
+                    int reqCode = Math.abs((medId + "_" + hStr).hashCode() % 900000) + 10000;
+                    Intent alarmIntent = new Intent(this, DoseAlarmReceiver.class);
+                    alarmIntent.putExtra("med_name", medName);
+                    alarmIntent.putExtra("med_time", hStr);
+                    PendingIntent pi = PendingIntent.getBroadcast(this, reqCode, alarmIntent, flags);
+                    if (!enabled || !medActive) {
+                        am.cancel(pi);
+                        continue;
+                    }
+                    String[] parts = hStr.split(":");
+                    int hour = Integer.parseInt(parts[0].trim());
+                    int minute = Integer.parseInt(parts[1].trim());
+                    Calendar target = Calendar.getInstance();
+                    target.set(Calendar.HOUR_OF_DAY, hour);
+                    target.set(Calendar.MINUTE, minute);
+                    target.set(Calendar.SECOND, 0);
+                    target.set(Calendar.MILLISECOND, 0);
+                    if (target.getTimeInMillis() <= System.currentTimeMillis()) {
+                        target.add(Calendar.DAY_OF_YEAR, 1);
+                    }
+                    long triggerAt = target.getTimeInMillis();
+                    if (Build.VERSION.SDK_INT >= 23) {
+                        try {
+                            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                        } catch (SecurityException se) {
+                            am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                        }
+                    } else {
+                        am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void checkAndPromptNotificationsOnStartup() {
+        try {
+            if (!this.isLoggedIn) return;
+            if (!this.prefs.getBoolean("onboarding_completed", false)) return;
+            if (areNotificationsFullyActive()) return;
+            if (this.notificationPromptDismissed) return;
+
+            if (Build.VERSION.SDK_INT >= 33 && !this.notificationRuntimeRequested) {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                    this.notificationRuntimeRequested = true;
+                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIFICATIONS);
+                    return;
+                }
+            }
+            showNotificationStartupPromptDialog();
+        } catch (Exception ignored) {}
+    }
+
+    private void showNotificationStartupPromptDialog() {
+        if (this.activeNotificationPromptDialog != null && this.activeNotificationPromptDialog.isShowing()) {
+            return;
+        }
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        this.activeNotificationPromptDialog = dialog;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setGravity(17);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        root.setPadding(dp(24), dp(24), dp(24), dp(20));
+
+        TextView tvIcon = new TextView(this);
+        tvIcon.setText("🔔");
+        tvIcon.setTextSize(sp(28.0f));
+        tvIcon.setGravity(17);
+        tvIcon.setBackground(shape(Color.argb(35, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 28, Color.argb(80, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 1));
+        LinearLayout.LayoutParams icLp = new LinearLayout.LayoutParams(dp(56), dp(56));
+        icLp.bottomMargin = dp(14);
+        tvIcon.setLayoutParams(icLp);
+        root.addView(tvIcon);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Ativar Notificações");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(19.0f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setGravity(17);
+        root.addView(tvTitle);
+
+        boolean sysAllowed = areSystemNotificationsAllowed();
+        TextView tvDesc = new TextView(this);
+        tvDesc.setText(sysAllowed
+            ? "As notificações de lembretes estão desativadas. Ative agora para receber alertas nos horários exatos dos seus medicamentos e não esquecer nenhuma dose."
+            : "Permita as notificações do MediCare no seu celular para receber alertas sonoros nos horários dos seus medicamentos e avisos de estoque.");
+        tvDesc.setTextColor(this.cTextMuted);
+        tvDesc.setTextSize(sp(14.0f));
+        tvDesc.setGravity(17);
+        tvDesc.setLineSpacing(dp(2), 1.05f);
+        tvDesc.setPadding(0, dp(10), 0, dp(20));
+        root.addView(tvDesc);
+
+        TextView btnAllow = new TextView(this);
+        btnAllow.setText("🔔 Permitir notificações");
+        btnAllow.setTextColor(Color.WHITE);
+        btnAllow.setTextSize(sp(15.0f));
+        btnAllow.setTypeface(null, 1);
+        btnAllow.setGravity(17);
+        btnAllow.setBackground(gradientShape(this.cPrimary, this.cPrimaryHover, 14));
+        btnAllow.setPadding(dp(16), dp(14), dp(16), dp(14));
+        LinearLayout.LayoutParams alLp = new LinearLayout.LayoutParams(-1, -2);
+        alLp.bottomMargin = dp(10);
+        btnAllow.setLayoutParams(alLp);
+        btnAllow.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                try {
+                    MainActivity.this.profile.put("notifications_enabled", true);
+                    MainActivity.this.notificationPromptDismissed = true;
+                    ensureNotificationChannel();
+                    if (!areSystemNotificationsAllowed()) {
+                        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIFICATIONS);
+                        } else {
+                            openSystemNotificationSettings();
+                        }
+                    } else {
+                        Toast.makeText(MainActivity.this, "✓ Notificações ativadas com sucesso!", 0).show();
+                    }
+                    saveAll();
+                    render();
+                } catch (Exception ignored) {}
+            }
+        });
+        root.addView(btnAllow);
+
+        TextView btnLater = new TextView(this);
+        btnLater.setText("Agora não");
+        btnLater.setTextColor(this.cTextMuted);
+        btnLater.setTextSize(sp(14.0f));
+        btnLater.setTypeface(null, 1);
+        btnLater.setGravity(17);
+        btnLater.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+        btnLater.setPadding(dp(16), dp(12), dp(16), dp(12));
+        btnLater.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+        btnLater.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.notificationPromptDismissed = true;
+                dialog.dismiss();
+            }
+        });
+        root.addView(btnLater);
+
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    @Override // android.app.Activity
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_POST_NOTIFICATIONS) {
+            boolean granted = grantResults != null && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (granted) {
+                try {
+                    this.profile.put("notifications_enabled", true);
+                    this.notificationPromptDismissed = true;
+                    ensureNotificationChannel();
+                    scheduleAllMedicationAlarms();
+                    saveAll();
+                    render();
+                    Toast.makeText(this, "✓ Notificações ativadas com sucesso!", 0).show();
+                } catch (Exception ignored) {}
+            } else if (!this.notificationPromptDismissed) {
+                showNotificationStartupPromptDialog();
+            }
+        }
     }
 
     @Override // android.app.Activity
@@ -1162,6 +1426,7 @@ public class MainActivity extends Activity {
             .putString("caregivers", this.caregivers.toString())
             .putString("ai_messages", this.aiMessages.toString())
             .apply();
+        scheduleAllMedicationAlarms();
         syncWithBackendSilently(false);
     }
 
@@ -1206,6 +1471,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(navBorder);
         linearLayout.addView(buildBottomNav());
         this.rootContainer.addView(linearLayout);
+        checkAndPromptNotificationsOnStartup();
     }
 
     private View buildHeader() {
@@ -7123,18 +7389,71 @@ public class MainActivity extends Activity {
         card.addView(btnVerifyDb);
 
         TextView btnExport = createButton("📤 Exportar meus dados (JSON)", this.cBgMain, this.cTextMain);
+        LinearLayout.LayoutParams expLp = new LinearLayout.LayoutParams(-1, -2);
+        expLp.bottomMargin = dp(10);
+        btnExport.setLayoutParams(expLp);
         btnExport.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 try {
+                    JSONObject fullBackup = new JSONObject();
+                    fullBackup.put("exported_at", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(new Date()));
+                    fullBackup.put("profile", MainActivity.this.profile);
+                    fullBackup.put("medicamentos", MainActivity.this.meds);
+                    fullBackup.put("historico_doses", MainActivity.this.doseLogs);
+                    fullBackup.put("health_events", MainActivity.this.events);
+                    fullBackup.put("calendar_notes", MainActivity.this.calNotesList);
+                    fullBackup.put("stock_movements", MainActivity.this.stockMovements);
+                    fullBackup.put("allergies", MainActivity.this.allergies);
+                    fullBackup.put("health_conditions", MainActivity.this.conditions);
+                    fullBackup.put("emergency_contacts", MainActivity.this.contacts);
+                    fullBackup.put("healthcare_professionals", MainActivity.this.professionals);
+                    fullBackup.put("caregivers", MainActivity.this.caregivers);
                     Intent sendIntent = new Intent(Intent.ACTION_SEND);
-                    sendIntent.putExtra(Intent.EXTRA_TEXT, MainActivity.this.profile.toString(2));
-                    sendIntent.setType("text/plain");
-                    startActivity(Intent.createChooser(sendIntent, "Exportar Dados"));
+                    sendIntent.putExtra(Intent.EXTRA_TEXT, fullBackup.toString(2));
+                    sendIntent.setType("application/json");
+                    startActivity(Intent.createChooser(sendIntent, "Exportar Dados MediCare"));
                 } catch (Exception ignored) {}
             }
         });
         card.addView(btnExport);
+
+        TextView btnDeleteAcc = createButton("🗑️ Excluir minha conta e dados", Color.parseColor("#1AEF4444"), this.cDanger);
+        btnDeleteAcc.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showStyledConfirmDialog(
+                    "Excluir Conta e Dados",
+                    "Tem certeza que deseja apagar todos os dados desta conta neste dispositivo? Esta ação não pode ser desfeita.",
+                    "Sim, excluir tudo",
+                    "Cancelar",
+                    MainActivity.this.cDanger,
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            MainActivity.this.isLoggedIn = false;
+                            MainActivity.this.profile = new JSONObject();
+                            MainActivity.this.meds = new JSONArray();
+                            MainActivity.this.doseLogs = new JSONArray();
+                            MainActivity.this.events = new JSONArray();
+                            MainActivity.this.calNotes = new JSONObject();
+                            MainActivity.this.calNotesList = new JSONArray();
+                            MainActivity.this.stockMovements = new JSONArray();
+                            MainActivity.this.allergies = new JSONArray();
+                            MainActivity.this.conditions = new JSONArray();
+                            MainActivity.this.contacts = new JSONArray();
+                            MainActivity.this.professionals = new JSONArray();
+                            MainActivity.this.caregivers = new JSONArray();
+                            MainActivity.this.aiMessages = new JSONArray();
+                            MainActivity.this.prefs.edit().clear().apply();
+                            render();
+                            Toast.makeText(MainActivity.this, "Conta e dados locais removidos.", 0).show();
+                        }
+                    }
+                );
+            }
+        });
+        card.addView(btnDeleteAcc);
         linearLayout.addView(card);
     }
 
@@ -7329,7 +7648,7 @@ public class MainActivity extends Activity {
         card.addView(div3);
 
         // Row 4: Notificações
-        final boolean notifEnabled = this.profile.optBoolean("notifications_enabled", true);
+        final boolean notifEnabled = areNotificationsFullyActive();
         LinearLayout rNotif = new LinearLayout(this);
         rNotif.setOrientation(0);
         rNotif.setGravity(16);
@@ -7353,7 +7672,7 @@ public class MainActivity extends Activity {
         notifCol.addView(tvNotifTitle);
 
         TextView tvNotifSub = new TextView(this);
-        tvNotifSub.setText(notifEnabled ? "Ativas" : "Desativadas");
+        tvNotifSub.setText(notifEnabled ? "Ativas" : (!areSystemNotificationsAllowed() ? "Permissão pendente no sistema" : "Desativadas"));
         tvNotifSub.setTextColor(this.cTextMuted);
         tvNotifSub.setTextSize(sp(13.0f));
         tvNotifSub.setPadding(0, dp(2), 0, 0);
@@ -7373,10 +7692,26 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 try {
-                    MainActivity.this.profile.put("notifications_enabled", !notifEnabled);
-                    saveAll();
-                    render();
-                    Toast.makeText(MainActivity.this, !notifEnabled ? "Notificações ativadas!" : "Notificações desativadas.", 0).show();
+                    if (notifEnabled) {
+                        MainActivity.this.profile.put("notifications_enabled", false);
+                        saveAll();
+                        render();
+                        Toast.makeText(MainActivity.this, "Notificações desativadas.", 0).show();
+                    } else {
+                        MainActivity.this.profile.put("notifications_enabled", true);
+                        ensureNotificationChannel();
+                        if (!areSystemNotificationsAllowed()) {
+                            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                                requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIFICATIONS);
+                            } else {
+                                openSystemNotificationSettings();
+                            }
+                        } else {
+                            Toast.makeText(MainActivity.this, "✓ Notificações ativadas!", 0).show();
+                        }
+                        saveAll();
+                        render();
+                    }
                 } catch (Exception ignored) {}
             }
         });
