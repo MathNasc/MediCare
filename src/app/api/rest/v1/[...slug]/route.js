@@ -409,6 +409,58 @@ async function handleRpcCall(client, fnName, args, userId) {
       return res.rowCount > 0;
     }
 
+    case 'create_managed_patient': {
+      if (!userId) return { success: false, error: 'Autenticação necessária.' };
+      const nome = (args.p_nome || '').trim();
+      if (!nome) return { success: false, error: 'O nome do paciente é obrigatório.' };
+      const relLabel = args.p_relationship_label || 'Dependente';
+      const patientId = crypto.randomUUID();
+      const fakeEmail = `paciente-${patientId.slice(0, 8)}@medicare.local`;
+
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO app_users (id, email, password_hash, raw_user_meta_data)
+         VALUES ($1, $2, 'managed_account_no_password', $3::jsonb)`,
+        [patientId, fakeEmail, JSON.stringify({ nome, role: 'paciente', managed_by: userId })]
+      );
+
+      await client.query(
+        `INSERT INTO profiles (id, nome, email, role, blood_type, dob, sex, phone)
+         VALUES ($1, $2, $3, 'paciente', $4, $5, $6, $7)`,
+        [
+          patientId,
+          nome,
+          fakeEmail,
+          args.p_blood_type || 'O+',
+          args.p_dob || null,
+          args.p_sex || null,
+          args.p_phone || null,
+        ]
+      );
+
+      const relId = crypto.randomUUID();
+      await client.query(
+        `INSERT INTO caregiver_relationships (id, patient_id, caregiver_id, permission_level, status, relationship_label, accepted_at)
+         VALUES ($1, $2, $3, 'admin', 'active', $4, NOW())`,
+        [relId, patientId, userId, relLabel]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (id, patient_id, performed_by, action, old_value, new_value, reason)
+         VALUES ($1, $2, $3, 'managed_patient_created', NULL, $4::jsonb, $5)`,
+        [
+          crypto.randomUUID(),
+          patientId,
+          userId,
+          JSON.stringify({ nome, relationship_label: relLabel }),
+          'Cadastro de paciente dependente realizado pelo cuidador',
+        ]
+      );
+      await client.query('COMMIT');
+
+      return { success: true, patient_id: patientId, relationship_id: relId };
+    }
+
     case 'get_patient_summary': {
       const patientId = args.p_patient_id;
       const [profRes, medsRes, lastDoseRes] = await Promise.all([

@@ -90,10 +90,10 @@ npm test
 ## 📌 Plano de Desenvolvimento (Roadmap)
 
 - **Etapa 0 (Concluída):** Preparação do monorepo, auditoria, reorganização e documentação técnica.
-- **Etapa 1 (Próxima):** Auditoria técnica aprofundada e especificação do contrato da API (`docs/API_CONTRACT.md`, `docs/DATA_MODEL.md`).
-- **Etapa 2:** Fundação do MediCare Cuidador Web (React, Vite, PWA, Tailwind, shadcn/ui).
-- **Etapa 3:** Implementação das funcionalidades do MVP (Central de Administração, Pacientes, Tratamentos, Agenda, Indicadores).
-- **Etapa 4:** Testes de segurança, validação de integridade e implantação no servidor Oracle Cloud.
+- **Etapa 1 (Concluída):** Auditoria técnica aprofundada e especificação dos contratos (`docs/API_CONTRACT.md`, `docs/DATA_MODEL.md`).
+- **Etapa 2 (Concluída):** Fundação técnica do MediCare Cuidador Web (React, TypeScript, PWA, layout adaptativo).
+- **Etapa 3 (Concluída):** Implementação completa das funcionalidades do MVP (Pacientes, Prescrições, Central de Doses, Agenda, Indicadores, Auditoria).
+- **Etapa 4 (Concluída):** Testes de segurança, validação de integridade, documentação de deploy e rollback (`docs/DEPLOYMENT_AND_TESTS.md`).
 
 ---
 

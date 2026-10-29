@@ -19,13 +19,7 @@ const nextConfig = {
     remotePatterns: [],
   },
   async redirects() {
-    return [
-      {
-        source: '/',
-        destination: '/home',
-        permanent: false,
-      },
-    ];
+    return [];
   },
   async rewrites() {
     return [

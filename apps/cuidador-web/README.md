@@ -1,10 +1,68 @@
-# MediCare Cuidador Web (Futura Aplicação)
+# MediCare Cuidador Web — Fundação Técnica (Etapa 2)
 
-Este diretório é o destino da futura aplicação **MediCare Cuidador**, conforme o plano de desenvolvimento em etapas:
-- **Etapa 0:** Preparação do monorepo (diretório reservado, sem desenvolvimento de código da aplicação).
-- **Etapa 1:** Auditoria técnica e definição do contrato da API (backend e banco).
-- **Etapa 2:** Fundação técnica da aplicação Cuidador Web (React, Vite, TypeScript, PWA, Tailwind, shadcn/ui).
-- **Etapa 3:** Implementação das funcionalidades do MVP (Pacientes, Cuidadores, Medicamentos, Central de Administração, Agenda, Relatórios).
-- **Etapa 4:** Testes, segurança e implantação no servidor Oracle Cloud.
+O **MediCare Cuidador** é a aplicação web progressiva (PWA) e responsiva dedicada a familiares e cuidadores para supervisão do tratamento de saúde e controle de administrações medicamentosas.
 
-> ⚠️ **Aviso:** Conforme as diretrizes permanentes em `AGENTS.md`, o desenvolvimento desta aplicação ocorrerá estritamente a partir da autorização explícita para a Etapa 2.
+---
+
+## 🛠️ Stack Tecnológica Escolhida
+
+- **Framework:** React 18 com TypeScript
+- **Bundler & Build Tool:** Vite
+- **Estilização:** Tailwind CSS (tema escuro de alto contraste)
+- **Ícones:** Lucide React
+- **Navegação:** Padrão adaptativo (Barra inferior em mobile, Sidebar expansível em desktop)
+- **API & Estado Assíncrono:** Cliente HTTP centralizado com gestão de tokens e sessões compatível com o backend PostgreSQL na Oracle Cloud
+
+---
+
+## 📂 Estrutura de Código
+
+```text
+apps/cuidador-web/
+├── public/
+│   ├── favicon.ico
+│   ├── icon-192.png
+│   ├── icon-512.png
+│   └── manifest.json
+├── src/
+│   ├── app/
+│   │   ├── App.tsx          # Componente principal e orquestrador de telas
+│   ├── components/
+│   │   └── Navigation.tsx   # Navegação responsiva (Mobile Bottom Bar + Desktop Sidebar)
+│   ├── features/
+│   │   ├── auth/            # Contexto de autenticação, sessão e tela de login
+│   │   ├── dashboard/       # Central de atividades do dia e linha do tempo de doses
+│   │   ├── patients/        # Lista, busca e perfil de pacientes acompanhados
+│   │   ├── agenda/          # Consultas, exames e compromissos clínicos
+│   │   └── reports/         # Indicadores oficiais de adesão e auditoria
+│   ├── lib/
+│   │   └── apiClient.ts     # Cliente de API com token Bearer e tratamento de 401
+│   ├── types/
+│   │   └── index.ts         # Tipagens TypeScript do domínio
+│   ├── styles/
+│   │   └── index.css        # Estilos base
+│   └── main.tsx             # Ponto de entrada React
+├── tests/
+├── .env.example
+├── index.html
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
+```
+
+---
+
+## 🚀 Como Executar
+
+Dentro do diretório `apps/cuidador-web`:
+
+```bash
+# Instalar dependências
+npm install
+
+# Iniciar servidor de desenvolvimento (porta 3001)
+npm run dev
+
+# Compilar para produção
+npm run build
+```

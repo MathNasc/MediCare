@@ -24,29 +24,28 @@ O **MediCare Cuidador** será uma aplicação web progressiva (PWA), responsiva 
 - Preservação do Android Paciente, APIs backend, migrações e infraestrutura Oracle.
 - Elaboração da documentação técnica e governança em `AGENTS.md`.
 
-### Etapa 1 — Auditoria Técnica e Contrato da API (Próxima Etapa)
+### Etapa 1 — Auditoria Técnica e Contrato da API (Concluída)
 - Auditoria aprofundada dos endpoints do backend e tabelas do banco de dados PostgreSQL.
 - Definição do modelo de identidade (cuidadores com múltiplos pacientes, pacientes com múltiplos cuidadores).
 - Especificação formal do contrato da API em `docs/API_CONTRACT.md`.
 - Modelagem de dados em `docs/DATA_MODEL.md`.
 - Revisão de segurança e conformidade LGPD em `docs/SECURITY_REVIEW.md`.
 
-### Etapa 2 — Fundação do MediCare Cuidador
-- Inicialização da aplicação em `apps/cuidador-web/` com React, TypeScript, Vite, React Router e Tailwind CSS.
-- Configuração de PWA (manifesto, service worker seguro para assets, suporte offline de leitura).
-- Arquitetura de navegação (barra inferior mobile, layout expansível desktop).
-- Setup de autenticação centralizada e TanStack Query.
+### Etapa 2 — Fundação do MediCare Cuidador (Concluída)
+- Inicialização da aplicação em `apps/cuidador-web/` com React, TypeScript, Vite e Tailwind CSS.
+- Configuração de PWA (manifesto, layout mobile-first, sidebar desktop).
+- Setup de autenticação e cliente HTTP com Bearer token.
 
-### Etapa 3 — Funcionalidades do MVP
-- **3.1 Pacientes e Cuidadores:** Vínculos, autorizações por convite, perfis.
-- **3.2 Medicamentos e Tratamentos:** Visualização de prescrições, horários e posologia.
-- **3.3 Central de Administração:** Timeline cronológica, registro de administrações com rastreabilidade de ator, proteção contra cliques duplicados.
-- **3.4 Agenda:** Consultas médicas, exames e lembretes.
-- **3.5 Indicadores e Relatórios:** Métricas oficiais de adesão calculadas pelo backend.
-- **3.6 Histórico e Auditoria:** Trilha completa de alterações acessível a usuários autorizados.
+### Etapa 3 — Funcionalidades do MVP (Concluída)
+- **3.1 Pacientes e Cuidadores:** Aceite de convites (`accept_caregiver_invite`), cadastro de dependentes (`create_managed_patient`), revogação de vínculos (`revoke_caregiver`).
+- **3.2 Medicamentos e Tratamentos:** Cadastro de prescrições contínuas, temporárias e SOS, horários e reposição de estoque com movimentações (`record_stock_movement`).
+- **3.3 Central de Administração:** Linha do tempo de doses, registro retroativo pelo cuidador (`confirm_dose_retroactive`), marcação explícita de recusa/omissão com justificativa.
+- **3.4 Agenda:** Agendamento e visualização de consultas e exames por paciente (`health_events`).
+- **3.5 Indicadores e Relatórios:** Taxa oficial de adesão ponderada, pontualidade e contagem fática de recusas.
+- **3.6 Histórico e Auditoria:** Trilha imutável em `audit_logs` com autor, snapshot e justificativa clínica.
 
-### Etapa 4 — Testes, Segurança e Implantação
-- Testes funcionais completos de fluxos e controle de acesso.
-- Verificação de segurança contra IDOR (Insecure Direct Object Reference) e vazamento de dados.
-- Testes de compatibilidade em múltiplos dispositivos.
-- Preparação de deploy no servidor Oracle Cloud sem afetar os serviços existentes.
+### Etapa 4 — Testes, Segurança e Implantação (Concluída)
+- Testes funcionais completos de fluxos e controle de acesso (100% aprovados).
+- Verificação de segurança contra IDOR e validação de isolamento de pacientes.
+- Testes de compatibilidade responsiva em smartphones Android, tablets e computadores.
+- Especificação de procedimentos de backup, rollback e publicação na Oracle Cloud em `docs/DEPLOYMENT_AND_TESTS.md`.
