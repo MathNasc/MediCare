@@ -25,6 +25,7 @@ import android.os.Bundle;
 import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.Base64;
 import android.util.TypedValue;
@@ -2949,37 +2950,51 @@ public class MainActivity extends Activity {
 
             LinearLayout titleCol = new LinearLayout(this);
             titleCol.setOrientation(1);
-            titleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            LinearLayout.LayoutParams tcLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            tcLp.rightMargin = dp(8);
+            titleCol.setLayoutParams(tcLp);
 
-            LinearLayout nameBadgeRow = new LinearLayout(this);
-            nameBadgeRow.setOrientation(0);
-            nameBadgeRow.setGravity(16);
             TextView mName = new TextView(this);
             mName.setText(med.optString("nome"));
             mName.setTextColor(this.cTextMain);
             mName.setTextSize(sp(16.0f));
             mName.setTypeface(null, 1);
-            mName.setPadding(0, 0, dp(6), 0);
-            nameBadgeRow.addView(mName);
+            mName.setMaxLines(2);
+            mName.setEllipsize(TextUtils.TruncateAt.END);
+            titleCol.addView(mName);
+
+            LinearLayout subBadgeRow = new LinearLayout(this);
+            subBadgeRow.setOrientation(0);
+            subBadgeRow.setGravity(16);
+            LinearLayout.LayoutParams sbrLp = new LinearLayout.LayoutParams(-1, -2);
+            sbrLp.topMargin = dp(5);
+            subBadgeRow.setLayoutParams(sbrLp);
 
             TextView tBadge = new TextView(this);
             tBadge.setText(isSOS ? "🆘 SOS" : (isTemp ? "📅 Temporário" : "🔄 Contínuo"));
             int tbColor = isSOS ? this.cInfo : (isTemp ? this.cWarning : this.cSuccess);
             tBadge.setTextColor(tbColor);
-            tBadge.setTextSize(sp(10.0f));
+            tBadge.setTextSize(sp(10.5f));
             tBadge.setTypeface(null, 1);
+            tBadge.setSingleLine(true);
             tBadge.setBackground(shape(Color.argb(35, Color.red(tbColor), Color.green(tbColor), Color.blue(tbColor)), 10, 0, 0));
             tBadge.setPadding(dp(8), dp(2), dp(8), dp(2));
-            nameBadgeRow.addView(tBadge);
-            titleCol.addView(nameBadgeRow);
+            LinearLayout.LayoutParams tbLp = new LinearLayout.LayoutParams(-2, -2);
+            tbLp.rightMargin = dp(8);
+            tBadge.setLayoutParams(tbLp);
+            subBadgeRow.addView(tBadge);
 
             String unitStr = med.optString("unidade", med.optString("forma", "comprimido"));
             TextView doseSub = new TextView(this);
             doseSub.setText(med.optString("dosagem") + " · " + unitStr);
             doseSub.setTextColor(this.cTextMuted);
             doseSub.setTextSize(sp(13.0f));
-            doseSub.setPadding(0, dp(2), 0, 0);
-            titleCol.addView(doseSub);
+            doseSub.setSingleLine(true);
+            doseSub.setEllipsize(TextUtils.TruncateAt.END);
+            doseSub.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            subBadgeRow.addView(doseSub);
+
+            titleCol.addView(subBadgeRow);
             topRow.addView(titleCol);
 
             // Edit & Delete buttons
@@ -3045,10 +3060,11 @@ public class MainActivity extends Activity {
             int qty = getMedStock(med);
             int stColor = qty <= 5 ? this.cDanger : (qty <= 10 ? this.cWarning : this.cSuccess);
             TextView stockPill = new TextView(this);
-            stockPill.setText("📦 " + qty + " " + unitStr + "s");
+            stockPill.setText("📦 " + qty + " " + unitStr + (qty == 1 ? "" : "s"));
             stockPill.setTextColor(stColor);
             stockPill.setTextSize(sp(12.0f));
             stockPill.setTypeface(null, 1);
+            stockPill.setSingleLine(true);
             stockPill.setBackground(shape(Color.argb(35, Color.red(stColor), Color.green(stColor), Color.blue(stColor)), 12, 0, 0));
             stockPill.setPadding(dp(10), dp(4), dp(10), dp(4));
             botRow.addView(stockPill);
@@ -3068,6 +3084,7 @@ public class MainActivity extends Activity {
                 todayStat.setText("Hoje: " + doneH + "/" + totH);
                 todayStat.setTextColor(this.cTextLight);
                 todayStat.setTextSize(sp(12.0f));
+                todayStat.setSingleLine(true);
                 todayStat.setPadding(dp(10), 0, 0, 0);
                 todayStat.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
                 botRow.addView(todayStat);
@@ -3081,6 +3098,7 @@ public class MainActivity extends Activity {
                 sosBtn.setTextColor(-1);
                 sosBtn.setTextSize(sp(12.0f));
                 sosBtn.setTypeface(null, 1);
+                sosBtn.setSingleLine(true);
                 sosBtn.setBackground(shape(this.cPrimary, 10, 0, 0));
                 sosBtn.setPadding(dp(14), dp(8), dp(14), dp(8));
                 sosBtn.setOnClickListener(new View.OnClickListener() {
@@ -3815,7 +3833,10 @@ public class MainActivity extends Activity {
         tvName.setTextColor(this.cTextMain);
         tvName.setTextSize(sp(14.5f));
         tvName.setTypeface(null, 1);
+        tvName.setMaxLines(2);
+        tvName.setEllipsize(TextUtils.TruncateAt.END);
         tvName.setPadding(0, 0, dp(8), 0);
+        tvName.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
         line1.addView(tvName);
 
         TextView tvBadge = new TextView(this);
@@ -3823,6 +3844,7 @@ public class MainActivity extends Activity {
         tvBadge.setTextColor(badgeColor);
         tvBadge.setTextSize(sp(9.5f));
         tvBadge.setTypeface(null, 1);
+        tvBadge.setSingleLine(true);
         tvBadge.setBackground(shape(badgeBg, 99, 0, 0));
         tvBadge.setPadding(dp(7), dp(2), dp(7), dp(2));
         line1.addView(tvBadge);
@@ -3913,7 +3935,10 @@ public class MainActivity extends Activity {
         tvN.setTextColor(this.cTextMain);
         tvN.setTextSize(sp(15.0f));
         tvN.setTypeface(null, 1);
+        tvN.setMaxLines(2);
+        tvN.setEllipsize(TextUtils.TruncateAt.END);
         tvN.setPadding(0, 0, dp(8), 0);
+        tvN.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
         topRow.addView(tvN);
 
         TextView tvB = new TextView(this);
@@ -3921,6 +3946,7 @@ public class MainActivity extends Activity {
         tvB.setTextColor(badgeColor);
         tvB.setTextSize(sp(9.0f));
         tvB.setTypeface(null, 1);
+        tvB.setSingleLine(true);
         tvB.setBackground(shape(iconBg, 99, 0, 0));
         tvB.setPadding(dp(8), dp(2), dp(8), dp(2));
         topRow.addView(tvB);
