@@ -225,3 +225,79 @@ description: "Sempre que terminar testes ou investigações, limpe e delete arqu
 # Limpeza de Arquivos Temporários
 Sempre que gerar arquivos temporários para testes (como scripts `test.js`, rotas de API de diagnóstico isoladas, arquivos `output.json`, patches experimentais, etc) e a investigação ou teste for concluída com sucesso, você **DEVE** deletar esses arquivos. Mantenha o repositório limpo, focado apenas no código final do produto.
 
+---
+name: medicare-diretriz-permanente
+description: "Diretriz permanente de desenvolvimento do MediCare: MediCare Paciente Android é a única aplicação ativa em desenvolvimento; código web existente é legado somente para leitura e referência."
+---
+
+# MEDICARE — DIRETRIZ PERMANENTE DE DESENVOLVIMENTO
+
+As seguintes regras são **obrigatórias e permanentes** para todas as alterações neste projeto, inclusive quando não forem mencionadas explicitamente na solicitação do usuário.
+
+## 1. Aplicação principal: MediCare Paciente Android
+
+- O **MediCare Paciente Android** (`/apps/paciente-android` em Kotlin e Jetpack Compose, e empacotamento nativo Android em `/src-apk` / `MediCare-Paciente.apk`) é a **única aplicação ativa em desenvolvimento**.
+- Toda alteração, correção, melhoria, implementação de funcionalidade ou mudança de UI/UX deve ser realizada **exclusivamente no aplicativo Android**.
+- **Não** implemente novas funcionalidades no frontend web.
+- **Não** corrija telas web.
+- **Não** atualize componentes React (`.jsx` / `.tsx`).
+- **Não** mantenha duas versões da interface em paralelo.
+- Alterações no backend compartilhado (`/src/pages/api`, `/src/lib`, `/oracle-migration`), banco de dados ou infraestrutura são permitidas **somente quando necessárias ao funcionamento do Android**, preservando a segurança e a compatibilidade dos dados.
+
+## 2. Código web: legado somente para referência
+
+- Todo o código web existente no repositório, incluindo Next.js, React, componentes (`/src/components`), páginas (`/src/pages` exceto rotas de API estritamente compartilhadas quando necessário ao Android), estilos (`/src/styles`) e demais arquivos relacionados à antiga PWA, deve ser considerado **LEGADO**.
+- Esse código permanece no repositório exclusivamente para:
+  - Consultar funcionalidades da versão original.
+  - Recuperar regras de negócio.
+  - Reproduzir a antiga UI/UX no Android.
+  - Identificar comportamentos e fluxos.
+  - Verificar funcionalidades ainda não migradas.
+  - Comparar a implementação antiga com a nova.
+- O código web é uma **referência, não um alvo de desenvolvimento**.
+- Sempre que encontrar uma funcionalidade existente apenas na versão web, implemente sua equivalente nativa em **Kotlin e Jetpack Compose** (e no pacote nativo Android que gera o APK).
+- **Não** reutilize telas web por meio de `WebView`.
+- **Não** altere o código legado para corrigir problemas encontrados durante a migração.
+
+## 3. Futuro MediCare Cuidador
+
+- Futuramente, somente quando houver **autorização explícita do usuário**, todo o frontend web legado será removido e substituído pelo **MediCare Cuidador**, uma aplicação web responsiva criada do zero e com arquitetura própria.
+- Até essa autorização explícita:
+  - **Não** exclua o código web legado.
+  - **Não** inicie o desenvolvimento do MediCare Cuidador.
+  - **Não** refatore o frontend web.
+  - **Não** prepare telas web novas.
+  - **Não** misture funcionalidades do futuro cuidador com a interface Android.
+- A futura remoção do legado deverá preservar o backend, o banco de dados, os serviços compartilhados e todas as funcionalidades do Android.
+
+## 4. Regra para todas as tarefas futuras
+
+Antes de modificar qualquer arquivo, identifique a qual camada ele pertence:
+
+1. **Ao Android (`/apps/paciente-android`, `/src-apk`, `/scripts/rebuild_and_sign_apk.sh`)**: pode ser alterado conforme a tarefa.
+2. **Ao frontend web legado (`/src/components`, `/src/pages` de interface, `/src/styles`, etc.)**: **somente leitura e consulta; nunca modificar**.
+3. **Ao backend ou infraestrutura compartilhada (`/src/pages/api`, `/src/lib`, `/oracle-migration`)**: alterar apenas quando necessário para o Android, com análise prévia dos impactos.
+
+Caso uma solicitação envolva código web, interprete-a como uma solicitação para implementar a funcionalidade correspondente **no Android**, salvo instrução explícita em contrário.
+
+## 5. APK atualizado
+
+Após cada alteração que afete o aplicativo Android:
+
+- Execute o build (`bash scripts/rebuild_and_sign_apk.sh`).
+- Valide a compilação e a assinatura do APK.
+- Atualize o arquivo `MediCare-Paciente.apk` na raiz do repositório.
+- Preserve o APK anterior caso a compilação falhe (garantido pelo build em diretório temporário antes de sobrescrever `MediCare-Paciente.apk`).
+- Mantenha o APK disponível para download e testes.
+- Inclua o APK atualizado no commit correspondente.
+
+---
+
+## REGRA FINAL E INEGOCIÁVEL
+
+- **ANDROID = APLICAÇÃO ATIVA.**
+- **WEB ATUAL = LEGADO, SOMENTE REFERÊNCIA.**
+- **MEDICARE CUIDADOR = FUTURO PROJETO WEB, A SER CRIADO DO ZERO SOMENTE COM AUTORIZAÇÃO EXPLÍCITA.**
+
+Não desenvolva, atualize ou corrija o frontend web legado. Toda funcionalidade antiga que ainda não existir no Android deverá ser migrada para uma implementação nativa. O objetivo é evoluir exclusivamente o **MediCare Paciente Android** até que ele esteja completo, funcional e independente do antigo frontend web.
+
