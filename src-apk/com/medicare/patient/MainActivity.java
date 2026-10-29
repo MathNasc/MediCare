@@ -152,6 +152,15 @@ public class MainActivity extends Activity {
         setContentView(frameLayout);
         render();
         syncWithBackendSilently(false);
+        pullFromBackendIfEmptyOrUpdated();
+    }
+
+    @Override // android.app.Activity
+    protected void onResume() {
+        super.onResume();
+        if (this.isLoggedIn) {
+            syncWithBackendSilently(false);
+        }
     }
 
     private void ensureNotificationChannel() {
@@ -1342,6 +1351,12 @@ public class MainActivity extends Activity {
                 this.calNotes = new JSONObject(this.prefs.getString("cal_notes", "{}"));
                 this.calNotesList = new JSONArray(this.prefs.getString("cal_notes_list", "[]"));
                 this.stockMovements = new JSONArray(this.prefs.getString("stock_movements", "[]"));
+                if (migrateStockEventsFromEvents()) {
+                    this.prefs.edit()
+                        .putString("events", this.events.toString())
+                        .putString("stock_movements", this.stockMovements.toString())
+                        .apply();
+                }
                 this.allergies = new JSONArray(this.prefs.getString("allergies", "[]"));
                 this.conditions = new JSONArray(this.prefs.getString("conditions", "[]"));
                 this.contacts = new JSONArray(this.prefs.getString("contacts", "[]"));
@@ -1932,7 +1947,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.5.0 • Produção");
+        versionBadge.setText("Versão 2.5.3 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -2131,7 +2146,8 @@ public class MainActivity extends Activity {
                             public final void run() {
                                 Toast.makeText(MainActivity.this, "✓ Bem-vindo de volta!", 0).show();
                                 MainActivity.this.render();
-                                MainActivity.this.syncWithBackendSilently(true);
+                                MainActivity.this.pullFromBackendIfEmptyOrUpdated();
+                                MainActivity.this.syncWithBackendSilently(false);
                             }
                         });
                     } else {
@@ -2242,7 +2258,7 @@ public class MainActivity extends Activity {
                             public final void run() {
                                 Toast.makeText(MainActivity.this, "✓ Conta criada com sucesso! Bem-vindo(a), " + nome, 1).show();
                                 MainActivity.this.render();
-                                MainActivity.this.syncWithBackendSilently(true);
+                                MainActivity.this.syncWithBackendSilently(false);
                             }
                         });
                     } else {
@@ -3566,6 +3582,33 @@ public class MainActivity extends Activity {
 
     private void showStockMovementModal(final JSONObject med, final int prevQty, final int newQty) {
         final int diff = newQty - prevQty;
+        final String today = todayIso();
+        final String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+        final JSONObject sm = new JSONObject();
+        try {
+            sm.put("id", "sm-" + System.currentTimeMillis());
+            sm.put("med_id", med.optString("id"));
+            sm.put("med_nome", med.optString("nome"));
+            sm.put("tipo", diff >= 0 ? "entrada" : "saida");
+            sm.put("movement_type", diff >= 0 ? "purchase" : "adjustment");
+            sm.put("qtd", Math.abs(diff));
+            sm.put("quantity_change", diff);
+            sm.put("delta", diff);
+            sm.put("previous_quantity", prevQty);
+            sm.put("new_quantity", newQty);
+            sm.put("pharmacy", "");
+            sm.put("price_paid", "");
+            sm.put("date", today);
+            sm.put("time", hm);
+            sm.put("hora", hm);
+            sm.put("data", today + " " + hm);
+            sm.put("created_at", today + "T" + hm + ":00.000Z");
+            sm.put("motivo", diff > 0 ? "Reposição de estoque" : "Ajuste manual");
+            this.stockMovements.put(sm);
+            saveAll();
+            render();
+        } catch (Exception ignored) {}
+
         ScrollView sv = new ScrollView(this);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(1);
@@ -3592,43 +3635,13 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    String today = todayIso();
-                    String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
                     String mType = typeInput.getText().toString().trim().toLowerCase(Locale.ROOT);
                     String movType = mType.contains("compra") ? "purchase" : (mType.contains("corr") ? "correction" : "adjustment");
                     String motivo = reasonInput.getText().toString().trim();
-                    JSONObject sm = new JSONObject();
-                    sm.put("id", "sm-" + System.currentTimeMillis());
-                    sm.put("med_id", med.optString("id"));
-                    sm.put("med_nome", med.optString("nome"));
-                    sm.put("tipo", diff >= 0 ? "entrada" : "saida");
                     sm.put("movement_type", movType);
-                    sm.put("qtd", Math.abs(diff));
-                    sm.put("quantity_change", diff);
-                    sm.put("previous_quantity", prevQty);
-                    sm.put("new_quantity", newQty);
                     sm.put("pharmacy", pharmInput.getText().toString().trim());
                     sm.put("price_paid", priceInput.getText().toString().trim());
-                    sm.put("data", today + " " + hm);
-                    sm.put("created_at", today + "T" + hm + ":00.000Z");
-                    sm.put("motivo", motivo.isEmpty() ? "Atualização de estoque" : motivo);
-                    MainActivity.this.stockMovements.put(sm);
-
-                    if (diff > 0) {
-                        JSONObject stEv = new JSONObject();
-                        stEv.put("id", "ev-st-" + System.currentTimeMillis());
-                        stEv.put("type", "estoque");
-                        stEv.put("tipo", "estoque");
-                        stEv.put("date", today);
-                        stEv.put("data", today);
-                        stEv.put("time", hm);
-                        stEv.put("hora", hm);
-                        stEv.put("title", "Reposição: " + med.optString("nome") + " (+" + diff + ")");
-                        stEv.put("titulo", "Reposição: " + med.optString("nome") + " (+" + diff + ")");
-                        stEv.put("description", motivo);
-                        stEv.put("notas", motivo);
-                        MainActivity.this.events.put(stEv);
-                    }
+                    sm.put("motivo", motivo.isEmpty() ? (diff > 0 ? "Reposição de estoque" : "Ajuste manual") : motivo);
                     saveAll();
                     render();
                 } catch (Exception ignored) {}
@@ -5100,13 +5113,25 @@ public class MainActivity extends Activity {
                 }
                 for (int i = 0; i < this.events.length(); i++) {
                     final JSONObject ev = this.events.optJSONObject(i);
-                    if (ev != null) {
+                    if (ev != null && !isStockEvent(ev)) {
                         String title = ev.optString("title", ev.optString("titulo", ""));
                         String notes = ev.optString("notes", ev.optString("notas", ""));
                         if (title.toLowerCase(Locale.ROOT).contains(q) || notes.toLowerCase(Locale.ROOT).contains(q)) {
                             matchCount++;
                             final String dStr = ev.optString("date", ev.optString("data", todayIso()));
-                            resCard.addView(buildSearchResultItem("📅", title, dStr + " · Evento", dStr));
+                            resCard.addView(buildSearchResultItem("📅", title, dStr + " · Consulta / Evento", dStr));
+                        }
+                    }
+                }
+                for (int i = 0; i < this.stockMovements.length(); i++) {
+                    final JSONObject sm = this.stockMovements.optJSONObject(i);
+                    if (sm != null && isCalendarStockMovement(sm)) {
+                        String label = formatStockMovementCardText(sm);
+                        String mot = sm.optString("motivo", "");
+                        if (label.toLowerCase(Locale.ROOT).contains(q) || mot.toLowerCase(Locale.ROOT).contains(q)) {
+                            matchCount++;
+                            final String dStr = getStockMovementDate(sm);
+                            resCard.addView(buildSearchResultItem("📦", label.replace("📦 ", ""), dStr + " · Estoque", dStr));
                         }
                     }
                 }
@@ -5447,12 +5472,12 @@ public class MainActivity extends Activity {
         int mEventsCount = 0;
         for (int i = 0; i < this.events.length(); i++) {
             JSONObject ev = this.events.optJSONObject(i);
-            if (ev != null && ev.optString("date", ev.optString("data", "")).startsWith(monthPrefix)) mEventsCount++;
+            if (ev != null && !isStockEvent(ev) && ev.optString("date", ev.optString("data", "")).startsWith(monthPrefix)) mEventsCount++;
         }
         int mRestockCount = 0;
         for (int i = 0; i < this.stockMovements.length(); i++) {
             JSONObject sm = this.stockMovements.optJSONObject(i);
-            if (sm != null && sm.optString("date", sm.optString("data_hora", "")).startsWith(monthPrefix) && sm.optInt("delta", 0) > 0) {
+            if (sm != null && isCalendarStockMovement(sm) && getStockMovementDate(sm).startsWith(monthPrefix) && getStockMovementDelta(sm) > 0) {
                 mRestockCount++;
             }
         }
@@ -5632,10 +5657,159 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    private boolean isStockEvent(JSONObject ev) {
+        if (ev == null) return false;
+        String tp = ev.optString("type", ev.optString("tipo", "")).trim().toLowerCase(Locale.ROOT);
+        if ("estoque".equals(tp) || "stock".equals(tp) || "reposicao".equals(tp) || "reposição".equals(tp)) {
+            return true;
+        }
+        String id = ev.optString("id", "");
+        if (id.startsWith("ev-st-")) return true;
+        String title = ev.optString("title", ev.optString("titulo", "")).trim();
+        return title.startsWith("Reposição:") || title.startsWith("Reposição de estoque") || title.startsWith("Ajuste de estoque");
+    }
+
+    private boolean isCalendarStockMovement(JSONObject sm) {
+        if (sm == null) return false;
+        String movType = sm.optString("movement_type", "").trim().toLowerCase(Locale.ROOT);
+        if ("consumption".equals(movType)) return false;
+        String mot = sm.optString("motivo", "").trim();
+        if (mot.startsWith("Dose tomada") || mot.startsWith("Uso SOS")) return false;
+        return true;
+    }
+
+    private String getStockMovementDate(JSONObject sm) {
+        if (sm == null) return "";
+        String raw = sm.optString("date", "");
+        if (raw.isEmpty()) raw = sm.optString("data", "");
+        if (raw.isEmpty()) raw = sm.optString("data_hora", "");
+        if (raw.isEmpty()) raw = sm.optString("created_at", "");
+        raw = raw.trim();
+        if (raw.length() >= 10) return raw.substring(0, 10);
+        return raw;
+    }
+
+    private String getStockMovementTime(JSONObject sm) {
+        if (sm == null) return "";
+        String tm = sm.optString("time", sm.optString("hora", "")).trim();
+        if (!tm.isEmpty()) return tm;
+        String dataStr = sm.optString("data", "").trim();
+        if (dataStr.length() >= 16 && dataStr.charAt(10) == ' ') {
+            return dataStr.substring(11, 16);
+        }
+        String createdAt = sm.optString("created_at", "").trim();
+        if (createdAt.length() >= 16 && createdAt.charAt(10) == 'T') {
+            return createdAt.substring(11, 16);
+        }
+        return "";
+    }
+
+    private int getStockMovementDelta(JSONObject sm) {
+        if (sm == null) return 0;
+        if (sm.has("quantity_change")) return sm.optInt("quantity_change", 0);
+        if (sm.has("delta")) return sm.optInt("delta", 0);
+        int q = sm.optInt("qtd", 0);
+        if ("saida".equalsIgnoreCase(sm.optString("tipo", ""))) return -q;
+        return q;
+    }
+
+    private String formatStockMovementCardText(JSONObject sm) {
+        if (sm == null) return "📦 Movimentação de estoque";
+        String tm = getStockMovementTime(sm);
+        String explicitTitle = sm.optString("title", sm.optString("titulo", "")).trim();
+        String medNome = sm.optString("med_nome", "").trim();
+        String mainText;
+        if (!medNome.isEmpty()) {
+            int delta = getStockMovementDelta(sm);
+            String prefix = delta >= 0 ? "Reposição: " : "Ajuste: ";
+            String deltaStr = delta > 0 ? "(+" + delta + ")" : "(" + delta + ")";
+            mainText = "📦 " + prefix + medNome + " " + deltaStr + (tm.isEmpty() ? "" : " às " + tm);
+        } else if (!explicitTitle.isEmpty()) {
+            mainText = "📦 " + explicitTitle + (tm.isEmpty() || explicitTitle.contains(" às ") ? "" : " às " + tm);
+        } else {
+            mainText = "📦 Movimentação de estoque" + (tm.isEmpty() ? "" : " às " + tm);
+        }
+        String pharm = sm.optString("pharmacy", "").trim();
+        String mot = sm.optString("motivo", sm.optString("description", sm.optString("notas", ""))).trim();
+        if (!pharm.isEmpty()) {
+            mainText += " • " + pharm;
+        }
+        if (!mot.isEmpty()
+                && !"Reposição de estoque".equalsIgnoreCase(mot)
+                && !"Atualização de estoque".equalsIgnoreCase(mot)
+                && !"Ajuste manual".equalsIgnoreCase(mot)) {
+            mainText += " • " + mot;
+        }
+        return mainText;
+    }
+
+    private boolean migrateStockEventsFromEvents() {
+        if (this.events == null) return false;
+        if (this.stockMovements == null) this.stockMovements = new JSONArray();
+        boolean changed = false;
+        JSONArray cleanEvents = new JSONArray();
+        for (int i = 0; i < this.events.length(); i++) {
+            JSONObject ev = this.events.optJSONObject(i);
+            if (ev == null) continue;
+            if (isStockEvent(ev)) {
+                changed = true;
+                String evDate = ev.optString("date", ev.optString("data", "")).trim();
+                String evTime = ev.optString("time", ev.optString("hora", "")).trim();
+                String evTitle = ev.optString("title", ev.optString("titulo", "")).trim();
+                boolean alreadyInStock = false;
+                for (int j = 0; j < this.stockMovements.length(); j++) {
+                    JSONObject sm = this.stockMovements.optJSONObject(j);
+                    if (sm != null && isCalendarStockMovement(sm)) {
+                        String smDate = getStockMovementDate(sm);
+                        String smTime = getStockMovementTime(sm);
+                        if (evDate.equals(smDate) && (evTime.isEmpty() || evTime.equals(smTime))) {
+                            alreadyInStock = true;
+                            break;
+                        }
+                    }
+                }
+                if (!alreadyInStock) {
+                    try {
+                        JSONObject migrated = new JSONObject();
+                        migrated.put("id", "sm-" + ev.optString("id", String.valueOf(System.currentTimeMillis())));
+                        migrated.put("tipo", "entrada");
+                        migrated.put("movement_type", "purchase");
+                        migrated.put("title", evTitle);
+                        migrated.put("titulo", evTitle);
+                        migrated.put("date", evDate);
+                        migrated.put("time", evTime);
+                        migrated.put("hora", evTime);
+                        migrated.put("data", evTime.isEmpty() ? evDate : (evDate + " " + evTime));
+                        migrated.put("created_at", evDate + "T" + (evTime.isEmpty() ? "12:00" : evTime) + ":00.000Z");
+                        int parsedDelta = 1;
+                        int plusIdx = evTitle.indexOf("(+");
+                        int closeIdx = evTitle.indexOf(")", plusIdx);
+                        if (plusIdx >= 0 && closeIdx > plusIdx + 2) {
+                            try {
+                                parsedDelta = Integer.parseInt(evTitle.substring(plusIdx + 2, closeIdx).trim());
+                            } catch (Exception ignored) {}
+                        }
+                        migrated.put("qtd", parsedDelta);
+                        migrated.put("quantity_change", parsedDelta);
+                        migrated.put("delta", parsedDelta);
+                        migrated.put("motivo", ev.optString("description", ev.optString("notas", "Reposição de estoque")));
+                        this.stockMovements.put(migrated);
+                    } catch (Exception ignored) {}
+                }
+            } else {
+                cleanEvents.put(ev);
+            }
+        }
+        if (changed) {
+            this.events = cleanEvents;
+        }
+        return changed;
+    }
+
     private boolean hasEventOnDate(String dateStr) {
         for (int i = 0; i < this.events.length(); i++) {
             JSONObject ev = this.events.optJSONObject(i);
-            if (ev != null && dateStr.equals(ev.optString("date", ev.optString("data")))) return true;
+            if (ev != null && !isStockEvent(ev) && dateStr.equals(ev.optString("date", ev.optString("data")))) return true;
         }
         return false;
     }
@@ -5643,7 +5817,7 @@ public class MainActivity extends Activity {
     private boolean hasStockMoveOnDate(String dateStr) {
         for (int i = 0; i < this.stockMovements.length(); i++) {
             JSONObject sm = this.stockMovements.optJSONObject(i);
-            if (sm != null && sm.optString("date", sm.optString("data_hora", "")).startsWith(dateStr)) return true;
+            if (sm != null && isCalendarStockMovement(sm) && dateStr.equals(getStockMovementDate(sm))) return true;
         }
         return false;
     }
@@ -5655,6 +5829,11 @@ public class MainActivity extends Activity {
         root.setOrientation(1);
         root.setPadding(dp(20), dp(20), dp(20), dp(20));
         root.setBackgroundColor(this.cSurface);
+
+        sv.addView(root);
+        b.setView(sv);
+        b.setNegativeButton("Fechar", null);
+        final AlertDialog dlg = b.create();
 
         boolean isToday = dateStr.equals(todayIso());
         boolean isPast = dateStr.compareTo(todayIso()) < 0;
@@ -5744,7 +5923,8 @@ public class MainActivity extends Activity {
                         @Override
                         public void onClick(View v) {
                             registerDose(m, dateStr, hStr, "tomado");
-                            Toast.makeText(MainActivity.this, "Dose confirmada!", 0).show();
+                            dlg.dismiss();
+                            showDayPanelDialog(dateStr);
                         }
                     });
                     dCard.addView(btnRetro);
@@ -5801,6 +5981,8 @@ public class MainActivity extends Activity {
                         MainActivity.this.calNotesList.remove(nIdx);
                         saveAll();
                         render();
+                        dlg.dismiss();
+                        showDayPanelDialog(dateStr);
                     }
                 });
                 nCard.addView(btnDelN);
@@ -5816,7 +5998,7 @@ public class MainActivity extends Activity {
             root.addView(tvEmptyN);
         }
 
-        // Events section
+        // Events section (Strictly Consultations & Health Events, decoupled from Stock)
         TextView tvEvHdr = new TextView(this);
         tvEvHdr.setText("📅 CONSULTAS & EVENTOS");
         tvEvHdr.setTextColor(this.cTextLight);
@@ -5829,7 +6011,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < this.events.length(); i++) {
             final int eIdx = i;
             final JSONObject ev = this.events.optJSONObject(i);
-            if (ev != null && dateStr.equals(ev.optString("date", ev.optString("data")))) {
+            if (ev != null && !isStockEvent(ev) && dateStr.equals(ev.optString("date", ev.optString("data")))) {
                 evItems++;
                 LinearLayout eCard = new LinearLayout(this);
                 eCard.setOrientation(0);
@@ -5859,6 +6041,8 @@ public class MainActivity extends Activity {
                         MainActivity.this.events.remove(eIdx);
                         saveAll();
                         render();
+                        dlg.dismiss();
+                        showDayPanelDialog(dateStr);
                     }
                 });
                 eCard.addView(btnDelE);
@@ -5870,13 +6054,65 @@ public class MainActivity extends Activity {
             tvEmptyE.setText("Nenhum evento neste dia.");
             tvEmptyE.setTextColor(this.cTextMuted);
             tvEmptyE.setTextSize(sp(12.0f));
+            tvEmptyE.setPadding(0, 0, 0, dp(10));
             root.addView(tvEmptyE);
         }
 
-        sv.addView(root);
-        b.setView(sv);
-        b.setNegativeButton("Fechar", null);
-        final AlertDialog dlg = b.create();
+        // Dedicated Stock Section (exclusively for stock replenishments and adjustments)
+        TextView tvStockHdr = new TextView(this);
+        tvStockHdr.setText("📦 ESTOQUE");
+        tvStockHdr.setTextColor(this.cTextLight);
+        tvStockHdr.setTextSize(sp(11.0f));
+        tvStockHdr.setTypeface(null, 1);
+        tvStockHdr.setPadding(0, dp(6), 0, dp(8));
+        root.addView(tvStockHdr);
+
+        int stockItems = 0;
+        for (int i = 0; i < this.stockMovements.length(); i++) {
+            final int sIdx = i;
+            final JSONObject sm = this.stockMovements.optJSONObject(i);
+            if (sm != null && isCalendarStockMovement(sm) && dateStr.equals(getStockMovementDate(sm))) {
+                stockItems++;
+                LinearLayout sCard = new LinearLayout(this);
+                sCard.setOrientation(0);
+                sCard.setGravity(16);
+                sCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                sCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(-1, -2);
+                scLp.bottomMargin = dp(8);
+                sCard.setLayoutParams(scLp);
+
+                TextView tvST = new TextView(this);
+                tvST.setText(formatStockMovementCardText(sm));
+                tvST.setTextColor(this.cTextMain);
+                tvST.setTextSize(sp(13.0f));
+                tvST.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                sCard.addView(tvST);
+
+                TextView btnDelS = new TextView(this);
+                btnDelS.setText("🗑");
+                btnDelS.setPadding(dp(8), dp(4), dp(4), dp(4));
+                btnDelS.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.stockMovements.remove(sIdx);
+                        saveAll();
+                        render();
+                        dlg.dismiss();
+                        showDayPanelDialog(dateStr);
+                    }
+                });
+                sCard.addView(btnDelS);
+                root.addView(sCard);
+            }
+        }
+        if (stockItems == 0) {
+            TextView tvEmptyS = new TextView(this);
+            tvEmptyS.setText("Nenhuma movimentação de estoque neste dia.");
+            tvEmptyS.setTextColor(this.cTextMuted);
+            tvEmptyS.setTextSize(sp(12.0f));
+            root.addView(tvEmptyS);
+        }
 
         btnAddN.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -7357,36 +7593,12 @@ public class MainActivity extends Activity {
         card.addView(tvTitle);
 
         TextView tvInfo = new TextView(this);
-        tvInfo.setText("Seus dados de saúde são privados e protegidos. Nenhuma informação é compartilhada com terceiros sem sua autorização explícita (como ao vincular um cuidador).\n\nO Cartão de Emergência exibe apenas as informações que você autorizar na tela de configuração do cartão.");
+        tvInfo.setText("Seus dados de saúde são privados, protegidos e sincronizados automaticamente em tempo real com o servidor seguro. Nenhuma informação é compartilhada com terceiros sem sua autorização explícita (como ao vincular um cuidador).\n\nO Cartão de Emergência exibe apenas as informações que você autorizar na tela de configuração do cartão.");
         tvInfo.setTextColor(this.cTextMuted);
         tvInfo.setTextSize(sp(14.0f));
         tvInfo.setLineSpacing(dp(4), 1.0f);
         tvInfo.setPadding(0, 0, 0, dp(18));
         card.addView(tvInfo);
-
-        TextView btnSync = createButton("☁️ Sincronizar dados agora", this.cPrimary, Color.WHITE);
-        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(-1, -2);
-        sLp.bottomMargin = dp(10);
-        btnSync.setLayoutParams(sLp);
-        btnSync.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                syncWithBackendSilently(true);
-            }
-        });
-        card.addView(btnSync);
-
-        TextView btnVerifyDb = createButton("🔍 Conferir dados gravados no banco", this.cSurfaceHover, this.cTextMain);
-        LinearLayout.LayoutParams vLp = new LinearLayout.LayoutParams(-1, -2);
-        vLp.bottomMargin = dp(10);
-        btnVerifyDb.setLayoutParams(vLp);
-        btnVerifyDb.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                verifyDatabaseRecordsDialog();
-            }
-        });
-        card.addView(btnVerifyDb);
 
         TextView btnExport = createButton("📤 Exportar meus dados (JSON)", this.cBgMain, this.cTextMain);
         LinearLayout.LayoutParams expLp = new LinearLayout.LayoutParams(-1, -2);
@@ -9415,24 +9627,23 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void verifyDatabaseRecordsDialog() {
-        Toast.makeText(this, "Consultando banco de dados Oracle...", 0).show();
+    private void pullFromBackendIfEmptyOrUpdated() {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
                     String patId = MainActivity.this.profile.optString("id", "").trim();
-                    if (patId.isEmpty() || patId.startsWith("pac-")) patId = "98e5cdc4-7866-43e5-9c90-ebb712ecd816";
+                    if (patId.isEmpty() || patId.startsWith("pac-") || patId.equals("user-local-paciente")) {
+                        patId = "98e5cdc4-7866-43e5-9c90-ebb712ecd816";
+                    }
                     URL url = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId));
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("GET");
                     conn.setConnectTimeout(8000);
                     conn.setReadTimeout(8000);
                     int code = conn.getResponseCode();
-                    BufferedReader br = new BufferedReader(new InputStreamReader(
-                        (code < 200 || code >= 400) ? conn.getErrorStream() : conn.getInputStream(),
-                        StandardCharsets.UTF_8
-                    ));
+                    if (code != 200) return;
+                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
                     StringBuilder sb = new StringBuilder();
                     String line;
                     while ((line = br.readLine()) != null) {
@@ -9440,58 +9651,57 @@ public class MainActivity extends Activity {
                     }
                     br.close();
                     final JSONObject resp = new JSONObject(sb.toString());
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            StringBuilder msg = new StringBuilder();
-                            boolean ok = resp.optBoolean("ok", false);
-                            msg.append("Status da conexão: ").append(ok ? "✅ ONLINE (Gravação Ativa)" : "⚠️ Indisponível").append("\n");
-                            msg.append("Servidor: ").append(EMBEDDED_BACKEND_URL).append("\n\n");
-                            JSONObject u = resp.optJSONObject("user");
-                            if (u != null) {
-                                msg.append("👤 PERFIL GRAVADO NO BANCO:\n");
-                                msg.append("• ID: ").append(u.optString("id", "-")).append("\n");
-                                msg.append("• Nome: ").append(u.optString("nome", "-")).append("\n");
-                                msg.append("• Nascimento: ").append(u.optString("dob", "-")).append("\n");
-                                msg.append("• CPF: ").append(u.optString("cpf", "-")).append("\n");
-                                msg.append("• Telefone: ").append(u.optString("phone", "-")).append("\n");
-                                msg.append("• Tipo Sanguíneo: ").append(u.optString("blood_type", "-")).append("\n");
-                                msg.append("• Foto salva: ").append(!u.optString("foto_url", "").isEmpty() ? "Sim ✅" : "Não").append("\n");
-                                msg.append("• Atualizado em: ").append(u.optString("updated_at", "-")).append("\n\n");
-                            } else {
-                                msg.append("👤 Perfil ainda não localizado para ID ").append(MainActivity.this.profile.optString("id", "pac-001")).append(".\nToque em 'Sincronizar dados agora' para enviar.\n\n");
+                    if (!resp.optBoolean("ok", false)) return;
+
+                    boolean changed = false;
+                    JSONObject u = resp.optJSONObject("user");
+                    if (u != null && MainActivity.this.profile.optString("nome", "").trim().isEmpty() && !u.optString("nome", "").trim().isEmpty()) {
+                        MainActivity.this.profile.put("id", u.optString("id", patId));
+                        MainActivity.this.profile.put("nome", u.optString("nome", ""));
+                        if (!u.optString("social_name", "").isEmpty()) MainActivity.this.profile.put("social_name", u.optString("social_name"));
+                        if (!u.optString("dob", "").isEmpty()) MainActivity.this.profile.put("data_nascimento", u.optString("dob"));
+                        if (!u.optString("cpf", "").isEmpty()) MainActivity.this.profile.put("cpf", u.optString("cpf"));
+                        if (!u.optString("phone", "").isEmpty()) MainActivity.this.profile.put("telefone", u.optString("phone"));
+                        if (!u.optString("blood_type", "").isEmpty()) MainActivity.this.profile.put("tipo_sanguineo", u.optString("blood_type"));
+                        if (!u.optString("foto_url", "").isEmpty()) MainActivity.this.profile.put("foto_url", u.optString("foto_url"));
+                        changed = true;
+                    }
+                    JSONArray mArr = resp.optJSONArray("meds");
+                    if (mArr != null && mArr.length() > 0 && MainActivity.this.meds.length() == 0) {
+                        MainActivity.this.meds = mArr;
+                        changed = true;
+                    }
+                    JSONArray hArr = resp.optJSONArray("history");
+                    if (hArr != null && hArr.length() > 0 && MainActivity.this.doseLogs.length() == 0) {
+                        MainActivity.this.doseLogs = hArr;
+                        changed = true;
+                    }
+                    JSONArray eArr = resp.optJSONArray("events");
+                    if (eArr != null && eArr.length() > 0 && MainActivity.this.events.length() == 0) {
+                        MainActivity.this.events = eArr;
+                        MainActivity.this.migrateStockEventsFromEvents();
+                        changed = true;
+                    }
+                    JSONArray aArr = resp.optJSONArray("allergies");
+                    if (aArr != null && aArr.length() > 0 && MainActivity.this.allergies.length() == 0) {
+                        MainActivity.this.allergies = aArr;
+                        changed = true;
+                    }
+                    JSONArray cArr = resp.optJSONArray("contacts");
+                    if (cArr != null && cArr.length() > 0 && MainActivity.this.contacts.length() == 0) {
+                        MainActivity.this.contacts = cArr;
+                        changed = true;
+                    }
+                    if (changed) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                MainActivity.this.saveAll();
+                                MainActivity.this.render();
                             }
-                            JSONArray mArr = resp.optJSONArray("meds");
-                            JSONArray hArr = resp.optJSONArray("history");
-                            JSONArray eArr = resp.optJSONArray("events");
-                            JSONArray nArr = resp.optJSONArray("notes");
-                            JSONArray aArr = resp.optJSONArray("allergies");
-                            JSONArray cArr = resp.optJSONArray("contacts");
-                            msg.append("📊 REGISTROS NAS TABELAS:\n");
-                            msg.append("• Medicamentos (medicamentos): ").append(mArr != null ? mArr.length() : 0).append("\n");
-                            msg.append("• Doses tomadas (historico_doses): ").append(hArr != null ? hArr.length() : 0).append("\n");
-                            msg.append("• Eventos/Consultas (health_events): ").append(eArr != null ? eArr.length() : 0).append("\n");
-                            msg.append("• Notas (calendar_notes): ").append(nArr != null ? nArr.length() : 0).append("\n");
-                            msg.append("• Alergias (allergies): ").append(aArr != null ? aArr.length() : 0).append("\n");
-                            msg.append("• Contatos SOS (emergency_contacts): ").append(cArr != null ? cArr.length() : 0).append("\n");
-                            showStyledConfirmDialog("🗄️ Status no Banco Oracle (PostgreSQL)", msg.toString(), "Fechar", null, MainActivity.this.cPrimary, null);
-                        }
-                    });
-                } catch (final Exception ex) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            showStyledConfirmDialog(
-                                "⚠️ Servidor Offline / Sem Conexão",
-                                "Não foi possível consultar " + EMBEDDED_BACKEND_URL + "/api/v1/sync.\n\nSeus dados estão salvos localmente no aparelho e serão sincronizados assim que o servidor responder.\n\nDetalhe: " + ex.getMessage(),
-                                "OK",
-                                null,
-                                MainActivity.this.cWarning,
-                                null
-                            );
-                        }
-                    });
-                }
+                        });
+                    }
+                } catch (Exception ignored) {}
             }
         }).start();
     }

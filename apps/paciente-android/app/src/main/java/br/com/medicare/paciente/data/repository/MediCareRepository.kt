@@ -510,24 +510,6 @@ class MediCareRepository @Inject constructor(
         dao.upsertStockMovement(movement)
         saveMedication(med.copy(quantidade = newQuantity))
 
-        if (newQuantity > med.quantidade) {
-            saveHealthEvent(
-                HealthEvent(
-                    id = UUID.randomUUID().toString(),
-                    userId = med.userId,
-                    type = "estoque",
-                    title = "Reposição de estoque: ${med.nome}",
-                    description = buildString {
-                        append("${med.quantidade} ➔ $newQuantity ${med.unidade}s")
-                        if (!purchaseLocation.isNullOrBlank()) append(" · $purchaseLocation")
-                    },
-                    date = LocalDate.now().toString(),
-                    time = "%02d:%02d".format(LocalTime.now().hour, LocalTime.now().minute),
-                    createdAt = Instant.now().toString()
-                )
-            )
-        }
-
         if (isRemoteConfigured) {
             runCatching {
                 remoteApi.recordStockMovement(

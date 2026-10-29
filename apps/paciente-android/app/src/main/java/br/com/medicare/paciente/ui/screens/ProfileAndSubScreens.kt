@@ -854,33 +854,31 @@ fun PatientProfileScreen(
             }
 
             "privacy" -> {
-                Text("🔐 Privacidade e Segurança", color = tokens.txt, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                Spacer(modifier = Modifier.height(12.dp))
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(tokens.bg1)
-                        .border(1.dp, tokens.bdr, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
+                        .border(1.dp, tokens.bdr, RoundedCornerShape(20.dp))
+                        .padding(20.dp)
                 ) {
-                    Text("🛡️ Proteção de Dados de Saúde (LGPD)", color = MediCareColors.Green, fontWeight = FontWeight.ExtraBold)
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("🔐 Privacidade e Segurança", color = tokens.txt, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "• Sessão e credenciais criptografadas via Android Keystore (AES-256-GCM).\n• Histórico clínico com auditoria imutável (confirmações retroativas e ações de cuidadores).\n• Sincronização offline-first segura via HTTPS.",
+                        text = "Seus dados de saúde são privados, protegidos e sincronizados automaticamente em tempo real com o servidor seguro. Nenhuma informação é compartilhada com terceiros sem sua autorização explícita (como ao vincular um cuidador).\n\nO Cartão de Emergência exibe apenas as informações que você autorizar na tela de configuração do cartão.",
                         color = tokens.sub,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         lineHeight = 20.sp
                     )
-                }
-                Spacer(modifier = Modifier.height(20.dp))
-                Button(
-                    onClick = onLogout,
-                    colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Red),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    Text("🚪 Sair da Conta", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Button(
+                        onClick = onLogout,
+                        colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Red.copy(alpha = 0.15f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp)
+                    ) {
+                        Text("🗑️ Excluir minha conta e dados", color = MediCareColors.Red, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 

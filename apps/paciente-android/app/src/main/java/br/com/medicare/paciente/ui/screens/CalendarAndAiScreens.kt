@@ -171,7 +171,11 @@ fun PatientCalendarScreen(
                 val q = searchQuery.trim().lowercase()
                 val matchedNotes = state.calendarNotes.filter { it.content.lowercase().contains(q) }
                 val matchedEvents = state.healthEvents.filter {
-                    it.title.lowercase().contains(q) || (it.doctor?.lowercase()?.contains(q) == true)
+                    it.type != "estoque" && (it.title.lowercase().contains(q) || (it.doctor?.lowercase()?.contains(q) == true))
+                }
+                val matchedStock = state.stockMovements.filter { sm ->
+                    val medName = state.medications.find { it.id == sm.medicationId }?.nome ?: ""
+                    medName.lowercase().contains(q) || (sm.notes?.lowercase()?.contains(q) == true) || (sm.purchaseLocation?.lowercase()?.contains(q) == true)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Column(
@@ -182,7 +186,7 @@ fun PatientCalendarScreen(
                         .border(1.dp, tokens.bdr, RoundedCornerShape(14.dp))
                         .padding(12.dp)
                 ) {
-                    if (matchedNotes.isEmpty() && matchedEvents.isEmpty()) {
+                    if (matchedNotes.isEmpty() && matchedEvents.isEmpty() && matchedStock.isEmpty()) {
                         Text("Nenhum resultado para \"$searchQuery\".", color = tokens.muted, fontSize = 13.sp)
                     } else {
                         matchedEvents.forEach { ev ->
@@ -194,6 +198,21 @@ fun PatientCalendarScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { selectedDateIso = ev.date }
+                                    .padding(vertical = 4.dp)
+                            )
+                        }
+                        matchedStock.forEach { sm ->
+                            val dIso = sm.createdAt.take(10)
+                            val medName = state.medications.find { it.id == sm.medicationId }?.nome ?: "Medicamento"
+                            val sign = if (sm.quantityDelta >= 0) "+${sm.quantityDelta}" else "${sm.quantityDelta}"
+                            Text(
+                                text = "📦 ${dIso.split("-").reversed().joinToString("/")} — Reposição: $medName ($sign)",
+                                color = Color(0xFF34D399),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedDateIso = dIso }
                                     .padding(vertical = 4.dp)
                             )
                         }
@@ -299,7 +318,8 @@ fun PatientCalendarScreen(
                             }
                             val hasNote = state.calendarNotes.any { it.date == dateIso }
                             val hasConsult = state.healthEvents.any { it.date == dateIso && it.type != "estoque" }
-                            val hasStock = state.healthEvents.any { it.date == dateIso && it.type == "estoque" }
+                            val hasStock = state.stockMovements.any { it.createdAt.startsWith(dateIso) && it.movementType != "consumption" } ||
+                                    state.healthEvents.any { it.date == dateIso && it.type == "estoque" }
 
                             val statusBg = when {
                                 expectedPerDay > 0 && dayConfirmed >= expectedPerDay -> MediCareColors.Green.copy(alpha = 0.22f)
@@ -358,6 +378,7 @@ fun PatientCalendarScreen(
                 LegendItem(MediCareColors.Red, "Perdido")
                 LegendItem(MediCareColors.Blue, "Nota")
                 LegendItem(MediCareColors.Purple, "Evento")
+                LegendItem(Color(0xFF34D399), "Estoque")
             }
         }
 
@@ -437,7 +458,8 @@ fun PatientCalendarScreen(
         val lateMonthCount = monthHist.count { it.atrasoMinutos > 15 }
         val missedMonthCount = (expectedMonthTotal - monthHist.size).coerceAtLeast(0)
         val consultMonthCount = monthEvents.count { it.type != "estoque" }
-        val stockMonthCount = monthEvents.count { it.type == "estoque" }
+        val stockMonthCount = state.stockMovements.count { it.createdAt.startsWith(monthPrefix) && it.quantityDelta > 0 } +
+                monthEvents.count { it.type == "estoque" }
         val sosMonthCount = monthHist.count { rec ->
             state.medications.find { it.id == rec.medId }?.treatmentType == "sos"
         }
@@ -646,10 +668,13 @@ private fun DayPanelDialog(
         state.calendarNotes.filter { it.date == dateIso }
     }
     val dayEvents = remember(state.healthEvents, dateIso) {
-        state.healthEvents.filter { it.date == dateIso && it.type != "estoque" }
+        state.healthEvents.filter { it.date == dateIso && it.type != "estoque" && !it.title.startsWith("Reposição:") }
     }
-    val dayStock = remember(state.healthEvents, dateIso) {
-        state.healthEvents.filter { it.date == dateIso && it.type == "estoque" }
+    val dayStockMovements = remember(state.stockMovements, dateIso) {
+        state.stockMovements.filter { it.createdAt.startsWith(dateIso) && it.movementType != "consumption" }
+    }
+    val dayLegacyStockEvents = remember(state.healthEvents, dateIso) {
+        state.healthEvents.filter { it.date == dateIso && (it.type == "estoque" || it.title.startsWith("Reposição:")) }
     }
     val activeScheduledMeds = remember(state.medications) {
         state.medications.filter { it.ativo && it.treatmentType != "sos" }
@@ -841,23 +866,50 @@ private fun DayPanelDialog(
             }
 
             if (filter == "all" || filter == "stock") {
-                if (dayStock.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("📦 Reposições de Estoque", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    dayStock.forEach { st ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("📦 Estoque", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                if (dayStockMovements.isEmpty() && dayLegacyStockEvents.isEmpty()) {
+                    Text("Nenhuma movimentação de estoque neste dia.", color = tokens.muted, fontSize = 12.sp)
+                } else {
+                    dayStockMovements.forEach { sm ->
+                        val medName = state.medications.find { it.id == sm.medicationId }?.nome ?: "Medicamento"
+                        val sign = if (sm.quantityDelta >= 0) "+${sm.quantityDelta}" else "${sm.quantityDelta}"
+                        val label = if (sm.quantityDelta >= 0) "Reposição: $medName ($sign)" else "Ajuste: $medName ($sign)"
+                        val timeStr = if (sm.createdAt.length >= 16 && sm.createdAt[10] == 'T') " às ${sm.createdAt.substring(11, 16)}" else ""
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 6.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(tokens.bg2)
-                                .padding(10.dp)
+                                .padding(12.dp)
                         ) {
-                            Text(st.title, color = Color(0xFF06B6D4), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            if (!st.description.isNullOrBlank()) {
-                                Text(st.description, color = tokens.sub, fontSize = 12.sp)
+                            Text("📦 $label$timeStr", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            val detail = listOfNotNull(sm.purchaseLocation, sm.notes).filter { it.isNotBlank() }.joinToString(" · ")
+                            if (detail.isNotBlank()) {
+                                Text(detail, color = tokens.sub, fontSize = 12.sp)
                             }
+                        }
+                    }
+                    dayLegacyStockEvents.forEach { st ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(tokens.bg2)
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("📦 ${st.title}", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                if (!st.description.isNullOrBlank()) {
+                                    Text(st.description, color = tokens.sub, fontSize = 12.sp)
+                                                                }
+                            }
+                            Text("🗑️", modifier = Modifier.clickable { onDeleteEvent(st.id) })
                         }
                     }
                 }
