@@ -48,8 +48,7 @@ function CatalogPreview({ item, T, scale }) {
         <p style={{ color: T.sub, fontSize: 12 * scale }}>{item.active_ingredient}{item.dosage ? ` · ${item.dosage}` : ''}</p>
         {item.manufacturer && <p style={{ color: T.muted, fontSize: 11 * scale, marginTop: 2 }}>🏭 {item.manufacturer}</p>}
       </div>
-    </div>,
-    document.getElementById('root') || document.body
+    </div>
   );
 }
 
@@ -206,14 +205,6 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
     }
 
     if (movementDetails && med) {
-      // ─── Diagnóstico temporário ─────────────────────────────────────────
-      console.log('[MedModal] chamando recordStockMovement com:', {
-        medicationId: med.id,
-        movementType: movementDetails.movementType,
-        quantityBefore: med.quantidade,
-        quantityAfter: payload.quantidade,
-      });
-      // ────────────────────────────────────────────────────────────────────
       const movementResult = await recordStockMovement({
         medicationId: med.id,
         movementType: movementDetails.movementType,
@@ -225,8 +216,6 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
         expirationDate: movementDetails.expirationDate,
         notes: movementDetails.notes,
       });
-
-      console.log('[MedModal] resultado de recordStockMovement:', movementResult);
 
       if (movementResult?.success === false) {
         console.error('[MedModal] recordStockMovement falhou:', movementResult.error);
@@ -249,11 +238,6 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
     const payload = buildPayload();
 
     const quantityChanged = isEditing && Number(payload.quantidade) !== Number(med.quantidade);
-    // ─── Diagnóstico temporário ───────────────────────────────────────────
-    console.log('[MedModal] handleSave', {
-      isEditing, medQuantidade: med?.quantidade, payloadQuantidade: payload.quantidade, quantityChanged,
-    });
-    // ───────────────────────────────────────────────────────────────────────
 
     if (quantityChanged) {
       // Aguarda confirmação no StockMovementModal antes de persistir
@@ -265,18 +249,20 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   };
 
   const handleStockMovementConfirm = async (movementDetails) => {
-    console.log('[MedModal] handleStockMovementConfirm', { pendingPayload, movementDetails });
     await commitSave(pendingPayload, movementDetails);
   };
 
   const inp = { background: T.inp, border: `1.5px solid ${T.inpB}`, borderRadius: 12, padding: '13px 15px', color: T.txt, fontSize: 15 * scale, width: '100%', outline: 'none' };
 
+  if (!mounted) return null;
+  const portalTarget = document.getElementById('root') || document.body;
+
   // ── STEP: SEARCH ───────────────────────────────────────────────────────────
   if (step === STEPS.SEARCH) {
-    return (
+    return createPortal(
       <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Adicionar medicamento"
-        className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300 }}>
-        <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1,  height: '90vh', display: 'flex', flexDirection: 'column' }}>
+        className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 1000 }}>
+        <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1, height: '90vh', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px 16px 12px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
             <div style={{ width: 44, height: 44, borderRadius: 13, background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>💊</div>
             <div style={{ flex: 1 }}>
@@ -290,16 +276,17 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
             <MedicationSearchInput onSelect={handleCatalogSelect} onManual={handleManual} userId={userId} T={T} scale={scale} autoFocus />
           </div>
         </div>
-      </div>
+      </div>,
+      portalTarget
     );
   }
 
   // ── STEP: TREATMENT ─────────────────────────────────────────────────────────
   if (step === STEPS.TREATMENT) {
-    return (
+    return createPortal(
       <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Tipo de tratamento"
-        className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300 }}>
-        <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1,   overflowY: 'auto', paddingBottom: 32 }}>
+        className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 1000 }}>
+        <div onClick={e => e.stopPropagation()} className="anim-fadeUp bottom-sheet-content" style={{ background: T.bg1, overflowY: 'auto', paddingBottom: 32 }}>
           <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', gap: 10, position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
             <button onClick={() => setStep(STEPS.SEARCH)} aria-label="Voltar" style={{ width: 36, height: 36, borderRadius: '50%', background: T.bg3, border: 'none', color: T.sub, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>‹</button>
             <div>
@@ -318,7 +305,8 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
             </button>
           </div>
         </div>
-      </div>
+      </div>,
+      portalTarget
     );
   }
 
@@ -327,11 +315,11 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
   const isSOS       = treatmentType === 'sos';
   const treatMeta   = TREATMENT_TYPES[treatmentType];
 
-  return (
+  return createPortal(
     <div onClick={onClose} role="dialog" aria-modal="true" aria-label={isEditing ? 'Editar medicamento' : 'Novo medicamento'}
-      className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 300 }}>
+      className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 1000 }}>
       <div className="anim-fadeUp bottom-sheet-content" onClick={e => e.stopPropagation()}
-        style={{ background: T.bg1,   overflowY: 'auto', paddingBottom: 36 }}>
+        style={{ background: T.bg1, overflowY: 'auto', paddingBottom: 36 }}>
 
         <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, background: T.bg1, zIndex: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -504,6 +492,7 @@ export function MedModal({ med, onSave, onClose, T, scale = 1, userId, toast }) 
           scale={scale}
         />
       )}
-    </div>
+    </div>,
+    portalTarget
   );
 }

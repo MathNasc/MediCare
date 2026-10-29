@@ -205,29 +205,30 @@ export function MedsScreen({ T, scale, onAdd, onEdit, onView, toast }) {
                 <div style={{ width: 4, borderRadius: 99, background: m.cor, flexShrink: 0, alignSelf: 'stretch', minHeight: 60 }} />
                 <div style={{ width: 50, height: 50, borderRadius: 14, flexShrink: 0, background: m.cor + '20', border: `2px solid ${m.cor}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>💊</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
-                        <p style={{ color: T.txt, fontWeight: 800, fontSize: 16 * scale }}>{m.nome}</p>
-                        <TreatmentBadge med={m} scale={scale} />
-                        {isFinished && (
-                          <span style={{ fontSize: 10 * scale, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: 'rgba(110,118,129,.15)', color: T.muted }}>Concluído</span>
-                        )}
-                      </div>
-                      <p style={{ color: T.sub, fontSize: 13 * scale }}>{m.dosagem} · {m.unidade}</p>
-                    </div>
-                    <div style={{ display: 'flex', gap: 5, flexShrink: 0, marginLeft: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                    <p style={{ color: T.txt, fontWeight: 800, fontSize: 16 * scale, lineHeight: 1.3, wordBreak: 'break-word', flex: 1, minWidth: 0 }}>
+                      {m.nome}
+                    </p>
+                    <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
                       <button
                         onClick={(e) => { e.stopPropagation(); onEdit(m); }}
                         aria-label={`Editar ${m.nome}`}
-                        style={{ width: 34, height: 34, borderRadius: 10, background: T.bg2, border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ width: 34, height: 34, borderRadius: 10, background: T.bg2, border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                       >✏️</button>
                       <button
                         onClick={(e) => { e.stopPropagation(); setDeleteTarget(m); }}
                         aria-label={`Excluir ${m.nome}`}
-                        style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.25)', color: C.red, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.25)', color: C.red, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                       >🗑</button>
                     </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                    <TreatmentBadge med={m} scale={scale} />
+                    {isFinished && (
+                      <span style={{ fontSize: 10 * scale, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: 'rgba(110,118,129,.15)', color: T.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>Concluído</span>
+                    )}
+                    <span style={{ color: T.sub, fontSize: 13 * scale }}>{m.dosagem ? `${m.dosagem} · ` : ''}{m.unidade}</span>
                   </div>
                   
                   {isSOS ? (

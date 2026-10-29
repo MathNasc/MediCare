@@ -51,18 +51,22 @@ export function StockMovementModal({ med, quantityBefore, quantityAfter, onConfi
     letterSpacing: '.5px', display: 'block', marginBottom: 6,
   };
 
-  const [mounted, setMounted] = require('react').useState(false); require('react').useEffect(() => setMounted(true), []); if (!mounted) return null; return require('react-dom').createPortal(
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={isIncrease ? 'Reposição de estoque' : 'Ajuste de estoque'}
-      className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 340,  justifyContent: 'center' }}
+      className="bottom-sheet-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', backdropFilter: 'blur(16px)', zIndex: 1100, justifyContent: 'center' }}
     >
       <div
         className="anim-fadeUp"
         onClick={e => e.stopPropagation()}
-        style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480,  overflowY: 'auto', paddingBottom: 32 }}
+        style={{ background: T.bg1, borderRadius: '28px 28px 0 0', width: '100%', maxWidth: 480, overflowY: 'auto', paddingBottom: 32 }}
       >
         {/* Header */}
         <div style={{ padding: '22px 20px 16px', textAlign: 'center' }}>

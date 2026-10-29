@@ -67,6 +67,7 @@ export async function ensureOraclePostgresSchema(client) {
   const check = await client.query("SELECT to_regclass('public.app_users') AS exists");
   if (check.rows[0]?.exists) {
     await client.query(`
+      ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS weight_updated_at timestamptz;
       ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS active_ingredient text;
       ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS principio_ativo text;
       ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS manufacturer text;
@@ -78,6 +79,8 @@ export async function ensureOraclePostgresSchema(client) {
       ALTER TABLE public.emergency_contacts ADD COLUMN IF NOT EXISTS relationship text;
       ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS location text;
       ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS clinic text;
+      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS email text;
+      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS notes text;
       ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS med_name text;
       ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_delta numeric;
       ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_changed numeric;
@@ -189,6 +192,7 @@ export async function ensureOraclePostgresSchema(client) {
       address TEXT,
       weight TEXT,
       height TEXT,
+      weight_updated_at TIMESTAMPTZ,
       role_change_pin TEXT DEFAULT '123456',
       role_change_pin_expires_at TIMESTAMPTZ,
       notifications_enabled BOOLEAN DEFAULT TRUE,
@@ -320,7 +324,8 @@ export async function ensureOraclePostgresSchema(client) {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      relation TEXT NOT NULL,
+      relation TEXT,
+      relationship TEXT,
       phone TEXT NOT NULL,
       secondary_phone TEXT,
       priority INTEGER DEFAULT 1,
@@ -333,8 +338,11 @@ export async function ensureOraclePostgresSchema(client) {
       name TEXT NOT NULL,
       specialty TEXT NOT NULL,
       phone TEXT,
+      email TEXT,
       crm TEXT,
+      clinic TEXT,
       location TEXT,
+      notes TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 

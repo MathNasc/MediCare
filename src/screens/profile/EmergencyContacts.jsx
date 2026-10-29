@@ -41,7 +41,7 @@ export function EmergencyContacts({ user, onBack, T, scale }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <p style={{ color: T.txt, fontSize: 16 * scale, fontWeight: 700 }}>{c.name}</p>
-              <p style={{ color: T.sub, fontSize: 13 * scale }}>{c.relationship}</p>
+              <p style={{ color: T.sub, fontSize: 13 * scale }}>{c.relationship || c.relation}</p>
             </div>
             <button onClick={() => handleRemove(c.id)} style={{ color: '#f87171', background: 'none', border: 'none', fontSize: 14, cursor: 'pointer' }}>Remover</button>
           </div>

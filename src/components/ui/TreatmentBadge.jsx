@@ -15,6 +15,7 @@ export function TreatmentBadge({ med, scale = 1, showProgress = false }) {
       display: 'inline-flex', alignItems: 'center', gap: 4,
       fontSize: 10 * scale, fontWeight: 700, padding: '2px 9px',
       borderRadius: 99, background: meta.bg, color: meta.color,
+      whiteSpace: 'nowrap', flexShrink: 0, width: 'fit-content',
     }}>
       <span>{meta.icon}</span>
       <span>{meta.shortLabel}</span>

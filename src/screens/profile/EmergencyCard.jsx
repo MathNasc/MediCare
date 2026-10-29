@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { ProfileDB } from '@/lib/profileDb';
 import { useApp } from '@/context/AppContext';
@@ -37,7 +36,10 @@ export function EmergencyCard({ user, profile, onBack, T, scale }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
           {s.show_photo && (
             <div style={{ position: 'relative', width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-              {profile?.foto_url ? <Image src={profile.foto_url} alt="Foto" fill style={{ objectFit: 'cover' }} sizes="64px" /> : <span style={{ fontSize: 30 }}>{profile?.nome?.[0]?.toUpperCase()}</span>}
+              {profile?.foto_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profile.foto_url} alt="Foto" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              ) : <span style={{ fontSize: 30 }}>{profile?.nome?.[0]?.toUpperCase()}</span>}
             </div>
           )}
           <div>
@@ -76,7 +78,7 @@ export function EmergencyCard({ user, profile, onBack, T, scale }) {
           <div style={{ background: 'rgba(255,255,255,.15)', padding: 14, borderRadius: 12 }}>
             <p style={{ fontWeight: 700, fontSize: 14 * scale, marginBottom: 6 }}>👤 Contato de Emergência</p>
             <p style={{ fontSize: 15 * scale, fontWeight: 800 }}>{contacts[0].name}</p>
-            <p style={{ fontSize: 14 * scale, opacity: 0.9 }}>{contacts[0].relationship}</p>
+            <p style={{ fontSize: 14 * scale, opacity: 0.9 }}>{contacts[0].relationship || contacts[0].relation}</p>
             <a href={`tel:${contacts[0].phone}`} style={{ display: 'inline-block', background: '#fff', color: '#ef4444', padding: '8px 16px', borderRadius: 20, marginTop: 10, textDecoration: 'none', fontWeight: 700, fontSize: 14 * scale }}>📞 Ligar</a>
           </div>
         )}

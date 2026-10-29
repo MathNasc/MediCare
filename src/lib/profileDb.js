@@ -23,6 +23,77 @@ function setLocal(key, val) {
   }
 }
 
+function renderSquareAvatarToDataUrl(source, width, height, rotateDeg = 0) {
+  const MAX_SIZE = 512;
+  const side = Math.min(width, height);
+  const sx = Math.max(0, (width - side) / 2);
+  const sy = Math.max(0, (height - side) / 2);
+  const outSize = Math.min(MAX_SIZE, side || MAX_SIZE);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = outSize;
+  canvas.height = outSize;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.save();
+  ctx.translate(outSize / 2, outSize / 2);
+  if (rotateDeg) {
+    ctx.rotate((rotateDeg * Math.PI) / 180);
+  }
+  ctx.drawImage(source, sx, sy, side, side, -outSize / 2, -outSize / 2, outSize, outSize);
+  ctx.restore();
+
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+async function processAvatarFile(file, rotateDeg = 0) {
+  if (typeof window === 'undefined' || !file) return null;
+
+  // Prefer createImageBitmap with imageOrientation: 'from-image' so EXIF orientation is respected
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      const dataUrl = renderSquareAvatarToDataUrl(bitmap, bitmap.width, bitmap.height, rotateDeg);
+      if (typeof bitmap.close === 'function') bitmap.close();
+      if (dataUrl) return dataUrl;
+    } catch {
+      // Fallback to HTMLImageElement below
+    }
+  }
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onload = () => {
+        const dataUrl = renderSquareAvatarToDataUrl(img, img.naturalWidth || img.width, img.naturalHeight || img.height, rotateDeg);
+        resolve(dataUrl || reader.result);
+      };
+      img.onerror = () => resolve(reader.result);
+      img.src = reader.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function rotateDataUrlImage(srcUrl, rotateDeg = 90) {
+  if (typeof window === 'undefined' || !srcUrl) return null;
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const w = img.naturalWidth || img.width || 512;
+      const h = img.naturalHeight || img.height || 512;
+      const dataUrl = renderSquareAvatarToDataUrl(img, w, h, rotateDeg);
+      resolve(dataUrl || srcUrl);
+    };
+    img.onerror = () => resolve(null);
+    img.src = srcUrl;
+  });
+}
+
 export const ProfileDB = {
   async getProfile(userId) {
     if (!isDatabaseConfigured || !databaseClient) {
@@ -62,26 +133,29 @@ export const ProfileDB = {
     return !error;
   },
   async uploadAvatar(userId, file) {
+    const processedDataUrl = await processAvatarFile(file, 0);
+    if (!processedDataUrl) return null;
+
     if (!isDatabaseConfigured || !databaseClient) {
-      return URL.createObjectURL(file);
-    }
-    const ext = file.name.split('.').pop();
-    const filePath = `${userId}/avatar-${Date.now()}.${ext}`;
-    
-    const { error: uploadError } = await databaseClient.storage
-      .from('avatars')
-      .upload(filePath, file, { upsert: true });
-
-    if (uploadError) {
-      console.error('uploadAvatar error:', uploadError);
-      return null;
+      return processedDataUrl;
     }
 
-    const { data: publicUrlData } = databaseClient.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
+    const filePath = `${userId}/avatar-${Date.now()}.jpg`;
+    try {
+      await databaseClient.storage
+        .from('avatars')
+        .upload(filePath, processedDataUrl, { upsert: true });
+    } catch (e) {
+      console.warn('uploadAvatar storage fallback:', e);
+    }
 
-    return publicUrlData?.publicUrl;
+    return processedDataUrl;
+  },
+  async rotateAvatar(userId, currentFotoUrl, rotateDeg = 90) {
+    const rotatedDataUrl = await rotateDataUrlImage(currentFotoUrl, rotateDeg);
+    if (!rotatedDataUrl) return null;
+    await this.updateProfile(userId, { foto_url: rotatedDataUrl });
+    return rotatedDataUrl;
   },
   async listAllergies(userId) {
     if (!isDatabaseConfigured || !databaseClient) return getLocal('mc_local_allergies_' + userId, []);
@@ -153,31 +227,35 @@ export const ProfileDB = {
     return data || [];
   },
   async addEmergencyContact(userId, payload) {
+    const rel = payload.relationship || payload.relation || '';
+    const normalized = { ...payload, relation: rel, relationship: rel };
     if (!isDatabaseConfigured || !databaseClient) {
       const list = getLocal('mc_local_emergency_contacts_' + userId, []);
-      const item = { id: 'emg-' + Date.now(), ...payload, user_id: userId, created_at: new Date().toISOString() };
+      const item = { id: 'emg-' + Date.now(), ...normalized, user_id: userId, created_at: new Date().toISOString() };
       list.push(item);
       setLocal('mc_local_emergency_contacts_' + userId, list);
       return item;
     }
-    const { data, error } = await databaseClient.from('emergency_contacts').insert({ ...payload, user_id: userId }).select().single();
+    const { data, error } = await databaseClient.from('emergency_contacts').insert({ ...normalized, user_id: userId }).select().single();
     if (error) console.error('addEmergencyContact error:', error);
     return data;
   },
   async updateEmergencyContact(id, payload) {
+    const rel = payload.relationship ?? payload.relation;
+    const normalized = rel !== undefined ? { ...payload, relation: rel, relationship: rel } : payload;
     if (!isDatabaseConfigured || !databaseClient) {
       if (typeof window !== 'undefined') {
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
           if (k && k.startsWith('mc_local_emergency_contacts_')) {
-            const list = getLocal(k, []).map(item => item.id === id ? { ...item, ...payload } : item);
+            const list = getLocal(k, []).map(item => item.id === id ? { ...item, ...normalized } : item);
             setLocal(k, list);
           }
         }
       }
       return true;
     }
-    const { error } = await databaseClient.from('emergency_contacts').update(payload).eq('id', id);
+    const { error } = await databaseClient.from('emergency_contacts').update(normalized).eq('id', id);
     return !error;
   },
   async deleteEmergencyContact(id) {

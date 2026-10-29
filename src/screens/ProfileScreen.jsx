@@ -1,7 +1,6 @@
 'use client';
 import { useNotifications } from '@/hooks/useNotifications';
 
-import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '@/context/AppContext';
@@ -82,12 +81,29 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggl
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingAvatar(true);
-    const url = await ProfileDB.uploadAvatar(user.id, file);
-    if (url) {
-      await ProfileDB.updateProfile(user.id, { foto_url: url });
-      setProfile(p => ({ ...p, foto_url: url }));
+    try {
+      const url = await ProfileDB.uploadAvatar(user.id, file);
+      if (url) {
+        await ProfileDB.updateProfile(user.id, { foto_url: url });
+        setProfile(p => ({ ...(p || {}), foto_url: url }));
+      }
+    } finally {
+      setUploadingAvatar(false);
+      if (e.target) e.target.value = '';
     }
-    setUploadingAvatar(false);
+  };
+
+  const handleRotateAvatar = async () => {
+    if (!profile?.foto_url || uploadingAvatar) return;
+    setUploadingAvatar(true);
+    try {
+      const rotated = await ProfileDB.rotateAvatar(user.id, profile.foto_url, 90);
+      if (rotated) {
+        setProfile(p => ({ ...(p || {}), foto_url: rotated }));
+      }
+    } finally {
+      setUploadingAvatar(false);
+    }
   };
 
   const currentRole = getRoleMeta(user?.role);
@@ -118,19 +134,44 @@ export function ProfileScreen({ T, scale, setFs, fsSize, dark, toggle, hc, toggl
             <div style={{ position: 'relative' }}>
               <div 
                 onClick={() => fileInputRef.current?.click()}
-                style={{ position: 'relative', width: 100, height: 100, borderRadius: '50%', background: T.bg2, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', border: `2px solid ${C.blue}` }}
+                style={{ position: 'relative', width: 108, height: 108, borderRadius: '50%', background: T.bg2, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', border: `2.5px solid ${C.blue}` }}
               >
                 {uploadingAvatar ? <span style={{ fontSize: 14 * scale, color: T.sub }}>...</span> 
-                 : profile?.foto_url ? <Image src={profile.foto_url} alt="Avatar" fill style={{ objectFit: 'cover' }} sizes="80px" /> 
+                 : profile?.foto_url ? (
+                   // eslint-disable-next-line @next/next/no-img-element
+                   <img src={profile.foto_url} alt="Avatar" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                 )
                  : <span style={{ fontSize: 36, color: T.sub }}>{displayName[0]?.toUpperCase()}</span>}
               </div>
               <input type="file" accept="image/*" ref={fileInputRef} onChange={handleAvatarUpload} style={{ display: 'none' }} />
               <div style={{ position: 'absolute', bottom: 0, right: 0, background: C.blue, width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,.2)' }} onClick={() => fileInputRef.current?.click()}>📷</div>
             </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                style={{ background: 'rgba(59,130,246,.12)', border: '1px solid rgba(59,130,246,.35)', color: C.blue, padding: '6px 14px', borderRadius: 99, fontSize: 12 * scale, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                📷 {profile?.foto_url ? 'Alterar foto' : 'Adicionar foto'}
+              </button>
+              {profile?.foto_url && (
+                <button
+                  type="button"
+                  onClick={handleRotateAvatar}
+                  disabled={uploadingAvatar}
+                  title="Girar foto em 90°"
+                  style={{ background: T.bg2, border: `1px solid ${T.bdr}`, color: T.sub, padding: '6px 12px', borderRadius: 99, fontSize: 12 * scale, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                >
+                  ↻ Girar foto
+                </button>
+              )}
+            </div>
             
-            <p style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 800, marginTop: 16 }}>{displayName}</p>
+            <p style={{ color: T.txt, fontSize: 22 * scale, fontWeight: 800, marginTop: 14, textAlign: 'center' }}>{displayName}</p>
             {profile?.dob && <p style={{ color: T.sub, fontSize: 15 * scale }}>{calcAge(profile.dob)}</p>}
-            <div style={{ background: T.bg2, padding: '4px 12px', borderRadius: 20, marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ background: T.bg2, padding: '4px 12px', borderRadius: 20, marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, border: `1px solid ${T.bdr}` }}>
               <span style={{ fontSize: 14 }}>{currentRole?.icon || '⚙️'}</span>
               <span style={{ color: T.sub, fontSize: 13 * scale, fontWeight: 600 }}>{currentRole?.label || 'Independente'}</span>
             </div>
