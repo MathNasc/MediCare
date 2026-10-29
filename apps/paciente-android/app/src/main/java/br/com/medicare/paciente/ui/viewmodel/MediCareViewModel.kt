@@ -135,9 +135,10 @@ class MediCareViewModel @Inject constructor(
             Quintuple(cgs, movements, pendingCount, selectedId, aiMsgs)
         }
     ) { base, extra ->
+        val userMedIds = base.medications.map { it.id }.toSet()
         base.copy(
             caregivers = extra.a,
-            stockMovements = extra.b,
+            stockMovements = if (base.user == null) emptyList() else extra.b.filter { it.medicationId in userMedIds },
             pendingSyncCount = extra.c,
             selectedDoseForModal = base.dailyDoses.find { it.id == extra.d },
             aiMessages = extra.e
@@ -213,6 +214,10 @@ class MediCareViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch {
+            _selectedDoseId.value = null
+            _aiMessages.value = listOf(
+                "assistant" to "Olá! Sou o Assistente de Saúde do MediCare. Posso explicar seus medicamentos em linguagem simples, revisar sua adesão ou preparar um resumo para sua próxima consulta médica.\n\nℹ️ *Minhas respostas são informativas e nunca substituem a orientação do seu médico.*"
+            )
             repository.logout()
         }
     }

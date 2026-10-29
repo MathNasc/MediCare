@@ -64,6 +64,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -226,7 +227,7 @@ public class MainActivity extends Activity {
         try {
             AlarmManager am = (AlarmManager) getSystemService("alarm");
             if (am == null || this.meds == null) return;
-            boolean enabled = areNotificationsFullyActive();
+            boolean enabled = this.isLoggedIn && areNotificationsFullyActive();
             int flags = 134217728; // FLAG_UPDATE_CURRENT
             if (Build.VERSION.SDK_INT >= 23) {
                 flags |= 67108864; // FLAG_IMMUTABLE
@@ -1345,6 +1346,262 @@ public class MainActivity extends Activity {
         }
     }
 
+    private JSONObject createEmptyProfile() {
+        JSONObject p = new JSONObject();
+        try {
+            p.put("id", "");
+            p.put("nome", "");
+            p.put("full_name", "");
+            p.put("social_name", "");
+            p.put("email", "");
+            p.put("data_nascimento", "");
+            p.put("dob", "");
+            p.put("sex", "");
+            p.put("sexo", "");
+            p.put("gender", "");
+            p.put("telefone", "");
+            p.put("phone", "");
+            p.put("cpf", "");
+            p.put("tipo_sanguineo", "");
+            p.put("blood_type", "");
+            p.put("peso", "");
+            p.put("weight", "");
+            p.put("altura", "");
+            p.put("height", "");
+            p.put("endereco", "");
+            p.put("address", "");
+            p.put("role", "independente");
+            p.put("user_role", "independent");
+            p.put("observacoes_medicas", "");
+            p.put("emergency_notes", "");
+            p.put("alerta_sonoro", true);
+            p.put("notifications_enabled", true);
+        } catch (Exception ignored) {}
+        return p;
+    }
+
+    private void resetActiveSessionData() {
+        this.profile = createEmptyProfile();
+        this.meds = new JSONArray();
+        this.doseLogs = new JSONArray();
+        this.events = new JSONArray();
+        this.calNotes = new JSONObject();
+        this.calNotesList = new JSONArray();
+        this.stockMovements = new JSONArray();
+        this.allergies = new JSONArray();
+        this.conditions = new JSONArray();
+        this.contacts = new JSONArray();
+        this.professionals = new JSONArray();
+        this.caregivers = new JSONArray();
+        this.aiMessages = new JSONArray();
+        this.onboardingStep = 0;
+        this.activeTab = "home";
+        this.profileSubView = "main";
+        this.aiSubView = "main";
+        this.stockAuditFilterMedId = "";
+        this.tabHistory.clear();
+    }
+
+    private boolean isOriginalMatheusAccount(String id, String email, String nome) {
+        String cleanId = id != null ? id.trim() : "";
+        String cleanNome = nome != null ? nome.trim().toLowerCase(Locale.ROOT) : "";
+        if ("98e5cdc4-7866-43e5-9c90-ebb712ecd816".equalsIgnoreCase(cleanId)) {
+            return cleanNome.isEmpty() || cleanNome.startsWith("matheus");
+        }
+        return cleanNome.equals("matheus do nascimento araujo");
+    }
+
+    private boolean hasLeakedOldProfileData(JSONObject prof, JSONArray medsArr) {
+        if (prof == null) return false;
+        String id = prof.optString("id", "");
+        String email = prof.optString("email", "");
+        String nome = prof.optString("nome", "");
+        if (isOriginalMatheusAccount(id, email, nome)) {
+            return false;
+        }
+        if (medsArr != null) {
+            boolean hasSertralina = false;
+            boolean hasHidantalOrVenvanse = false;
+            for (int i = 0; i < medsArr.length(); i++) {
+                JSONObject m = medsArr.optJSONObject(i);
+                if (m != null) {
+                    String mn = m.optString("nome", "").trim().toLowerCase(Locale.ROOT);
+                    if (mn.contains("sertralina")) hasSertralina = true;
+                    if (mn.contains("hidantal") || mn.contains("venvanse")) hasHidantalOrVenvanse = true;
+                }
+            }
+            if (hasSertralina && hasHidantalOrVenvanse) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String resolveCurrentAccountUserId() {
+        String patId = this.profile != null ? this.profile.optString("id", "").trim() : "";
+        String email = this.profile != null ? this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT) : "";
+        String nome = this.profile != null ? this.profile.optString("nome", "").trim().toLowerCase(Locale.ROOT) : "";
+        if (!patId.isEmpty() && !patId.startsWith("pac-") && !patId.equals("user-local-paciente")) {
+            if ("98e5cdc4-7866-43e5-9c90-ebb712ecd816".equalsIgnoreCase(patId) && !isOriginalMatheusAccount(patId, email, nome)) {
+                String fixedId = !email.isEmpty()
+                    ? UUID.nameUUIDFromBytes(("medicare-user:" + email).getBytes(StandardCharsets.UTF_8)).toString()
+                    : UUID.randomUUID().toString();
+                try { this.profile.put("id", fixedId); } catch (Exception ignored) {}
+                return fixedId;
+            }
+            return patId;
+        }
+        if (isOriginalMatheusAccount(patId, email, nome)) {
+            patId = "98e5cdc4-7866-43e5-9c90-ebb712ecd816";
+        } else if (!email.isEmpty()) {
+            patId = UUID.nameUUIDFromBytes(("medicare-user:" + email).getBytes(StandardCharsets.UTF_8)).toString();
+        } else {
+            patId = UUID.randomUUID().toString();
+        }
+        try {
+            if (this.profile != null) {
+                this.profile.put("id", patId);
+            }
+        } catch (Exception ignored) {}
+        return patId;
+    }
+
+    private void saveUserSnapshot() {
+        try {
+            if (this.profile == null) return;
+            String emailKey = this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
+            if (emailKey.isEmpty()) return;
+            if (hasLeakedOldProfileData(this.profile, this.meds)) return;
+            JSONObject snap = new JSONObject();
+            snap.put("profile", new JSONObject(this.profile.toString()));
+            snap.put("meds", this.meds != null ? new JSONArray(this.meds.toString()) : new JSONArray());
+            snap.put("dose_logs", this.doseLogs != null ? new JSONArray(this.doseLogs.toString()) : new JSONArray());
+            snap.put("events", this.events != null ? new JSONArray(this.events.toString()) : new JSONArray());
+            snap.put("cal_notes", this.calNotes != null ? new JSONObject(this.calNotes.toString()) : new JSONObject());
+            snap.put("cal_notes_list", this.calNotesList != null ? new JSONArray(this.calNotesList.toString()) : new JSONArray());
+            snap.put("stock_movements", this.stockMovements != null ? new JSONArray(this.stockMovements.toString()) : new JSONArray());
+            snap.put("allergies", this.allergies != null ? new JSONArray(this.allergies.toString()) : new JSONArray());
+            snap.put("conditions", this.conditions != null ? new JSONArray(this.conditions.toString()) : new JSONArray());
+            snap.put("contacts", this.contacts != null ? new JSONArray(this.contacts.toString()) : new JSONArray());
+            snap.put("professionals", this.professionals != null ? new JSONArray(this.professionals.toString()) : new JSONArray());
+            snap.put("caregivers", this.caregivers != null ? new JSONArray(this.caregivers.toString()) : new JSONArray());
+            snap.put("ai_messages", this.aiMessages != null ? new JSONArray(this.aiMessages.toString()) : new JSONArray());
+            snap.put("onboarding_completed", this.prefs.getBoolean("onboarding_completed", false));
+            this.prefs.edit().putString("user_snapshot_" + emailKey, snap.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    private boolean restoreUserSnapshot(String email, String expectedUserId) {
+        try {
+            if (email == null || email.trim().isEmpty()) return false;
+            String emailKey = email.trim().toLowerCase(Locale.ROOT);
+            String raw = this.prefs.getString("user_snapshot_" + emailKey, null);
+            if (raw == null || raw.isEmpty()) return false;
+            JSONObject snap = new JSONObject(raw);
+            JSONObject snapProf = snap.optJSONObject("profile");
+            if (snapProf == null) return false;
+            String snapEmail = snapProf.optString("email", "").trim().toLowerCase(Locale.ROOT);
+            if (!emailKey.equals(snapEmail)) return false;
+            String snapId = snapProf.optString("id", "").trim();
+            if (expectedUserId != null && !expectedUserId.trim().isEmpty() && !snapId.isEmpty() && !snapId.equalsIgnoreCase(expectedUserId.trim())) {
+                return false;
+            }
+            JSONArray snapMeds = snap.optJSONArray("meds");
+            if (hasLeakedOldProfileData(snapProf, snapMeds)) {
+                this.prefs.edit().remove("user_snapshot_" + emailKey).apply();
+                return false;
+            }
+            this.profile = snapProf;
+            this.meds = snapMeds != null ? snapMeds : new JSONArray();
+            this.doseLogs = snap.optJSONArray("dose_logs") != null ? snap.optJSONArray("dose_logs") : new JSONArray();
+            this.events = snap.optJSONArray("events") != null ? snap.optJSONArray("events") : new JSONArray();
+            this.calNotes = snap.optJSONObject("cal_notes") != null ? snap.optJSONObject("cal_notes") : new JSONObject();
+            this.calNotesList = snap.optJSONArray("cal_notes_list") != null ? snap.optJSONArray("cal_notes_list") : new JSONArray();
+            this.stockMovements = snap.optJSONArray("stock_movements") != null ? snap.optJSONArray("stock_movements") : new JSONArray();
+            this.allergies = snap.optJSONArray("allergies") != null ? snap.optJSONArray("allergies") : new JSONArray();
+            this.conditions = snap.optJSONArray("conditions") != null ? snap.optJSONArray("conditions") : new JSONArray();
+            this.contacts = snap.optJSONArray("contacts") != null ? snap.optJSONArray("contacts") : new JSONArray();
+            this.professionals = snap.optJSONArray("professionals") != null ? snap.optJSONArray("professionals") : new JSONArray();
+            this.caregivers = snap.optJSONArray("caregivers") != null ? snap.optJSONArray("caregivers") : new JSONArray();
+            this.aiMessages = snap.optJSONArray("ai_messages") != null ? snap.optJSONArray("ai_messages") : new JSONArray();
+            this.prefs.edit().putBoolean("onboarding_completed", snap.optBoolean("onboarding_completed", true)).apply();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void wipeRemoteLeakedDataForUser(final String targetUserId, final String keepName, final String keepEmail, final String keepRole) {
+        if (targetUserId == null || targetUserId.trim().isEmpty()) return;
+        final String uid = targetUserId.trim();
+        if ("98e5cdc4-7866-43e5-9c90-ebb712ecd816".equalsIgnoreCase(uid)) {
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String[][] deleteTargets = {
+                        {"historico_doses", "user_id"},
+                        {"stock_movements", "user_id"},
+                        {"medicamentos", "user_id"},
+                        {"health_events", "user_id"},
+                        {"notes", "user_id"},
+                        {"calendar_notes", "user_id"},
+                        {"allergies", "user_id"},
+                        {"health_conditions", "user_id"},
+                        {"emergency_contacts", "user_id"},
+                        {"healthcare_professionals", "user_id"},
+                        {"caregiver_relationships", "patient_id"}
+                    };
+                    for (int i = 0; i < deleteTargets.length; i++) {
+                        try {
+                            URL delUrl = new URL(EMBEDDED_BACKEND_URL + "/api/rest/v1/" + deleteTargets[i][0] + "?" + deleteTargets[i][1] + "=eq." + Uri.encode(uid));
+                            HttpURLConnection delConn = (HttpURLConnection) delUrl.openConnection();
+                            delConn.setRequestMethod("DELETE");
+                            delConn.setConnectTimeout(6000);
+                            delConn.setReadTimeout(6000);
+                            delConn.getResponseCode();
+                            delConn.disconnect();
+                        } catch (Exception ignored) {}
+                    }
+                    try {
+                        URL upsertUrl = new URL(EMBEDDED_BACKEND_URL + "/api/rest/v1/profiles");
+                        HttpURLConnection upsertConn = (HttpURLConnection) upsertUrl.openConnection();
+                        upsertConn.setRequestMethod("POST");
+                        upsertConn.setConnectTimeout(6000);
+                        upsertConn.setReadTimeout(6000);
+                        upsertConn.setDoOutput(true);
+                        upsertConn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                        upsertConn.setRequestProperty("Prefer", "resolution=merge-duplicates");
+                        JSONObject cleanProf = new JSONObject();
+                        cleanProf.put("id", uid);
+                        cleanProf.put("nome", keepName != null && !keepName.isEmpty() ? keepName : "Paciente");
+                        if (keepEmail != null && !keepEmail.isEmpty()) cleanProf.put("email", keepEmail);
+                        cleanProf.put("role", keepRole != null && !keepRole.isEmpty() ? keepRole : "independente");
+                        cleanProf.put("social_name", JSONObject.NULL);
+                        cleanProf.put("dob", JSONObject.NULL);
+                        cleanProf.put("sex", JSONObject.NULL);
+                        cleanProf.put("cpf", JSONObject.NULL);
+                        cleanProf.put("phone", JSONObject.NULL);
+                        cleanProf.put("address", JSONObject.NULL);
+                        cleanProf.put("weight", JSONObject.NULL);
+                        cleanProf.put("height", JSONObject.NULL);
+                        cleanProf.put("blood_type", JSONObject.NULL);
+                        cleanProf.put("foto_url", JSONObject.NULL);
+                        byte[] bodyBytes = cleanProf.toString().getBytes(StandardCharsets.UTF_8);
+                        OutputStream os = upsertConn.getOutputStream();
+                        os.write(bodyBytes);
+                        os.close();
+                        upsertConn.getResponseCode();
+                        upsertConn.disconnect();
+                    } catch (Exception ignored) {}
+                    MainActivity.this.prefs.edit().putBoolean("v257_remote_cleaned_" + uid, true).apply();
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
     private void loadOrInitData() {
         try {
             this.isLoggedIn = this.prefs.getBoolean("is_logged_in", false);
@@ -1354,7 +1611,7 @@ public class MainActivity extends Activity {
             this.fontScaleMode = this.prefs.getString("font_scale_mode", "normal");
             this.lastSyncTimestamp = this.prefs.getString("last_sync_timestamp", "Sincronização automática ativa");
             String string = this.prefs.getString("profile", null);
-            if (string != null) {
+            if (string != null && this.isLoggedIn) {
                 this.profile = new JSONObject(string);
                 this.meds = new JSONArray(this.prefs.getString("meds", "[]"));
                 this.doseLogs = new JSONArray(this.prefs.getString("dose_logs", "[]"));
@@ -1379,60 +1636,53 @@ public class MainActivity extends Activity {
 
                 if ("maria.silva@email.com".equalsIgnoreCase(this.profile.optString("email", ""))) {
                     this.isLoggedIn = false;
-                    this.profile = new JSONObject();
-                    this.meds = new JSONArray();
-                    this.doseLogs = new JSONArray();
-                    this.events = new JSONArray();
-                    this.calNotes = new JSONObject();
-                    this.calNotesList = new JSONArray();
-                    this.stockMovements = new JSONArray();
-                    this.allergies = new JSONArray();
-                    this.conditions = new JSONArray();
-                    this.contacts = new JSONArray();
-                    this.professionals = new JSONArray();
-                    this.caregivers = new JSONArray();
-                    this.aiMessages = new JSONArray();
+                    resetActiveSessionData();
                     this.prefs.edit().putBoolean("is_logged_in", false).putBoolean("onboarding_completed", false).apply();
-                    saveAll();
+                    saveLocalStateOnly();
+                    return;
+                }
+
+                String curId = this.profile.optString("id", "").trim();
+                String curEmail = this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
+                String curNome = this.profile.optString("nome", "").trim();
+                boolean notOriginalUser = !isOriginalMatheusAccount(curId, curEmail, curNome);
+                boolean needsCleanup = hasLeakedOldProfileData(this.profile, this.meds)
+                    || (notOriginalUser && !this.prefs.getBoolean("v257_account_isolation_cleaned", false));
+
+                if (needsCleanup) {
+                    String cleanId = resolveCurrentAccountUserId();
+                    String cleanRole = isPatientProfileRole() ? "paciente" : "independente";
+                    if (!curEmail.isEmpty()) {
+                        this.prefs.edit().remove("user_snapshot_" + curEmail).apply();
+                    }
+                    resetActiveSessionData();
+                    this.profile.put("id", cleanId);
+                    this.profile.put("nome", curNome);
+                    this.profile.put("full_name", curNome);
+                    this.profile.put("email", curEmail);
+                    setProfileRoleValue(cleanRole);
+                    this.prefs.edit()
+                        .putBoolean("onboarding_completed", false)
+                        .putBoolean("v257_account_isolation_cleaned", true)
+                        .apply();
+                    saveLocalStateOnly();
+                    wipeRemoteLeakedDataForUser(cleanId, curNome, curEmail, cleanRole);
+                } else {
+                    this.prefs.edit().putBoolean("v257_account_isolation_cleaned", true).apply();
+                    saveUserSnapshot();
                 }
             } else {
-                this.profile = new JSONObject();
-                this.profile.put("id", "");
-                this.profile.put("nome", "");
-                this.profile.put("social_name", "");
-                this.profile.put("email", "");
-                this.profile.put("data_nascimento", "");
-                this.profile.put("dob", "");
-                this.profile.put("sex", "");
-                this.profile.put("telefone", "");
-                this.profile.put("cpf", "");
-                this.profile.put("tipo_sanguineo", "");
-                this.profile.put("peso", "");
-                this.profile.put("altura", "");
-                this.profile.put("endereco", "");
-                this.profile.put("role", "independente");
-                this.profile.put("observacoes_medicas", "");
-                this.profile.put("alerta_sonoro", true);
-                this.meds = new JSONArray();
-                this.doseLogs = new JSONArray();
-                this.events = new JSONArray();
-                this.calNotes = new JSONObject();
-                this.calNotesList = new JSONArray();
-                this.stockMovements = new JSONArray();
-                this.allergies = new JSONArray();
-                this.conditions = new JSONArray();
-                this.contacts = new JSONArray();
-                this.professionals = new JSONArray();
-                this.caregivers = new JSONArray();
-                this.aiMessages = new JSONArray();
-                saveAll();
+                this.isLoggedIn = false;
+                resetActiveSessionData();
+                this.prefs.edit().putBoolean("v257_account_isolation_cleaned", true).apply();
+                saveLocalStateOnly();
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private void saveAll() {
+    private void saveLocalStateOnly() {
         this.prefs.edit()
             .putBoolean("is_logged_in", this.isLoggedIn)
             .putBoolean("dark_mode", this.isDarkMode)
@@ -1454,8 +1704,30 @@ public class MainActivity extends Activity {
             .putString("caregivers", this.caregivers.toString())
             .putString("ai_messages", this.aiMessages.toString())
             .apply();
+        if (this.isLoggedIn) {
+            saveUserSnapshot();
+        }
         scheduleAllMedicationAlarms();
-        syncWithBackendSilently(false);
+    }
+
+    private void performLogout() {
+        if (this.isLoggedIn) {
+            saveUserSnapshot();
+        }
+        this.isLoggedIn = false;
+        this.isRegisterMode = false;
+        scheduleAllMedicationAlarms();
+        resetActiveSessionData();
+        this.prefs.edit().putBoolean("onboarding_completed", false).remove("active_user_email").apply();
+        saveLocalStateOnly();
+        render();
+    }
+
+    private void saveAll() {
+        saveLocalStateOnly();
+        if (this.isLoggedIn) {
+            syncWithBackendSilently(false);
+        }
     }
 
     private void render() {
@@ -2020,7 +2292,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.5.6 • Produção");
+        versionBadge.setText("Versão 2.5.7 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -2160,6 +2432,7 @@ public class MainActivity extends Activity {
             return;
         }
 
+        final String cleanEmail = email.trim().toLowerCase(Locale.ROOT);
         Toast.makeText(this, "Entrando na conta...", 0).show();
 
         new Thread(new Runnable() {
@@ -2175,7 +2448,7 @@ public class MainActivity extends Activity {
                     conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
 
                     JSONObject reqBody = new JSONObject();
-                    reqBody.put("email", email);
+                    reqBody.put("email", cleanEmail);
                     reqBody.put("password", password);
 
                     byte[] postData = reqBody.toString().getBytes(StandardCharsets.UTF_8);
@@ -2198,29 +2471,50 @@ public class MainActivity extends Activity {
                     final JSONObject respObj = new JSONObject(sb.toString());
 
                     if (responseCode == 200) {
-                        MainActivity.this.profile.put("email", email);
-                        JSONObject userObj = respObj.optJSONObject("user");
-                        if (userObj != null) {
-                            String userId = userObj.optString("id");
-                            if (!userId.isEmpty()) {
-                                MainActivity.this.profile.put("id", userId);
-                            }
-                            JSONObject meta = userObj.optJSONObject("user_metadata");
-                            if (meta != null && meta.has("nome")) {
-                                MainActivity.this.profile.put("nome", meta.optString("nome"));
-                            }
-                        }
-                        MainActivity.this.isLoggedIn = true;
-                        MainActivity.this.isRegisterMode = false;
-                        MainActivity.this.saveAll();
-
                         MainActivity.this.runOnUiThread(new Runnable() {
                             @Override
                             public final void run() {
-                                Toast.makeText(MainActivity.this, "✓ Bem-vindo de volta!", 0).show();
-                                MainActivity.this.render();
-                                MainActivity.this.pullFromBackendIfEmptyOrUpdated();
-                                MainActivity.this.syncWithBackendSilently(false);
+                                try {
+                                    JSONObject userObj = respObj.optJSONObject("user");
+                                    String userId = userObj != null ? userObj.optString("id", "").trim() : "";
+                                    JSONObject meta = userObj != null ? userObj.optJSONObject("user_metadata") : null;
+                                    String userName = "";
+                                    if (meta != null && !meta.optString("nome", "").trim().isEmpty()) {
+                                        userName = meta.optString("nome", "").trim();
+                                    } else if (userObj != null && !userObj.optString("nome", "").trim().isEmpty()) {
+                                        userName = userObj.optString("nome", "").trim();
+                                    }
+                                    String userRole = "independente";
+                                    if (userObj != null && !userObj.optString("role", "").trim().isEmpty()) {
+                                        userRole = userObj.optString("role", "").trim();
+                                    } else if (meta != null && !meta.optString("role", "").trim().isEmpty()) {
+                                        userRole = meta.optString("role", "").trim();
+                                    }
+
+                                    MainActivity.this.resetActiveSessionData();
+                                    boolean restored = MainActivity.this.restoreUserSnapshot(cleanEmail, userId);
+                                    MainActivity.this.profile.put("email", cleanEmail);
+                                    if (!userId.isEmpty()) {
+                                        MainActivity.this.profile.put("id", userId);
+                                    } else {
+                                        MainActivity.this.resolveCurrentAccountUserId();
+                                    }
+                                    if (!userName.isEmpty() && MainActivity.this.profile.optString("nome", "").trim().isEmpty()) {
+                                        MainActivity.this.profile.put("nome", userName);
+                                        MainActivity.this.profile.put("full_name", userName);
+                                    }
+                                    if (!restored) {
+                                        MainActivity.this.setProfileRoleValue(userRole);
+                                        MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
+                                    }
+                                    MainActivity.this.isLoggedIn = true;
+                                    MainActivity.this.isRegisterMode = false;
+                                    MainActivity.this.prefs.edit().putString("active_user_email", cleanEmail).apply();
+                                    MainActivity.this.saveLocalStateOnly();
+                                    Toast.makeText(MainActivity.this, "✓ Bem-vindo de volta!", 0).show();
+                                    MainActivity.this.render();
+                                    MainActivity.this.pullFromBackendIfEmptyOrUpdated();
+                                } catch (Exception ignored) {}
                             }
                         });
                     } else {
@@ -2236,10 +2530,11 @@ public class MainActivity extends Activity {
                     MainActivity.this.runOnUiThread(new Runnable() {
                         @Override
                         public final void run() {
-                            if (email.equalsIgnoreCase(MainActivity.this.profile.optString("email", ""))) {
+                            MainActivity.this.resetActiveSessionData();
+                            if (MainActivity.this.restoreUserSnapshot(cleanEmail, null)) {
                                 MainActivity.this.isLoggedIn = true;
                                 MainActivity.this.isRegisterMode = false;
-                                MainActivity.this.saveAll();
+                                MainActivity.this.saveLocalStateOnly();
                                 MainActivity.this.render();
                                 Toast.makeText(MainActivity.this, "Conectado em modo offline.", 0).show();
                             } else {
@@ -2270,6 +2565,8 @@ public class MainActivity extends Activity {
             return;
         }
 
+        final String cleanEmail = email.trim().toLowerCase(Locale.ROOT);
+        final String cleanNome = nome.trim();
         Toast.makeText(this, "Criando sua conta...", 0).show();
 
         new Thread(new Runnable() {
@@ -2285,12 +2582,12 @@ public class MainActivity extends Activity {
                     conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
 
                     JSONObject reqBody = new JSONObject();
-                    reqBody.put("email", email);
+                    reqBody.put("email", cleanEmail);
                     reqBody.put("password", password);
 
                     JSONObject metaData = new JSONObject();
-                    metaData.put("nome", nome);
-                    metaData.put("role", "paciente");
+                    metaData.put("nome", cleanNome);
+                    metaData.put("role", "independente");
                     reqBody.put("data", metaData);
 
                     byte[] postData = reqBody.toString().getBytes(StandardCharsets.UTF_8);
@@ -2313,25 +2610,33 @@ public class MainActivity extends Activity {
                     final JSONObject respObj = new JSONObject(sb.toString());
 
                     if (responseCode == 200 || responseCode == 201) {
-                        MainActivity.this.profile.put("email", email);
-                        MainActivity.this.profile.put("nome", nome);
-                        JSONObject userObj = respObj.optJSONObject("user");
-                        if (userObj != null) {
-                            String userId = userObj.optString("id");
-                            if (!userId.isEmpty()) {
-                                MainActivity.this.profile.put("id", userId);
-                            }
-                        }
-                        MainActivity.this.isLoggedIn = true;
-                        MainActivity.this.isRegisterMode = false;
-                        MainActivity.this.saveAll();
-
                         MainActivity.this.runOnUiThread(new Runnable() {
                             @Override
                             public final void run() {
-                                Toast.makeText(MainActivity.this, "✓ Conta criada com sucesso! Bem-vindo(a), " + nome, 1).show();
-                                MainActivity.this.render();
-                                MainActivity.this.syncWithBackendSilently(false);
+                                try {
+                                    MainActivity.this.prefs.edit().remove("user_snapshot_" + cleanEmail).apply();
+                                    MainActivity.this.resetActiveSessionData();
+                                    JSONObject userObj = respObj.optJSONObject("user");
+                                    String newUserId = userObj != null ? userObj.optString("id", "").trim() : "";
+                                    if (newUserId.isEmpty()) {
+                                        newUserId = UUID.nameUUIDFromBytes(("medicare-user:" + cleanEmail).getBytes(StandardCharsets.UTF_8)).toString();
+                                    }
+                                    MainActivity.this.profile.put("id", newUserId);
+                                    MainActivity.this.profile.put("email", cleanEmail);
+                                    MainActivity.this.profile.put("nome", cleanNome);
+                                    MainActivity.this.profile.put("full_name", cleanNome);
+                                    MainActivity.this.setProfileRoleValue("independente");
+                                    MainActivity.this.isLoggedIn = true;
+                                    MainActivity.this.isRegisterMode = false;
+                                    MainActivity.this.onboardingStep = 0;
+                                    MainActivity.this.prefs.edit()
+                                        .putBoolean("onboarding_completed", false)
+                                        .putString("active_user_email", cleanEmail)
+                                        .apply();
+                                    MainActivity.this.saveAll();
+                                    Toast.makeText(MainActivity.this, "✓ Conta criada com sucesso! Bem-vindo(a), " + cleanNome, 1).show();
+                                    MainActivity.this.render();
+                                } catch (Exception ignored) {}
                             }
                         });
                     } else {
@@ -2348,12 +2653,22 @@ public class MainActivity extends Activity {
                         @Override
                         public final void run() {
                             try {
-                                MainActivity.this.profile.put("email", email);
-                                MainActivity.this.profile.put("nome", nome);
-                                MainActivity.this.profile.put("id", "pac-" + System.currentTimeMillis());
+                                MainActivity.this.prefs.edit().remove("user_snapshot_" + cleanEmail).apply();
+                                MainActivity.this.resetActiveSessionData();
+                                String fallbackUuid = UUID.nameUUIDFromBytes(("medicare-user:" + cleanEmail).getBytes(StandardCharsets.UTF_8)).toString();
+                                MainActivity.this.profile.put("id", fallbackUuid);
+                                MainActivity.this.profile.put("email", cleanEmail);
+                                MainActivity.this.profile.put("nome", cleanNome);
+                                MainActivity.this.profile.put("full_name", cleanNome);
+                                MainActivity.this.setProfileRoleValue("independente");
                             } catch (Exception ignored) {}
                             MainActivity.this.isLoggedIn = true;
                             MainActivity.this.isRegisterMode = false;
+                            MainActivity.this.onboardingStep = 0;
+                            MainActivity.this.prefs.edit()
+                                .putBoolean("onboarding_completed", false)
+                                .putString("active_user_email", cleanEmail)
+                                .apply();
                             MainActivity.this.saveAll();
                             MainActivity.this.render();
                             Toast.makeText(MainActivity.this, "Conta criada localmente! Sincronização pendente.", 1).show();
@@ -7538,9 +7853,7 @@ public class MainActivity extends Activity {
         btnLogout.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                MainActivity.this.isLoggedIn = false;
-                saveAll();
-                render();
+                performLogout();
             }
         });
         linearLayout.addView(btnLogout);
@@ -10294,12 +10607,13 @@ public class MainActivity extends Activity {
     /* JADX INFO: Access modifiers changed from: package-private */
     /* renamed from: lambda$buildProfileTab$20$com-medicare-patient-MainActivity, reason: not valid java name */
     public /* synthetic */ void m19lambda$buildProfileTab$20$commedicarepatientMainActivity(View view) {
-        this.isLoggedIn = false;
-        saveAll();
-        render();
+        performLogout();
     }
 
     private void syncWithBackendSilently(final boolean z) {
+        if (!this.isLoggedIn) {
+            return;
+        }
         if (z) {
             Toast.makeText(this, "Sincronizando dados com o servidor...", 0).show();
         }
@@ -10315,6 +10629,7 @@ public class MainActivity extends Activity {
     /* renamed from: lambda$syncWithBackendSilently$23$com-medicare-patient-MainActivity, reason: not valid java name */
     public /* synthetic */ void m24x90e7608c(final boolean z) {
         try {
+            if (!this.isLoggedIn) return;
             HttpURLConnection httpURLConnection = (HttpURLConnection) new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync").openConnection();
             httpURLConnection.setRequestMethod("POST");
             httpURLConnection.setConnectTimeout(8000);
@@ -10325,16 +10640,14 @@ public class MainActivity extends Activity {
             if (!EMBEDDED_API_KEY.isEmpty()) {
                 httpURLConnection.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
             }
-            String patId = this.profile.optString("id", "").trim();
-            if (patId.isEmpty() || patId.startsWith("pac-") || patId.equals("user-local-paciente")) {
-                patId = "98e5cdc4-7866-43e5-9c90-ebb712ecd816";
-                this.profile.put("id", patId);
-            }
+            String patId = resolveCurrentAccountUserId();
             JSONObject syncProfile = new JSONObject(this.profile.toString());
             syncProfile.put("id", patId);
             String apelido = this.profile.optString("apelido", this.profile.optString("social_name", "")).trim();
             if (!apelido.isEmpty()) {
                 syncProfile.put("social_name", apelido);
+            } else {
+                syncProfile.remove("social_name");
             }
             String rawDob = this.profile.optString("data_nascimento", this.profile.optString("dob", "")).trim();
             if (rawDob.matches("^\\d{2}/\\d{2}/\\d{4}$")) {
@@ -10348,14 +10661,20 @@ public class MainActivity extends Activity {
             String sexoVal = this.profile.optString("sexo", this.profile.optString("sex", "")).trim();
             if (!sexoVal.isEmpty()) {
                 syncProfile.put("sex", sexoVal);
+            } else {
+                syncProfile.remove("sex");
             }
             String telVal = this.profile.optString("telefone", this.profile.optString("phone", "")).trim();
             if (!telVal.isEmpty()) {
                 syncProfile.put("phone", telVal);
+            } else {
+                syncProfile.remove("phone");
             }
             String endVal = this.profile.optString("endereco", this.profile.optString("address", "")).trim();
             if (!endVal.isEmpty()) {
                 syncProfile.put("address", endVal);
+            } else {
+                syncProfile.remove("address");
             }
             String rawWeight = this.profile.optString("peso", this.profile.optString("weight", "")).replace(",", ".").replaceAll("[^0-9.]", "").trim();
             if (!rawWeight.isEmpty()) {
@@ -10369,9 +10688,11 @@ public class MainActivity extends Activity {
             } else {
                 syncProfile.remove("height");
             }
-            String btVal = this.profile.optString("tipo_sanguineo", this.profile.optString("blood_type", "O+")).trim();
+            String btVal = this.profile.optString("tipo_sanguineo", this.profile.optString("blood_type", "")).trim();
             if (!btVal.isEmpty()) {
                 syncProfile.put("blood_type", btVal);
+            } else {
+                syncProfile.remove("blood_type");
             }
             JSONObject jSONObject = new JSONObject();
             jSONObject.put("patientId", patId);
@@ -10417,7 +10738,7 @@ public class MainActivity extends Activity {
                 z2 = false;
             }
             String returnedUserId = jSONObject2.optString("userId", "").trim();
-            if (!returnedUserId.isEmpty()) {
+            if (!returnedUserId.isEmpty() && patId.equalsIgnoreCase(returnedUserId)) {
                 this.profile.put("id", returnedUserId);
                 this.prefs.edit().putString("profile", this.profile.toString()).apply();
             }
@@ -10440,15 +10761,17 @@ public class MainActivity extends Activity {
     }
 
     private void pullFromBackendIfEmptyOrUpdated() {
+        if (!this.isLoggedIn) {
+            return;
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    String patId = MainActivity.this.profile.optString("id", "").trim();
-                    if (patId.isEmpty() || patId.startsWith("pac-") || patId.equals("user-local-paciente")) {
-                        patId = "98e5cdc4-7866-43e5-9c90-ebb712ecd816";
-                    }
-                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId));
+                    if (!MainActivity.this.isLoggedIn) return;
+                    final String patId = MainActivity.this.resolveCurrentAccountUserId();
+                    final String myEmail = MainActivity.this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
+                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId) + "&email=" + Uri.encode(myEmail));
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("GET");
                     conn.setConnectTimeout(8000);
@@ -10464,21 +10787,91 @@ public class MainActivity extends Activity {
                     br.close();
                     final JSONObject resp = new JSONObject(sb.toString());
                     if (!resp.optBoolean("ok", false)) return;
+                    if (!MainActivity.this.isLoggedIn) return;
+
+                    String respUserId = resp.optString("userId", "").trim();
+                    JSONObject u = resp.optJSONObject("user");
+                    String respEmail = u != null ? u.optString("email", "").trim().toLowerCase(Locale.ROOT) : "";
+
+                    // Garantir que os dados retornados realmente pertencem ao usuário logado
+                    if (!respUserId.isEmpty() && !respUserId.equalsIgnoreCase(patId)) {
+                        if (myEmail.isEmpty() || !myEmail.equalsIgnoreCase(respEmail)) {
+                            return;
+                        }
+                    }
+
+                    JSONArray mArr = resp.optJSONArray("meds");
+                    if (MainActivity.this.hasLeakedOldProfileData(MainActivity.this.profile, mArr)) {
+                        MainActivity.this.wipeRemoteLeakedDataForUser(
+                            patId,
+                            MainActivity.this.profile.optString("nome", ""),
+                            myEmail,
+                            MainActivity.this.profile.optString("role", "independente")
+                        );
+                        return;
+                    }
 
                     boolean changed = false;
-                    JSONObject u = resp.optJSONObject("user");
-                    if (u != null && MainActivity.this.profile.optString("nome", "").trim().isEmpty() && !u.optString("nome", "").trim().isEmpty()) {
-                        MainActivity.this.profile.put("id", u.optString("id", patId));
-                        MainActivity.this.profile.put("nome", u.optString("nome", ""));
-                        if (!u.optString("social_name", "").isEmpty()) MainActivity.this.profile.put("social_name", u.optString("social_name"));
-                        if (!u.optString("dob", "").isEmpty()) MainActivity.this.profile.put("data_nascimento", u.optString("dob"));
-                        if (!u.optString("cpf", "").isEmpty()) MainActivity.this.profile.put("cpf", u.optString("cpf"));
-                        if (!u.optString("phone", "").isEmpty()) MainActivity.this.profile.put("telefone", u.optString("phone"));
-                        if (!u.optString("blood_type", "").isEmpty()) MainActivity.this.profile.put("tipo_sanguineo", u.optString("blood_type"));
-                        if (!u.optString("foto_url", "").isEmpty()) MainActivity.this.profile.put("foto_url", u.optString("foto_url"));
-                        changed = true;
+                    if (u != null) {
+                        if (MainActivity.this.profile.optString("nome", "").trim().isEmpty() && !u.optString("nome", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("nome", u.optString("nome", "").trim());
+                            MainActivity.this.profile.put("full_name", u.optString("nome", "").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("social_name", "").trim().isEmpty() && !u.isNull("social_name") && !u.optString("social_name", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("social_name", u.optString("social_name").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("data_nascimento", "").trim().isEmpty() && !u.isNull("dob") && !u.optString("dob", "").trim().isEmpty()) {
+                            String dobStr = u.optString("dob").trim();
+                            if (dobStr.length() >= 10) dobStr = dobStr.substring(0, 10);
+                            MainActivity.this.profile.put("data_nascimento", dobStr);
+                            MainActivity.this.profile.put("dob", dobStr);
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("sexo", "").trim().isEmpty() && !u.isNull("sex") && !u.optString("sex", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("sexo", u.optString("sex").trim());
+                            MainActivity.this.profile.put("sex", u.optString("sex").trim());
+                            MainActivity.this.profile.put("gender", u.optString("sex").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("cpf", "").trim().isEmpty() && !u.isNull("cpf") && !u.optString("cpf", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("cpf", u.optString("cpf").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("telefone", "").trim().isEmpty() && !u.isNull("phone") && !u.optString("phone", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("telefone", u.optString("phone").trim());
+                            MainActivity.this.profile.put("phone", u.optString("phone").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("endereco", "").trim().isEmpty() && !u.isNull("address") && !u.optString("address", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("endereco", u.optString("address").trim());
+                            MainActivity.this.profile.put("address", u.optString("address").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("peso", "").trim().isEmpty() && !u.isNull("weight") && !u.optString("weight", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("peso", u.optString("weight").trim());
+                            MainActivity.this.profile.put("weight", u.optString("weight").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("altura", "").trim().isEmpty() && !u.isNull("height") && !u.optString("height", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("altura", u.optString("height").trim());
+                            MainActivity.this.profile.put("height", u.optString("height").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("tipo_sanguineo", "").trim().isEmpty() && !u.isNull("blood_type") && !u.optString("blood_type", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("tipo_sanguineo", u.optString("blood_type").trim());
+                            MainActivity.this.profile.put("blood_type", u.optString("blood_type").trim());
+                            changed = true;
+                        }
+                        if (MainActivity.this.profile.optString("foto_url", "").trim().isEmpty() && !u.isNull("foto_url") && !u.optString("foto_url", "").trim().isEmpty()) {
+                            MainActivity.this.profile.put("foto_url", u.optString("foto_url").trim());
+                            changed = true;
+                        }
+                        if (!u.isNull("role") && !u.optString("role", "").trim().isEmpty()) {
+                            MainActivity.this.setProfileRoleValue(u.optString("role").trim());
+                        }
                     }
-                    JSONArray mArr = resp.optJSONArray("meds");
                     if (mArr != null && mArr.length() > 0 && MainActivity.this.meds.length() == 0) {
                         MainActivity.this.meds = mArr;
                         changed = true;
@@ -10513,16 +10906,31 @@ public class MainActivity extends Activity {
                         MainActivity.this.allergies = aArr;
                         changed = true;
                     }
+                    JSONArray condArr = resp.optJSONArray("conditions");
+                    if (condArr != null && condArr.length() > 0 && MainActivity.this.conditions.length() == 0) {
+                        MainActivity.this.conditions = condArr;
+                        changed = true;
+                    }
                     JSONArray cArr = resp.optJSONArray("contacts");
                     if (cArr != null && cArr.length() > 0 && MainActivity.this.contacts.length() == 0) {
                         MainActivity.this.contacts = cArr;
+                        changed = true;
+                    }
+                    JSONArray pArr = resp.optJSONArray("professionals");
+                    if (pArr != null && pArr.length() > 0 && MainActivity.this.professionals.length() == 0) {
+                        MainActivity.this.professionals = pArr;
+                        changed = true;
+                    }
+                    JSONArray cgArr = resp.optJSONArray("caregivers");
+                    if (cgArr != null && cgArr.length() > 0 && MainActivity.this.caregivers.length() == 0) {
+                        MainActivity.this.caregivers = cgArr;
                         changed = true;
                     }
                     if (changed) {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                MainActivity.this.saveAll();
+                                MainActivity.this.saveLocalStateOnly();
                                 MainActivity.this.render();
                             }
                         });

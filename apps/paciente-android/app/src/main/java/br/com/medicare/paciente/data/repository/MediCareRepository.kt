@@ -134,14 +134,15 @@ class MediCareRepository @Inject constructor(
 
     suspend fun register(nome: String, email: String, pass: String, role: String = "independente"): Result<UserProfile> {
         if (!isRemoteConfigured) {
+            val cleanEmail = email.trim().lowercase()
+            val uniqueLocalId = UUID.nameUUIDFromBytes("medicare-user:$cleanEmail".toByteArray()).toString()
             val localUser = UserProfile(
-                id = "user-local-paciente",
-                nome = nome.ifBlank { "Maria Helena Silva" },
-                email = email.ifBlank { "maria.helena@medicare.br" },
+                id = uniqueLocalId,
+                nome = nome.trim(),
+                email = cleanEmail,
                 role = role
             )
             sessionManager.saveSession(localUser, accessToken = null)
-            seedDefaultDataIfEmpty(localUser.id)
             return Result.success(localUser)
         }
 

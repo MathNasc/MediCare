@@ -104,10 +104,14 @@ async function resolveTargetUserId(client, requestedId, userObj = {}) {
   const email = (userObj.email || '').trim().toLowerCase();
   const nome = (userObj.nome || '').trim();
 
-  // 1. Se o ID informado já existe em profiles, usa-o diretamente
+  // 1. Se o ID informado já existe em profiles ou app_users, usa-o diretamente
   if (isValidUuid(requestedId)) {
     const byId = await client.query('SELECT id FROM profiles WHERE id = $1 LIMIT 1', [requestedId.trim()]);
     if (byId.rowCount > 0) return byId.rows[0].id;
+    const byAppUserId = await client
+      .query('SELECT id FROM app_users WHERE id = $1 LIMIT 1', [requestedId.trim()])
+      .catch(() => ({ rowCount: 0 }));
+    if (byAppUserId.rowCount > 0) return byAppUserId.rows[0].id;
   }
 
   // 2. Procura por email em profiles ou app_users
@@ -120,7 +124,24 @@ async function resolveTargetUserId(client, requestedId, userObj = {}) {
     if (byAppUserEmail.rowCount > 0) return byAppUserEmail.rows[0].id;
   }
 
-  // 3. Procura por nome exato ou parcial em profiles (ex.: "Matheus" -> "Matheus do Nascimento Araujo")
+  // Se um UUID válido ou um email explícito foi informado (novo usuário), NUNCA mesclar com outro perfil existente
+  if (isValidUuid(requestedId) || email) {
+    const newUuid = isValidUuid(requestedId)
+      ? requestedId.trim()
+      : toDeterministicUuid(email, 'medicare-user');
+    const fallbackEmail = email || `${newUuid.slice(0, 8)}@medicare.local`;
+    await client
+      .query(
+        `INSERT INTO app_users (id, email, password_hash, raw_user_meta_data)
+         VALUES ($1, $2, 'local_sync_account', $3::jsonb)
+         ON CONFLICT (id) DO NOTHING`,
+        [newUuid, fallbackEmail, JSON.stringify({ nome: nome || 'Paciente', role: 'independente' })]
+      )
+      .catch(() => {});
+    return newUuid;
+  }
+
+  // 3. Apenas quando não há ID nem email: procura por nome exato ou parcial em profiles
   if (nome && nome.toLowerCase() !== 'paciente') {
     const byName = await client.query(
       'SELECT id FROM profiles WHERE lower(nome) = lower($1) OR lower(nome) LIKE lower($2) ORDER BY updated_at DESC LIMIT 1',
@@ -129,15 +150,14 @@ async function resolveTargetUserId(client, requestedId, userObj = {}) {
     if (byName.rowCount > 0) return byName.rows[0].id;
   }
 
-  // 4. Se existir exatamente 1 perfil cadastrado no banco (como o perfil principal do paciente), vincula a ele
+  // 4. Fallback legado somente para chamadas sem identificador
   const existingProfiles = await client.query('SELECT id FROM profiles ORDER BY updated_at DESC LIMIT 5');
   if (existingProfiles.rowCount > 0) {
     return existingProfiles.rows[0].id;
   }
 
-  // 5. Caso o banco esteja completamente vazio, cria um app_user + UUID válido
-  const newUuid = isValidUuid(requestedId) ? requestedId.trim() : toDeterministicUuid(requestedId || 'pac-001', 'user');
-  const fallbackEmail = email || `${newUuid.slice(0, 8)}@medicare.local`;
+  const newUuid = toDeterministicUuid(requestedId || 'pac-001', 'user');
+  const fallbackEmail = `${newUuid.slice(0, 8)}@medicare.local`;
   await client
     .query(
       `INSERT INTO app_users (id, email, password_hash, raw_user_meta_data)
@@ -156,6 +176,7 @@ export async function OPTIONS() {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const rawUserId = searchParams.get('userId') || searchParams.get('patientId') || '';
+  const rawEmail = searchParams.get('email') || '';
 
   const pool = getPgPool();
   if (!pool) {
@@ -173,7 +194,7 @@ export async function GET(request) {
       'SELECT id, nome, social_name, email, role, blood_type, dob, sex, cpf, phone, weight, height, updated_at FROM profiles ORDER BY updated_at DESC LIMIT 50'
     );
 
-    const userId = await resolveTargetUserId(client, rawUserId, {});
+    const userId = await resolveTargetUserId(client, rawUserId, { email: rawEmail });
 
     const [profileRes, medsRes, histRes, eventsRes, notesRes, algRes, condRes, contRes, profRes, cgRes, stockRes] =
       await Promise.all([
