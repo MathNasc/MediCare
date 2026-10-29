@@ -180,7 +180,10 @@ export async function GET(request) {
         client.query('SELECT * FROM profiles WHERE id = $1 LIMIT 1', [userId]),
         client.query('SELECT * FROM medicamentos WHERE user_id = $1 ORDER BY created_at ASC', [userId]),
         client.query('SELECT * FROM historico_doses WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500', [userId]),
-        client.query('SELECT * FROM health_events WHERE user_id = $1 ORDER BY date ASC', [userId]),
+        client.query(
+          "SELECT * FROM health_events WHERE user_id = $1 AND COALESCE(type, '') <> 'estoque' AND COALESCE(title, '') NOT ILIKE 'Reposição:%' AND COALESCE(title, '') NOT ILIKE 'Ajuste:%' ORDER BY date ASC",
+          [userId]
+        ),
         client
           .query('SELECT * FROM notes WHERE user_id = $1 ORDER BY date DESC', [userId])
           .catch(() => client.query('SELECT * FROM calendar_notes WHERE user_id = $1 ORDER BY date DESC', [userId]))
@@ -466,9 +469,21 @@ export async function POST(request) {
       );
     }
 
+    await client
+      .query(
+        `DELETE FROM health_events WHERE user_id = $1 AND (type = 'estoque' OR title ILIKE 'Reposição:%' OR title ILIKE 'Ajuste:%')`,
+        [userId]
+      )
+      .catch(() => {});
+
     for (const ev of events) {
+      const evType = normalizeEventType(ev.type || ev.tipo);
+      const evTitle = String(ev.title || ev.titulo || 'Compromisso').trim();
+      if (evType === 'estoque' || /^reposi[cç][aã]o:/i.test(evTitle) || /^ajuste:/i.test(evTitle)) {
+        continue;
+      }
       const evDate = parsePgDate(ev.date || ev.data) || new Date().toISOString().slice(0, 10);
-      const evUuid = toDeterministicUuid(ev.id || `${ev.title || ev.titulo}:${evDate}`, `event:${userId}`);
+      const evUuid = toDeterministicUuid(ev.id || `${evTitle}:${evDate}`, `event:${userId}`);
       await client.query(
         `INSERT INTO health_events (id, user_id, type, title, description, date, time, doctor, location)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -482,8 +497,8 @@ export async function POST(request) {
         [
           evUuid,
           userId,
-          normalizeEventType(ev.type || ev.tipo),
-          ev.title || ev.titulo || 'Compromisso',
+          evType,
+          evTitle,
           ev.description || ev.observacoes || null,
           evDate,
           parsePgTime(ev.time || ev.hora),
@@ -585,15 +600,27 @@ export async function POST(request) {
 
     for (const sm of stockMovements) {
       const rawMedId = sm.medication_id || sm.med_id || '';
-      const resolvedMedUuid = medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
+      const smMedName = sm.med_name || sm.med_nome || sm.nome || null;
+      let resolvedMedUuid =
+        medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
+      if (!resolvedMedUuid && smMedName) {
+        const matchedMed = meds.find(
+          (m) => String(m.nome || '').trim().toLowerCase() === String(smMedName).trim().toLowerCase()
+        );
+        if (matchedMed) {
+          const mRawId = matchedMed.id || `med-${matchedMed.nome}`;
+          resolvedMedUuid = medIdMap.get(mRawId) || toDeterministicUuid(mRawId, `med:${userId}`);
+        }
+      }
       if (!resolvedMedUuid) continue;
       const medExists = await client.query('SELECT 1 FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
       if (medExists.rowCount === 0) continue;
 
-      const smUuid = toDeterministicUuid(sm.id || `${resolvedMedUuid}:${sm.created_at || Date.now()}`, `sm:${userId}`);
-      const qBefore = parsePgNumeric(sm.quantity_before) ?? 0;
-      const qAfter = parsePgNumeric(sm.quantity_after) ?? 0;
-      const qChanged = parsePgNumeric(sm.quantity_changed ?? sm.quantity_delta) ?? qAfter - qBefore;
+      const smUuid = toDeterministicUuid(sm.id || `${resolvedMedUuid}:${sm.created_at || sm.data || Date.now()}`, `sm:${userId}`);
+      const qBefore = parsePgNumeric(sm.quantity_before ?? sm.previous_quantity) ?? 0;
+      const qChanged =
+        parsePgNumeric(sm.quantity_changed ?? sm.quantity_delta ?? sm.quantity_change ?? sm.delta ?? sm.qtd) ?? 0;
+      const qAfter = parsePgNumeric(sm.quantity_after ?? sm.new_quantity) ?? Math.max(0, qBefore + qChanged);
 
       await client.query(
         `INSERT INTO stock_movements (
@@ -602,22 +629,31 @@ export async function POST(request) {
            purchase_price, purchase_location, batch, expiration_date, notes
          )
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT (id) DO UPDATE SET
+           med_name = COALESCE(EXCLUDED.med_name, stock_movements.med_name),
+           movement_type = EXCLUDED.movement_type,
+           quantity_before = EXCLUDED.quantity_before,
+           quantity_changed = EXCLUDED.quantity_changed,
+           quantity_delta = EXCLUDED.quantity_delta,
+           quantity_after = EXCLUDED.quantity_after,
+           purchase_price = COALESCE(EXCLUDED.purchase_price, stock_movements.purchase_price),
+           purchase_location = COALESCE(EXCLUDED.purchase_location, stock_movements.purchase_location),
+           notes = COALESCE(EXCLUDED.notes, stock_movements.notes)`,
         [
           smUuid,
           userId,
           resolvedMedUuid,
-          sm.med_name || sm.nome || null,
+          smMedName,
           normalizeMovementType(sm.movement_type || sm.tipo),
           qBefore,
           qChanged,
           qChanged,
           qAfter,
-          parsePgNumeric(sm.purchase_price || sm.preco),
-          sm.purchase_location || sm.local || null,
+          parsePgNumeric(sm.purchase_price ?? sm.price_paid ?? sm.preco),
+          sm.purchase_location || sm.pharmacy || sm.local || null,
           sm.batch || sm.lote || null,
           parsePgDate(sm.expiration_date || sm.validade),
-          sm.notes || sm.observacoes || null,
+          sm.notes || sm.motivo || sm.description || sm.observacoes || null,
         ]
       );
     }

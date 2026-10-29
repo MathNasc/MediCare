@@ -975,85 +975,172 @@ fun StockHistorySubScreen(state: PatientUiState) {
     val selectedForecast = state.stockForecasts.firstOrNull { selectedMedId == null || it.medId == selectedMedId }
 
     Column {
-        Text("📦 Histórico de Estoque", color = tokens.txt, fontSize = 20.sp, fontWeight = FontWeight.Black)
-        Text("Compras, ajustes, preços e previsão de término", color = tokens.sub, fontSize = 13.sp)
-
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(99.dp))
-                    .background(if (selectedMedId == null) MediCareColors.Blue else tokens.bg1)
-                    .clickable { selectedMedId = null }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text("Todos", color = if (selectedMedId == null) Color.White else tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-            state.medications.forEach { m ->
-                val sel = selectedMedId == m.id
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(99.dp))
-                        .background(if (sel) MediCareColors.Blue else tokens.bg1)
-                        .clickable { selectedMedId = m.id }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text(m.nome, color = if (sel) Color.White else tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        // Situação do Estoque Card
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(tokens.bg1)
+                .border(1.dp, tokens.bdr, RoundedCornerShape(20.dp))
+                .padding(18.dp)
+        ) {
+            Text("📦 Situação do Estoque", color = tokens.txt, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text("Acompanhe a quantidade restante, adicione reposições ou ajuste o saldo", color = tokens.sub, fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(14.dp))
+            if (state.medications.isEmpty()) {
+                Text("Nenhum medicamento cadastrado.", color = tokens.muted, fontSize = 13.sp)
+            } else {
+                state.medications.forEach { med ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(tokens.bg0)
+                            .border(1.dp, tokens.bdr, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(med.nome, color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                text = "Restam: ${med.estoqueAtual} ${med.unidade}",
+                                color = if (med.estoqueAtual <= 5) MediCareColors.Amber else tokens.sub,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MediCareColors.Blue.copy(alpha = 0.16f))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text("+ Repor", color = MediCareColors.Blue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InfoPill("🛒 Última compra", lastPurchase?.createdAt?.take(10)?.split("-")?.reversed()?.joinToString("/") ?: "--", MediCareColors.Blue, Modifier.weight(1f))
-            InfoPill("📦 Comprado mês", "+$boughtThisMonth un", MediCareColors.Green, Modifier.weight(1f))
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InfoPill("⏳ Duração média", "${selectedForecast?.daysRemaining ?: 15} dias", MediCareColors.Amber, Modifier.weight(1f))
-            InfoPill("🔮 Término prev.", selectedForecast?.depletionDate?.split("-")?.reversed()?.joinToString("/") ?: "--", MediCareColors.Purple, Modifier.weight(1f))
-        }
-
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Movimentações registradas", color = tokens.sub, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(8.dp))
-        if (filteredMovements.isEmpty()) {
-            Text("Nenhuma movimentação registrada.", color = tokens.muted, fontSize = 13.sp)
-        } else {
-            filteredMovements.forEach { mov ->
-                val medName = state.medications.find { it.id == mov.medicationId }?.nome ?: "Medicamento"
-                val isPositive = mov.quantityDelta >= 0
-                Column(
+
+        // Histórico de Alterações (Auditoria) Card
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(tokens.bg1)
+                .border(1.dp, tokens.bdr, RoundedCornerShape(20.dp))
+                .padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("📋 Histórico de Alterações", color = tokens.txt, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Text("Registro completo para auditoria de reposições, ajustes e consumos", color = tokens.sub, fontSize = 12.sp)
+                }
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(tokens.bg1)
-                        .border(1.dp, tokens.bdr, RoundedCornerShape(14.dp))
-                        .padding(14.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MediCareColors.Blue.copy(alpha = 0.16f))
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
                 ) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(medName, color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                        Text(
-                            text = "${if (isPositive) "+" else ""}${mov.quantityDelta} (${mov.quantityBefore} ➔ ${mov.quantityAfter})",
-                            color = if (isPositive) MediCareColors.Green else MediCareColors.Red,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 14.sp
-                        )
+                    Text("${filteredMovements.size} reg.", color = MediCareColors.Blue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(if (selectedMedId == null) MediCareColors.Blue else tokens.bg0)
+                        .clickable { selectedMedId = null }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text("Todos", color = if (selectedMedId == null) Color.White else tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                state.medications.forEach { m ->
+                    val sel = selectedMedId == m.id
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(99.dp))
+                            .background(if (sel) MediCareColors.Blue else tokens.bg0)
+                            .clickable { selectedMedId = m.id }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(m.nome, color = if (sel) Color.White else tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text(
-                        text = listOfNotNull(
-                            mov.createdAt.take(10).split("-").reversed().joinToString("/"),
-                            mov.purchaseLocation,
-                            mov.purchasePrice?.let { "R$ %.2f".format(it) },
-                            mov.batch?.let { "Lote $it" },
-                            mov.expirationDate?.let { "Val: $it" }
-                        ).joinToString(" · "),
-                        color = tokens.sub,
-                        fontSize = 12.sp
-                    )
-                    if (!mov.notes.isNullOrBlank()) {
-                        Text(mov.notes, color = tokens.muted, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoPill("🛒 Última compra", lastPurchase?.createdAt?.take(10)?.split("-")?.reversed()?.joinToString("/") ?: "--", MediCareColors.Blue, Modifier.weight(1f))
+                InfoPill("📦 Comprado mês", "+$boughtThisMonth un", MediCareColors.Green, Modifier.weight(1f))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoPill("⏳ Duração média", "${selectedForecast?.daysRemaining ?: 15} dias", MediCareColors.Amber, Modifier.weight(1f))
+                InfoPill("🔮 Término prev.", selectedForecast?.depletionDate?.split("-")?.reversed()?.joinToString("/") ?: "--", MediCareColors.Purple, Modifier.weight(1f))
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            if (filteredMovements.isEmpty()) {
+                Text("Nenhuma alteração de estoque registrada para este filtro.", color = tokens.muted, fontSize = 13.sp)
+            } else {
+                filteredMovements.forEach { mov ->
+                    val medName = state.medications.find { it.id == mov.medicationId }?.nome ?: "Medicamento"
+                    val isPositive = mov.quantityDelta >= 0
+                    val typeLabel = when (mov.movementType.lowercase()) {
+                        "consumption" -> "💊 Consumo de Dose"
+                        "correction", "adjustment" -> if (isPositive) "⚖️ Correção (+)" else "⚖️ Ajuste (-)"
+                        else -> if (isPositive) "📦 Reposição" else "📤 Baixa Manual"
+                    }
+                    val datePart = mov.createdAt.take(10).split("-").reversed().joinToString("/")
+                    val timePart = if (mov.createdAt.length >= 16) mov.createdAt.substring(11, 16) else ""
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(tokens.bg0)
+                            .border(1.dp, tokens.bdr, RoundedCornerShape(14.dp))
+                            .padding(14.dp)
+                    ) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(medName, color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                text = "${if (isPositive) "+" else ""}${mov.quantityDelta} unid.",
+                                color = if (isPositive) MediCareColors.Green else MediCareColors.Red,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "$typeLabel  •  $datePart${if (timePart.isNotEmpty()) " às $timePart" else ""}",
+                            color = tokens.sub,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Saldo auditado: ${mov.quantityBefore} → ${mov.quantityAfter} unidades",
+                            color = tokens.txt,
+                            fontSize = 12.sp
+                        )
+                        val extraDetails = listOfNotNull(
+                            mov.notes?.takeIf { it.isNotBlank() }?.let { "Motivo: $it" },
+                            mov.purchaseLocation?.takeIf { it.isNotBlank() }?.let { "Local: $it" },
+                            mov.purchasePrice?.let { "Valor: R$ %.2f".format(it) }
+                        ).joinToString("  •  ")
+                        if (extraDetails.isNotBlank()) {
+                            Text(extraDetails, color = tokens.muted, fontSize = 12.sp)
+                        }
                     }
                 }
             }

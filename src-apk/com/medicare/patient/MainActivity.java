@@ -92,6 +92,7 @@ public class MainActivity extends Activity {
     private JSONObject profile;
     private FrameLayout rootContainer;
     private JSONArray stockMovements;
+    private String stockAuditFilterMedId = "";
     private int cPrimary = Color.parseColor("#3B82F6");
     private int cPrimaryHover = Color.parseColor("#6366F1");
     private int cPrimaryLight = Color.parseColor("#DBEAFE");
@@ -572,6 +573,16 @@ public class MainActivity extends Activity {
     private void styleDialogWindow(AlertDialog dialog) {
         if (dialog != null && dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            try {
+                View decor = dialog.getWindow().getDecorView();
+                if (decor != null) {
+                    decor.setBackgroundColor(Color.TRANSPARENT);
+                }
+                View content = dialog.findViewById(android.R.id.content);
+                if (content != null) {
+                    content.setBackgroundColor(Color.TRANSPARENT);
+                }
+            } catch (Exception ignored) {}
         }
     }
 
@@ -1949,7 +1960,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.5.3 • Produção");
+        versionBadge.setText("Versão 2.5.5 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -2412,22 +2423,59 @@ public class MainActivity extends Activity {
 
             int currentStock = getMedStock(med);
             if ("tomado".equals(newStatus) && !"tomado".equals(prevStatus)) {
-                setMedStock(med, currentStock - 1);
+                int nextStock = Math.max(0, currentStock - 1);
+                setMedStock(med, nextStock);
                 this.stockMovements.put(new JSONObject()
                     .put("id", "sm-" + System.currentTimeMillis())
                     .put("med_id", medId)
+                    .put("medication_id", medId)
                     .put("med_nome", med.optString("nome"))
+                    .put("med_name", med.optString("nome"))
                     .put("tipo", "saida")
                     .put("movement_type", "consumption")
                     .put("qtd", 1)
                     .put("quantity_change", -1)
+                    .put("quantity_changed", -1)
+                    .put("quantity_delta", -1)
+                    .put("delta", -1)
                     .put("previous_quantity", currentStock)
-                    .put("new_quantity", Math.max(0, currentStock - 1))
+                    .put("quantity_before", currentStock)
+                    .put("new_quantity", nextStock)
+                    .put("quantity_after", nextStock)
+                    .put("date", dateStr)
+                    .put("time", nowTime)
+                    .put("hora", nowTime)
                     .put("data", dateStr + " " + nowTime)
                     .put("created_at", dateStr + "T" + nowTime + ":00.000Z")
-                    .put("motivo", "Dose tomada (" + horaStr + ")"));
+                    .put("motivo", "Dose confirmada (" + horaStr + ")")
+                    .put("notes", "Dose confirmada (" + horaStr + ")"));
             } else if (!"tomado".equals(newStatus) && "tomado".equals(prevStatus)) {
-                setMedStock(med, currentStock + 1);
+                int nextStock = currentStock + 1;
+                setMedStock(med, nextStock);
+                this.stockMovements.put(new JSONObject()
+                    .put("id", "sm-" + System.currentTimeMillis())
+                    .put("med_id", medId)
+                    .put("medication_id", medId)
+                    .put("med_nome", med.optString("nome"))
+                    .put("med_name", med.optString("nome"))
+                    .put("tipo", "entrada")
+                    .put("movement_type", "correction")
+                    .put("qtd", 1)
+                    .put("quantity_change", 1)
+                    .put("quantity_changed", 1)
+                    .put("quantity_delta", 1)
+                    .put("delta", 1)
+                    .put("previous_quantity", currentStock)
+                    .put("quantity_before", currentStock)
+                    .put("new_quantity", nextStock)
+                    .put("quantity_after", nextStock)
+                    .put("date", dateStr)
+                    .put("time", nowTime)
+                    .put("hora", nowTime)
+                    .put("data", dateStr + " " + nowTime)
+                    .put("created_at", dateStr + "T" + nowTime + ":00.000Z")
+                    .put("motivo", "Estorno de dose desfeita (" + horaStr + ")")
+                    .put("notes", "Estorno de dose desfeita (" + horaStr + ")"));
             }
             saveAll();
             render();
@@ -3479,20 +3527,33 @@ public class MainActivity extends Activity {
                     MainActivity.this.doseLogs.put(log);
 
                     int curSt = getMedStock(med);
-                    setMedStock(med, curSt - qUsed);
+                    int nextSt = Math.max(0, curSt - qUsed);
+                    setMedStock(med, nextSt);
+                    String sosReason = mot.isEmpty() ? "Uso SOS" : "Uso SOS: " + mot;
                     MainActivity.this.stockMovements.put(new JSONObject()
                         .put("id", "sm-" + System.currentTimeMillis())
                         .put("med_id", med.optString("id"))
+                        .put("medication_id", med.optString("id"))
                         .put("med_nome", med.optString("nome"))
+                        .put("med_name", med.optString("nome"))
                         .put("tipo", "saida")
                         .put("movement_type", "consumption")
                         .put("qtd", qUsed)
                         .put("quantity_change", -qUsed)
+                        .put("quantity_changed", -qUsed)
+                        .put("quantity_delta", -qUsed)
+                        .put("delta", -qUsed)
                         .put("previous_quantity", curSt)
-                        .put("new_quantity", Math.max(0, curSt - qUsed))
+                        .put("quantity_before", curSt)
+                        .put("new_quantity", nextSt)
+                        .put("quantity_after", nextSt)
+                        .put("date", today)
+                        .put("time", h)
+                        .put("hora", h)
                         .put("data", today + " " + h)
                         .put("created_at", today + "T" + h + ":00.000Z")
-                        .put("motivo", mot.isEmpty() ? "Uso SOS" : "Uso SOS: " + mot));
+                        .put("motivo", sosReason)
+                        .put("notes", sosReason));
                     saveAll();
                     render();
                     Toast.makeText(MainActivity.this, "✓ Uso SOS de " + med.optString("nome") + " registrado!", 0).show();
@@ -3588,25 +3649,36 @@ public class MainActivity extends Activity {
         final String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
         final JSONObject sm = new JSONObject();
         try {
+            String defaultMotivo = diff > 0 ? "Reposição de estoque" : "Ajuste manual de estoque";
             sm.put("id", "sm-" + System.currentTimeMillis());
             sm.put("med_id", med.optString("id"));
+            sm.put("medication_id", med.optString("id"));
             sm.put("med_nome", med.optString("nome"));
+            sm.put("med_name", med.optString("nome"));
             sm.put("tipo", diff >= 0 ? "entrada" : "saida");
             sm.put("movement_type", diff >= 0 ? "purchase" : "adjustment");
             sm.put("qtd", Math.abs(diff));
             sm.put("quantity_change", diff);
+            sm.put("quantity_changed", diff);
+            sm.put("quantity_delta", diff);
             sm.put("delta", diff);
             sm.put("previous_quantity", prevQty);
+            sm.put("quantity_before", prevQty);
             sm.put("new_quantity", newQty);
+            sm.put("quantity_after", newQty);
             sm.put("pharmacy", "");
+            sm.put("purchase_location", "");
             sm.put("price_paid", "");
+            sm.put("purchase_price", "");
             sm.put("date", today);
             sm.put("time", hm);
             sm.put("hora", hm);
             sm.put("data", today + " " + hm);
             sm.put("created_at", today + "T" + hm + ":00.000Z");
-            sm.put("motivo", diff > 0 ? "Reposição de estoque" : "Ajuste manual");
+            sm.put("motivo", defaultMotivo);
+            sm.put("notes", defaultMotivo);
             this.stockMovements.put(sm);
+            deduplicateStockMovements();
             saveAll();
             render();
         } catch (Exception ignored) {}
@@ -3629,7 +3701,7 @@ public class MainActivity extends Activity {
         box.addView(pharmInput);
         final EditText priceInput = createInput("Valor pago R$ (opcional)", "");
         box.addView(priceInput);
-        final EditText reasonInput = createInput("Observação / Motivo (ex: Compra mensal, Perda)", diff > 0 ? "Reposição de estoque" : "Ajuste manual");
+        final EditText reasonInput = createInput("Observação / Motivo para auditoria", diff > 0 ? "Reposição de estoque" : "Ajuste manual de estoque");
         box.addView(reasonInput);
 
         sv.addView(box);
@@ -3640,10 +3712,16 @@ public class MainActivity extends Activity {
                     String mType = typeInput.getText().toString().trim().toLowerCase(Locale.ROOT);
                     String movType = mType.contains("compra") ? "purchase" : (mType.contains("corr") ? "correction" : "adjustment");
                     String motivo = reasonInput.getText().toString().trim();
+                    String finalMotivo = motivo.isEmpty() ? (diff > 0 ? "Reposição de estoque" : "Ajuste manual de estoque") : motivo;
+                    String pharm = pharmInput.getText().toString().trim();
+                    String price = priceInput.getText().toString().trim();
                     sm.put("movement_type", movType);
-                    sm.put("pharmacy", pharmInput.getText().toString().trim());
-                    sm.put("price_paid", priceInput.getText().toString().trim());
-                    sm.put("motivo", motivo.isEmpty() ? (diff > 0 ? "Reposição de estoque" : "Ajuste manual") : motivo);
+                    sm.put("pharmacy", pharm);
+                    sm.put("purchase_location", pharm);
+                    sm.put("price_paid", price);
+                    sm.put("purchase_price", price);
+                    sm.put("motivo", finalMotivo);
+                    sm.put("notes", finalMotivo);
                     saveAll();
                     render();
                 } catch (Exception ignored) {}
@@ -5714,17 +5792,51 @@ public class MainActivity extends Activity {
     private int getStockMovementDelta(JSONObject sm) {
         if (sm == null) return 0;
         if (sm.has("quantity_change")) return sm.optInt("quantity_change", 0);
+        if (sm.has("quantity_changed")) return sm.optInt("quantity_changed", 0);
+        if (sm.has("quantity_delta")) return sm.optInt("quantity_delta", 0);
         if (sm.has("delta")) return sm.optInt("delta", 0);
         int q = sm.optInt("qtd", 0);
         if ("saida".equalsIgnoreCase(sm.optString("tipo", ""))) return -q;
         return q;
     }
 
+    private String resolveStockMovementMedName(JSONObject sm) {
+        if (sm == null) return "";
+        String medNome = sm.optString("med_nome", sm.optString("med_name", "")).trim();
+        if (!medNome.isEmpty()) return medNome;
+        String medId = sm.optString("med_id", sm.optString("medication_id", "")).trim();
+        if (!medId.isEmpty() && this.meds != null) {
+            for (int i = 0; i < this.meds.length(); i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m != null && medId.equals(m.optString("id"))) {
+                    return m.optString("nome", "").trim();
+                }
+            }
+        }
+        String rawTitle = sm.optString("title", sm.optString("titulo", "")).trim();
+        if (!rawTitle.isEmpty()) {
+            String cleaned = rawTitle.replace("📦", "").trim();
+            if (cleaned.regionMatches(true, 0, "Reposição:", 0, 10)) {
+                cleaned = cleaned.substring(10).trim();
+            } else if (cleaned.regionMatches(true, 0, "Reposicao:", 0, 10)) {
+                cleaned = cleaned.substring(10).trim();
+            } else if (cleaned.regionMatches(true, 0, "Ajuste:", 0, 7)) {
+                cleaned = cleaned.substring(7).trim();
+            }
+            int parenIdx = cleaned.indexOf(" (");
+            if (parenIdx > 0) cleaned = cleaned.substring(0, parenIdx).trim();
+            int asIdx = cleaned.indexOf(" às ");
+            if (asIdx > 0) cleaned = cleaned.substring(0, asIdx).trim();
+            return cleaned;
+        }
+        return "";
+    }
+
     private String formatStockMovementCardText(JSONObject sm) {
         if (sm == null) return "📦 Movimentação de estoque";
         String tm = getStockMovementTime(sm);
         String explicitTitle = sm.optString("title", sm.optString("titulo", "")).trim();
-        String medNome = sm.optString("med_nome", "").trim();
+        String medNome = resolveStockMovementMedName(sm);
         String mainText;
         if (!medNome.isEmpty()) {
             int delta = getStockMovementDelta(sm);
@@ -5732,19 +5844,21 @@ public class MainActivity extends Activity {
             String deltaStr = delta > 0 ? "(+" + delta + ")" : "(" + delta + ")";
             mainText = "📦 " + prefix + medNome + " " + deltaStr + (tm.isEmpty() ? "" : " às " + tm);
         } else if (!explicitTitle.isEmpty()) {
-            mainText = "📦 " + explicitTitle + (tm.isEmpty() || explicitTitle.contains(" às ") ? "" : " às " + tm);
+            String cleanTitle = explicitTitle.replaceAll("(\\d{2}:\\d{2}):\\d{2}", "$1");
+            mainText = "📦 " + cleanTitle + (tm.isEmpty() || cleanTitle.contains(" às ") ? "" : " às " + tm);
         } else {
             mainText = "📦 Movimentação de estoque" + (tm.isEmpty() ? "" : " às " + tm);
         }
-        String pharm = sm.optString("pharmacy", "").trim();
-        String mot = sm.optString("motivo", sm.optString("description", sm.optString("notas", ""))).trim();
+        String pharm = sm.optString("pharmacy", sm.optString("purchase_location", "")).trim();
+        String mot = sm.optString("motivo", sm.optString("notes", sm.optString("description", sm.optString("notas", "")))).trim();
         if (!pharm.isEmpty()) {
             mainText += " • " + pharm;
         }
         if (!mot.isEmpty()
                 && !"Reposição de estoque".equalsIgnoreCase(mot)
                 && !"Atualização de estoque".equalsIgnoreCase(mot)
-                && !"Ajuste manual".equalsIgnoreCase(mot)) {
+                && !"Ajuste manual".equalsIgnoreCase(mot)
+                && !"Ajuste manual de estoque".equalsIgnoreCase(mot)) {
             mainText += " • " + mot;
         }
         return mainText;
@@ -5761,18 +5875,30 @@ public class MainActivity extends Activity {
             if (isStockEvent(ev)) {
                 changed = true;
                 String evDate = ev.optString("date", ev.optString("data", "")).trim();
+                if (evDate.length() >= 10) {
+                    evDate = evDate.substring(0, 10);
+                }
                 String evTime = ev.optString("time", ev.optString("hora", "")).trim();
                 if (evTime.length() >= 5 && evTime.charAt(2) == ':') {
                     evTime = evTime.substring(0, 5);
                 }
                 String evTitle = ev.optString("title", ev.optString("titulo", "")).trim();
+                int parsedDelta = 1;
+                int plusIdx = evTitle.indexOf("(+");
+                int closeIdx = evTitle.indexOf(")", plusIdx);
+                if (plusIdx >= 0 && closeIdx > plusIdx + 2) {
+                    try {
+                        parsedDelta = Integer.parseInt(evTitle.substring(plusIdx + 2, closeIdx).trim());
+                    } catch (Exception ignored) {}
+                }
                 boolean alreadyInStock = false;
                 for (int j = 0; j < this.stockMovements.length(); j++) {
                     JSONObject sm = this.stockMovements.optJSONObject(j);
                     if (sm != null && isCalendarStockMovement(sm)) {
                         String smDate = getStockMovementDate(sm);
                         String smTime = getStockMovementTime(sm);
-                        if (evDate.equals(smDate) && (evTime.isEmpty() || smTime.isEmpty() || evTime.equals(smTime))) {
+                        int smDelta = getStockMovementDelta(sm);
+                        if (evDate.equals(smDate) && (smDelta == parsedDelta || evTime.isEmpty() || smTime.isEmpty() || evTime.equals(smTime))) {
                             alreadyInStock = true;
                             break;
                         }
@@ -5791,18 +5917,19 @@ public class MainActivity extends Activity {
                         migrated.put("hora", evTime);
                         migrated.put("data", evTime.isEmpty() ? evDate : (evDate + " " + evTime));
                         migrated.put("created_at", evDate + "T" + (evTime.isEmpty() ? "12:00" : evTime) + ":00.000Z");
-                        int parsedDelta = 1;
-                        int plusIdx = evTitle.indexOf("(+");
-                        int closeIdx = evTitle.indexOf(")", plusIdx);
-                        if (plusIdx >= 0 && closeIdx > plusIdx + 2) {
-                            try {
-                                parsedDelta = Integer.parseInt(evTitle.substring(plusIdx + 2, closeIdx).trim());
-                            } catch (Exception ignored) {}
-                        }
                         migrated.put("qtd", parsedDelta);
                         migrated.put("quantity_change", parsedDelta);
+                        migrated.put("quantity_changed", parsedDelta);
+                        migrated.put("quantity_delta", parsedDelta);
                         migrated.put("delta", parsedDelta);
-                        migrated.put("motivo", ev.optString("description", ev.optString("notas", "Reposição de estoque")));
+                        String mot = ev.optString("description", ev.optString("notas", "Reposição de estoque"));
+                        migrated.put("motivo", mot);
+                        migrated.put("notes", mot);
+                        String resolvedName = resolveStockMovementMedName(migrated);
+                        if (!resolvedName.isEmpty()) {
+                            migrated.put("med_nome", resolvedName);
+                            migrated.put("med_name", resolvedName);
+                        }
                         this.stockMovements.put(migrated);
                     } catch (Exception ignored) {}
                 }
@@ -5823,14 +5950,52 @@ public class MainActivity extends Activity {
         for (int i = 0; i < this.stockMovements.length(); i++) {
             JSONObject sm = this.stockMovements.optJSONObject(i);
             if (sm == null) continue;
-            String rawTime = sm.optString("time", "").trim();
-            if (rawTime.length() > 5 && rawTime.charAt(2) == ':') {
-                try {
-                    sm.put("time", rawTime.substring(0, 5));
-                    sm.put("hora", rawTime.substring(0, 5));
+            try {
+                String normDate = getStockMovementDate(sm);
+                if (!normDate.isEmpty() && !normDate.equals(sm.optString("date", ""))) {
+                    sm.put("date", normDate);
                     changed = true;
-                } catch (Exception ignored) {}
-            }
+                }
+                String normTime = getStockMovementTime(sm);
+                if (!normTime.isEmpty()) {
+                    if (!normTime.equals(sm.optString("time", "")) || !normTime.equals(sm.optString("hora", ""))) {
+                        sm.put("time", normTime);
+                        sm.put("hora", normTime);
+                        changed = true;
+                    }
+                    String expectedData = normDate.isEmpty() ? "" : (normDate + " " + normTime);
+                    if (!expectedData.isEmpty() && !expectedData.equals(sm.optString("data", ""))) {
+                        sm.put("data", expectedData);
+                        changed = true;
+                    }
+                }
+                String resolvedMedName = resolveStockMovementMedName(sm);
+                if (!resolvedMedName.isEmpty() && sm.optString("med_nome", "").trim().isEmpty()) {
+                    sm.put("med_nome", resolvedMedName);
+                    sm.put("med_name", resolvedMedName);
+                    changed = true;
+                }
+                if (!resolvedMedName.isEmpty() && sm.optString("med_id", "").trim().isEmpty() && this.meds != null) {
+                    for (int mIdx = 0; mIdx < this.meds.length(); mIdx++) {
+                        JSONObject mObj = this.meds.optJSONObject(mIdx);
+                        if (mObj != null && resolvedMedName.equalsIgnoreCase(mObj.optString("nome", "").trim())) {
+                            sm.put("med_id", mObj.optString("id"));
+                            sm.put("medication_id", mObj.optString("id"));
+                            if (!sm.has("new_quantity") && !sm.has("quantity_after")) {
+                                int curSt = getMedStock(mObj);
+                                int d = getStockMovementDelta(sm);
+                                sm.put("new_quantity", curSt);
+                                sm.put("quantity_after", curSt);
+                                sm.put("previous_quantity", Math.max(0, curSt - d));
+                                sm.put("quantity_before", Math.max(0, curSt - d));
+                            }
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+
             if (!isCalendarStockMovement(sm)) {
                 clean.put(sm);
                 continue;
@@ -5838,8 +6003,9 @@ public class MainActivity extends Activity {
             String smDate = getStockMovementDate(sm);
             String smTime = getStockMovementTime(sm);
             int smDelta = getStockMovementDelta(sm);
+            String smMed = resolveStockMovementMedName(sm).toLowerCase(Locale.ROOT);
+            String smMot = sm.optString("motivo", sm.optString("notes", "")).trim().toLowerCase(Locale.ROOT);
             String smCardText = formatStockMovementCardText(sm).trim().toLowerCase(Locale.ROOT);
-            boolean isMigrated = sm.optString("id", "").startsWith("sm-ev-") || sm.optString("med_nome", "").trim().isEmpty();
 
             int duplicateIdx = -1;
             for (int j = 0; j < clean.length(); j++) {
@@ -5854,8 +6020,13 @@ public class MainActivity extends Activity {
                 }
                 String exTime = getStockMovementTime(existing);
                 int exDelta = getStockMovementDelta(existing);
-                boolean exIsMigrated = existing.optString("id", "").startsWith("sm-ev-") || existing.optString("med_nome", "").trim().isEmpty();
-                if (smDelta == exDelta && (!smTime.isEmpty() && smTime.equals(exTime)) && (isMigrated || exIsMigrated)) {
+                String exMed = resolveStockMovementMedName(existing).toLowerCase(Locale.ROOT);
+                String exMot = existing.optString("motivo", existing.optString("notes", "")).trim().toLowerCase(Locale.ROOT);
+                if (smDelta == exDelta && (!smTime.isEmpty() && smTime.equals(exTime)) && (smMed.equals(exMed) || smMed.isEmpty() || exMed.isEmpty())) {
+                    duplicateIdx = j;
+                    break;
+                }
+                if (smDelta == exDelta && !smMed.isEmpty() && smMed.equals(exMed) && smMot.equals(exMot)) {
                     duplicateIdx = j;
                     break;
                 }
@@ -5863,9 +6034,9 @@ public class MainActivity extends Activity {
             if (duplicateIdx >= 0) {
                 changed = true;
                 JSONObject existing = clean.optJSONObject(duplicateIdx);
-                boolean exHasMed = existing != null && !existing.optString("med_nome", "").trim().isEmpty();
-                boolean smHasMed = !sm.optString("med_nome", "").trim().isEmpty();
-                if (smHasMed && !exHasMed) {
+                boolean exHasId = existing != null && !existing.optString("med_id", "").trim().isEmpty();
+                boolean smHasId = !sm.optString("med_id", "").trim().isEmpty();
+                if (smHasId && !exHasId) {
                     try {
                         clean.put(duplicateIdx, sm);
                     } catch (Exception ignored) {}
@@ -5883,7 +6054,11 @@ public class MainActivity extends Activity {
     private boolean hasEventOnDate(String dateStr) {
         for (int i = 0; i < this.events.length(); i++) {
             JSONObject ev = this.events.optJSONObject(i);
-            if (ev != null && !isStockEvent(ev) && dateStr.equals(ev.optString("date", ev.optString("data")))) return true;
+            if (ev != null && !isStockEvent(ev)) {
+                String evDate = ev.optString("date", ev.optString("data", "")).trim();
+                if (evDate.length() >= 10) evDate = evDate.substring(0, 10);
+                if (dateStr.equals(evDate)) return true;
+            }
         }
         return false;
     }
@@ -5905,13 +6080,7 @@ public class MainActivity extends Activity {
         LinearLayout modalCard = new LinearLayout(this);
         modalCard.setOrientation(1);
         modalCard.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
-
-        ScrollView sv = new ScrollView(this);
-        sv.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
-
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(1);
-        root.setPadding(dp(20), dp(20), dp(20), dp(16));
+        modalCard.setClipToOutline(true);
 
         boolean isToday = dateStr.equals(todayIso());
         boolean isPast = dateStr.compareTo(todayIso()) < 0;
@@ -5919,7 +6088,7 @@ public class MainActivity extends Activity {
         LinearLayout topHdr = new LinearLayout(this);
         topHdr.setOrientation(0);
         topHdr.setGravity(16);
-        topHdr.setPadding(0, 0, 0, dp(12));
+        topHdr.setPadding(dp(20), dp(18), dp(20), dp(14));
 
         LinearLayout dateCol = new LinearLayout(this);
         dateCol.setOrientation(1);
@@ -5947,7 +6116,7 @@ public class MainActivity extends Activity {
         btnCloseX.setTextSize(sp(15.0f));
         btnCloseX.setTypeface(null, 1);
         btnCloseX.setGravity(17);
-        btnCloseX.setBackground(shape(this.cSurfaceHover, 18, 0, 0));
+        btnCloseX.setBackground(shape(this.cSurfaceHover, 18, this.cBorder, 1));
         btnCloseX.setLayoutParams(new LinearLayout.LayoutParams(dp(36), dp(36)));
         btnCloseX.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -5956,7 +6125,20 @@ public class MainActivity extends Activity {
             }
         });
         topHdr.addView(btnCloseX);
-        root.addView(topHdr);
+        modalCard.addView(topHdr);
+
+        View topDiv = new View(this);
+        topDiv.setBackgroundColor(this.cBorder);
+        topDiv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        modalCard.addView(topDiv);
+
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setPadding(dp(20), dp(16), dp(20), dp(16));
 
         // Quick Add buttons inside DayPanel
         LinearLayout addRow = new LinearLayout(this);
@@ -6116,42 +6298,47 @@ public class MainActivity extends Activity {
         for (int i = 0; i < this.events.length(); i++) {
             final int eIdx = i;
             final JSONObject ev = this.events.optJSONObject(i);
-            if (ev != null && !isStockEvent(ev) && dateStr.equals(ev.optString("date", ev.optString("data")))) {
-                evItems++;
-                LinearLayout eCard = new LinearLayout(this);
-                eCard.setOrientation(0);
-                eCard.setGravity(16);
-                eCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
-                eCard.setPadding(dp(12), dp(10), dp(12), dp(10));
-                LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
-                ecLp.bottomMargin = dp(8);
-                eCard.setLayoutParams(ecLp);
+            if (ev != null && !isStockEvent(ev)) {
+                String evDate = ev.optString("date", ev.optString("data", "")).trim();
+                if (evDate.length() >= 10) evDate = evDate.substring(0, 10);
+                if (dateStr.equals(evDate)) {
+                    evItems++;
+                    LinearLayout eCard = new LinearLayout(this);
+                    eCard.setOrientation(0);
+                    eCard.setGravity(16);
+                    eCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+                    eCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+                    LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
+                    ecLp.bottomMargin = dp(8);
+                    eCard.setLayoutParams(ecLp);
 
-                TextView tvET = new TextView(this);
-                String t = ev.optString("title", ev.optString("titulo", "Evento"));
-                String tm = ev.optString("time", ev.optString("hora", ""));
-                String loc = ev.optString("location", ev.optString("local", ""));
-                tvET.setText("📅 " + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
-                tvET.setTextColor(this.cTextMain);
-                tvET.setTextSize(sp(13.0f));
-                tvET.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-                eCard.addView(tvET);
+                    TextView tvET = new TextView(this);
+                    String t = ev.optString("title", ev.optString("titulo", "Evento"));
+                    String tm = ev.optString("time", ev.optString("hora", ""));
+                    if (tm.length() >= 5 && tm.charAt(2) == ':') tm = tm.substring(0, 5);
+                    String loc = ev.optString("location", ev.optString("local", ""));
+                    tvET.setText("📅 " + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
+                    tvET.setTextColor(this.cTextMain);
+                    tvET.setTextSize(sp(13.0f));
+                    tvET.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                    eCard.addView(tvET);
 
-                TextView btnDelE = new TextView(this);
-                btnDelE.setText("🗑");
-                btnDelE.setPadding(dp(8), dp(4), dp(4), dp(4));
-                btnDelE.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        MainActivity.this.events.remove(eIdx);
-                        saveAll();
-                        render();
-                        dlg.dismiss();
-                        showDayPanelDialog(dateStr);
-                    }
-                });
-                eCard.addView(btnDelE);
-                root.addView(eCard);
+                    TextView btnDelE = new TextView(this);
+                    btnDelE.setText("🗑");
+                    btnDelE.setPadding(dp(8), dp(4), dp(4), dp(4));
+                    btnDelE.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            MainActivity.this.events.remove(eIdx);
+                            saveAll();
+                            render();
+                            dlg.dismiss();
+                            showDayPanelDialog(dateStr);
+                        }
+                    });
+                    eCard.addView(btnDelE);
+                    root.addView(eCard);
+                }
             }
         }
         if (evItems == 0) {
@@ -6244,6 +6431,7 @@ public class MainActivity extends Activity {
 
         LinearLayout footerBar = new LinearLayout(this);
         footerBar.setOrientation(1);
+        footerBar.setBackgroundColor(this.cSurface);
         footerBar.setPadding(dp(20), dp(12), dp(20), dp(16));
 
         TextView btnCloseFooter = new TextView(this);
@@ -6264,7 +6452,7 @@ public class MainActivity extends Activity {
         footerBar.addView(btnCloseFooter);
         modalCard.addView(footerBar);
 
-        dlg.setView(modalCard);
+        dlg.setView(modalCard, 0, 0, 0, 0);
         dlg.show();
         styleDialogWindow(dlg);
     }
@@ -9466,6 +9654,9 @@ public class MainActivity extends Activity {
     }
 
     private void buildStockHistorySubScreen(LinearLayout linearLayout) {
+        if (migrateStockEventsFromEvents() | deduplicateStockMovements()) {
+            saveAll();
+        }
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(1);
         card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
@@ -9480,7 +9671,7 @@ public class MainActivity extends Activity {
         card.addView(tvT);
 
         TextView tvS = new TextView(this);
-        tvS.setText("Acompanhe a quantidade restante e adicione reposições");
+        tvS.setText("Acompanhe a quantidade restante, adicione reposições ou ajuste o saldo");
         tvS.setTextColor(this.cTextMuted);
         tvS.setTextSize(sp(13.0f));
         tvS.setPadding(0, 0, 0, dp(16));
@@ -9528,6 +9719,24 @@ public class MainActivity extends Activity {
 
                 row.addView(col);
 
+                TextView btnAdjust = new TextView(this);
+                btnAdjust.setText("Ajustar");
+                btnAdjust.setTextColor(this.cTextMuted);
+                btnAdjust.setTextSize(sp(12.5f));
+                btnAdjust.setTypeface(null, 1);
+                btnAdjust.setBackground(shape(this.cSurfaceHover, 10, this.cBorder, 1));
+                btnAdjust.setPadding(dp(10), dp(8), dp(10), dp(8));
+                LinearLayout.LayoutParams adjLp = new LinearLayout.LayoutParams(-2, -2);
+                adjLp.rightMargin = dp(8);
+                btnAdjust.setLayoutParams(adjLp);
+                btnAdjust.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showAdjustStockDialog(m);
+                    }
+                });
+                row.addView(btnAdjust);
+
                 TextView btnRefill = new TextView(this);
                 btnRefill.setText("+ Repor");
                 btnRefill.setTextColor(this.cPrimary);
@@ -9547,6 +9756,276 @@ public class MainActivity extends Activity {
             }
         }
         linearLayout.addView(card);
+
+        // Audit History Card (Histórico de Alterações)
+        LinearLayout auditCard = new LinearLayout(this);
+        auditCard.setOrientation(1);
+        auditCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        auditCard.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout.LayoutParams acLp = new LinearLayout.LayoutParams(-1, -2);
+        acLp.topMargin = dp(16);
+        auditCard.setLayoutParams(acLp);
+
+        LinearLayout hdrRow = new LinearLayout(this);
+        hdrRow.setOrientation(0);
+        hdrRow.setGravity(16);
+
+        LinearLayout hdrTextCol = new LinearLayout(this);
+        hdrTextCol.setOrientation(1);
+        hdrTextCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvAuditTitle = new TextView(this);
+        tvAuditTitle.setText("📋 Histórico de Alterações");
+        tvAuditTitle.setTextColor(this.cTextMain);
+        tvAuditTitle.setTextSize(sp(16.0f));
+        tvAuditTitle.setTypeface(null, 1);
+        tvAuditTitle.setPadding(0, 0, 0, dp(3));
+        hdrTextCol.addView(tvAuditTitle);
+
+        TextView tvAuditSub = new TextView(this);
+        tvAuditSub.setText("Registro completo para auditoria de reposições, ajustes e consumos");
+        tvAuditSub.setTextColor(this.cTextMuted);
+        tvAuditSub.setTextSize(sp(12.5f));
+        hdrTextCol.addView(tvAuditSub);
+        hdrRow.addView(hdrTextCol);
+
+        TextView badgeCount = new TextView(this);
+        badgeCount.setText((this.stockMovements != null ? this.stockMovements.length() : 0) + " reg.");
+        badgeCount.setTextColor(this.cPrimary);
+        badgeCount.setTextSize(sp(11.5f));
+        badgeCount.setTypeface(null, 1);
+        badgeCount.setBackground(shape(this.cPrimaryLight, 10, 0, 0));
+        badgeCount.setPadding(dp(9), dp(4), dp(9), dp(4));
+        hdrRow.addView(badgeCount);
+        auditCard.addView(hdrRow);
+
+        // Medication filter chips
+        if (this.meds != null && this.meds.length() > 0) {
+            HorizontalScrollView filterScroll = new HorizontalScrollView(this);
+            filterScroll.setHorizontalScrollBarEnabled(false);
+            LinearLayout.LayoutParams fsLp = new LinearLayout.LayoutParams(-1, -2);
+            fsLp.topMargin = dp(14);
+            fsLp.bottomMargin = dp(14);
+            filterScroll.setLayoutParams(fsLp);
+
+            LinearLayout chipRow = new LinearLayout(this);
+            chipRow.setOrientation(0);
+
+            boolean allSelected = this.stockAuditFilterMedId == null || this.stockAuditFilterMedId.isEmpty();
+            TextView allChip = new TextView(this);
+            allChip.setText("Todos");
+            allChip.setTextColor(allSelected ? Color.WHITE : this.cTextMuted);
+            allChip.setTextSize(sp(12.0f));
+            allChip.setTypeface(null, 1);
+            allChip.setBackground(shape(allSelected ? this.cPrimary : this.cBgMain, 16, allSelected ? 0 : this.cBorder, allSelected ? 0 : 1));
+            allChip.setPadding(dp(12), dp(6), dp(12), dp(6));
+            LinearLayout.LayoutParams acChipLp = new LinearLayout.LayoutParams(-2, -2);
+            acChipLp.rightMargin = dp(8);
+            allChip.setLayoutParams(acChipLp);
+            allChip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.stockAuditFilterMedId = "";
+                    render();
+                }
+            });
+            chipRow.addView(allChip);
+
+            for (int i = 0; i < this.meds.length(); i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m == null) continue;
+                final String mId = m.optString("id", "");
+                final String mName = m.optString("nome", "Medicamento");
+                boolean isSel = !mId.isEmpty() && mId.equals(this.stockAuditFilterMedId);
+
+                TextView mChip = new TextView(this);
+                mChip.setText(mName);
+                mChip.setTextColor(isSel ? Color.WHITE : this.cTextMuted);
+                mChip.setTextSize(sp(12.0f));
+                mChip.setTypeface(null, 1);
+                mChip.setBackground(shape(isSel ? this.cPrimary : this.cBgMain, 16, isSel ? 0 : this.cBorder, isSel ? 0 : 1));
+                mChip.setPadding(dp(12), dp(6), dp(12), dp(6));
+                LinearLayout.LayoutParams mcLp = new LinearLayout.LayoutParams(-2, -2);
+                if (i < this.meds.length() - 1) mcLp.rightMargin = dp(8);
+                mChip.setLayoutParams(mcLp);
+                mChip.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.stockAuditFilterMedId = mId;
+                        render();
+                    }
+                });
+                chipRow.addView(mChip);
+            }
+            filterScroll.addView(chipRow);
+            auditCard.addView(filterScroll);
+        } else {
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(14)));
+            auditCard.addView(spacer);
+        }
+
+        String filterMedName = "";
+        if (this.stockAuditFilterMedId != null && !this.stockAuditFilterMedId.isEmpty() && this.meds != null) {
+            for (int i = 0; i < this.meds.length(); i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m != null && this.stockAuditFilterMedId.equals(m.optString("id"))) {
+                    filterMedName = m.optString("nome", "").trim();
+                    break;
+                }
+            }
+        }
+
+        int shownCount = 0;
+        if (this.stockMovements != null) {
+            for (int i = this.stockMovements.length() - 1; i >= 0; i--) {
+                JSONObject sm = this.stockMovements.optJSONObject(i);
+                if (sm == null) continue;
+                String smMedId = sm.optString("med_id", sm.optString("medication_id", "")).trim();
+                String smMedName = resolveStockMovementMedName(sm);
+                if (this.stockAuditFilterMedId != null && !this.stockAuditFilterMedId.isEmpty()) {
+                    boolean idMatch = this.stockAuditFilterMedId.equals(smMedId);
+                    boolean nameMatch = !filterMedName.isEmpty() && filterMedName.equalsIgnoreCase(smMedName);
+                    if (!idMatch && !nameMatch) continue;
+                }
+                shownCount++;
+
+                int delta = getStockMovementDelta(sm);
+                boolean isPositive = delta >= 0;
+                String movType = sm.optString("movement_type", sm.optString("tipo", "")).trim().toLowerCase(Locale.ROOT);
+                boolean isConsumption = "consumption".equals(movType) || sm.optString("motivo", "").toLowerCase(Locale.ROOT).startsWith("dose ") || sm.optString("motivo", "").toLowerCase(Locale.ROOT).startsWith("uso sos");
+
+                String typeBadgeText;
+                int typeBadgeColor;
+                int typeBadgeBg;
+                if (isConsumption) {
+                    typeBadgeText = "💊 Consumo de Dose";
+                    typeBadgeColor = this.cInfo;
+                    typeBadgeBg = this.cInfoBg;
+                } else if ("correction".equals(movType) || "adjustment".equals(movType) || sm.optString("motivo", "").toLowerCase(Locale.ROOT).contains("corre") || sm.optString("motivo", "").toLowerCase(Locale.ROOT).contains("ajust")) {
+                    typeBadgeText = isPositive ? "⚖️ Correção (+)" : "⚖️ Ajuste (-)";
+                    typeBadgeColor = this.cWarning;
+                    typeBadgeBg = this.cWarningBg;
+                } else if (isPositive) {
+                    typeBadgeText = "📦 Reposição";
+                    typeBadgeColor = this.cSuccess;
+                    typeBadgeBg = this.cSuccessBg;
+                } else {
+                    typeBadgeText = "📤 Baixa Manual";
+                    typeBadgeColor = this.cDanger;
+                    typeBadgeBg = this.cDangerBg;
+                }
+
+                LinearLayout itemCard = new LinearLayout(this);
+                itemCard.setOrientation(1);
+                itemCard.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+                itemCard.setPadding(dp(14), dp(12), dp(14), dp(12));
+                LinearLayout.LayoutParams icLp = new LinearLayout.LayoutParams(-1, -2);
+                icLp.bottomMargin = dp(10);
+                itemCard.setLayoutParams(icLp);
+
+                // Top Row: Medication Name + Delta Badge
+                LinearLayout topRow = new LinearLayout(this);
+                topRow.setOrientation(0);
+                topRow.setGravity(16);
+
+                TextView tvMedTitle = new TextView(this);
+                tvMedTitle.setText(smMedName.isEmpty() ? "Medicamento" : smMedName);
+                tvMedTitle.setTextColor(this.cTextMain);
+                tvMedTitle.setTextSize(sp(14.5f));
+                tvMedTitle.setTypeface(null, 1);
+                tvMedTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+                topRow.addView(tvMedTitle);
+
+                TextView tvDelta = new TextView(this);
+                String deltaLabel = (delta > 0 ? "+" : "") + delta + " unid.";
+                tvDelta.setText(deltaLabel);
+                tvDelta.setTextColor(isPositive ? this.cSuccess : (isConsumption ? this.cTextMuted : this.cDanger));
+                tvDelta.setTextSize(sp(13.5f));
+                tvDelta.setTypeface(null, 1);
+                topRow.addView(tvDelta);
+                itemCard.addView(topRow);
+
+                // Second Row: Type Badge + Date/Time
+                LinearLayout metaRow = new LinearLayout(this);
+                metaRow.setOrientation(0);
+                metaRow.setGravity(16);
+                metaRow.setPadding(0, dp(6), 0, dp(6));
+
+                TextView tvTypeBadge = new TextView(this);
+                tvTypeBadge.setText(typeBadgeText);
+                tvTypeBadge.setTextColor(typeBadgeColor);
+                tvTypeBadge.setTextSize(sp(11.0f));
+                tvTypeBadge.setTypeface(null, 1);
+                int badgeAlphaBg = Color.argb(35, Color.red(typeBadgeColor), Color.green(typeBadgeColor), Color.blue(typeBadgeColor));
+                tvTypeBadge.setBackground(shape(this.isDarkMode ? badgeAlphaBg : typeBadgeBg, 8, 0, 0));
+                tvTypeBadge.setPadding(dp(8), dp(3), dp(8), dp(3));
+                metaRow.addView(tvTypeBadge);
+
+                String rawDate = getStockMovementDate(sm);
+                String formattedDate = rawDate;
+                if (rawDate.length() == 10 && rawDate.charAt(4) == '-' && rawDate.charAt(7) == '-') {
+                    formattedDate = rawDate.substring(8, 10) + "/" + rawDate.substring(5, 7) + "/" + rawDate.substring(0, 4);
+                }
+                String rawTime = getStockMovementTime(sm);
+                TextView tvDateTime = new TextView(this);
+                tvDateTime.setText("  •  " + (formattedDate.isEmpty() ? "--" : formattedDate) + (rawTime.isEmpty() ? "" : " às " + rawTime));
+                tvDateTime.setTextColor(this.cTextMuted);
+                tvDateTime.setTextSize(sp(12.0f));
+                metaRow.addView(tvDateTime);
+                itemCard.addView(metaRow);
+
+                // Third Row: Balance change (Anterior -> Novo)
+                int prevQ = sm.optInt("previous_quantity", sm.optInt("quantity_before", -1));
+                int newQ = sm.optInt("new_quantity", sm.optInt("quantity_after", -1));
+                if (prevQ >= 0 && newQ >= 0) {
+                    TextView tvBalance = new TextView(this);
+                    tvBalance.setText("Saldo auditado: " + prevQ + " → " + newQ + " unidades");
+                    tvBalance.setTextColor(this.cTextMain);
+                    tvBalance.setTextSize(sp(12.5f));
+                    tvBalance.setPadding(0, 0, 0, dp(3));
+                    itemCard.addView(tvBalance);
+                }
+
+                // Fourth Row: Motivo / Notes + Pharmacy / Price
+                String mot = sm.optString("motivo", sm.optString("notes", sm.optString("description", ""))).trim();
+                String pharm = sm.optString("pharmacy", sm.optString("purchase_location", "")).trim();
+                String price = sm.optString("price_paid", sm.optString("purchase_price", "")).trim();
+                StringBuilder detailSb = new StringBuilder();
+                if (!mot.isEmpty()) {
+                    detailSb.append("Motivo: ").append(mot);
+                }
+                if (!pharm.isEmpty()) {
+                    if (detailSb.length() > 0) detailSb.append("  •  ");
+                    detailSb.append("Local: ").append(pharm);
+                }
+                if (!price.isEmpty() && !"0".equals(price) && !"0.0".equals(price) && !"null".equalsIgnoreCase(price)) {
+                    if (detailSb.length() > 0) detailSb.append("  •  ");
+                    detailSb.append("Valor: R$ ").append(price);
+                }
+                if (detailSb.length() > 0) {
+                    TextView tvDetail = new TextView(this);
+                    tvDetail.setText(detailSb.toString());
+                    tvDetail.setTextColor(this.cTextMuted);
+                    tvDetail.setTextSize(sp(12.0f));
+                    itemCard.addView(tvDetail);
+                }
+
+                auditCard.addView(itemCard);
+            }
+        }
+
+        if (shownCount == 0) {
+            TextView tvEmptyAudit = new TextView(this);
+            tvEmptyAudit.setText("Nenhuma alteração de estoque registrada para este filtro.");
+            tvEmptyAudit.setTextColor(this.cTextMuted);
+            tvEmptyAudit.setTextSize(sp(13.5f));
+            tvEmptyAudit.setGravity(17);
+            tvEmptyAudit.setPadding(0, dp(16), 0, dp(16));
+            auditCard.addView(tvEmptyAudit);
+        }
+
+        linearLayout.addView(auditCard);
     }
 
     private void showRefillStockDialog(final JSONObject med) {
@@ -9576,6 +10055,72 @@ public class MainActivity extends Activity {
                         saveAll();
                         render();
                         showStockMovementModal(med, curStock, newQty);
+                    }
+                } catch (Exception ignored) {}
+            }
+        });
+    }
+
+    private void showAdjustStockDialog(final JSONObject med) {
+        final int curStock = getMedStock(med);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(1);
+
+        TextView tvCur = new TextView(this);
+        tvCur.setText("Saldo atual registrado: " + curStock + " " + med.optString("unidade", "unid."));
+        tvCur.setTextColor(this.cTextMuted);
+        tvCur.setTextSize(sp(13.0f));
+        tvCur.setPadding(0, 0, 0, dp(10));
+        layout.addView(tvCur);
+
+        final EditText etNewStock = createInput("Novo saldo real em mãos", String.valueOf(curStock));
+        etNewStock.setInputType(InputType.TYPE_CLASS_NUMBER);
+        layout.addView(etNewStock);
+
+        final EditText etReason = createInput("Motivo do ajuste / auditoria", "Conferência física de estoque");
+        layout.addView(etReason);
+
+        showStyledFormModal("⚖️ Ajustar Estoque — " + med.optString("nome"), layout, "Salvar Ajuste", "Cancelar", this.cPrimary, new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    int newQty = Integer.parseInt(etNewStock.getText().toString().trim());
+                    if (newQty >= 0 && newQty != curStock) {
+                        int diff = newQty - curStock;
+                        String today = todayIso();
+                        String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+                        String reason = etReason.getText().toString().trim();
+                        if (reason.isEmpty()) reason = "Correção de estoque";
+                        setMedStock(med, newQty);
+                        JSONObject sm = new JSONObject();
+                        sm.put("id", "sm-" + System.currentTimeMillis());
+                        sm.put("med_id", med.optString("id"));
+                        sm.put("medication_id", med.optString("id"));
+                        sm.put("med_nome", med.optString("nome"));
+                        sm.put("med_name", med.optString("nome"));
+                        sm.put("tipo", diff >= 0 ? "entrada" : "saida");
+                        sm.put("movement_type", "correction");
+                        sm.put("qtd", Math.abs(diff));
+                        sm.put("quantity_change", diff);
+                        sm.put("quantity_changed", diff);
+                        sm.put("quantity_delta", diff);
+                        sm.put("delta", diff);
+                        sm.put("previous_quantity", curStock);
+                        sm.put("quantity_before", curStock);
+                        sm.put("new_quantity", newQty);
+                        sm.put("quantity_after", newQty);
+                        sm.put("date", today);
+                        sm.put("time", hm);
+                        sm.put("hora", hm);
+                        sm.put("data", today + " " + hm);
+                        sm.put("created_at", today + "T" + hm + ":00.000Z");
+                        sm.put("motivo", reason);
+                        sm.put("notes", reason);
+                        MainActivity.this.stockMovements.put(sm);
+                        deduplicateStockMovements();
+                        saveAll();
+                        render();
+                        Toast.makeText(MainActivity.this, "✓ Estoque ajustado e registrado no histórico!", 0).show();
                     }
                 } catch (Exception ignored) {}
             }
@@ -9802,9 +10347,22 @@ public class MainActivity extends Activity {
                         changed = true;
                     }
                     JSONArray eArr = resp.optJSONArray("events");
-                    if (eArr != null && eArr.length() > 0 && MainActivity.this.events.length() == 0) {
-                        MainActivity.this.events = eArr;
-                        MainActivity.this.migrateStockEventsFromEvents();
+                    if (eArr != null && eArr.length() > 0) {
+                        JSONArray nonStockEvents = new JSONArray();
+                        for (int i = 0; i < eArr.length(); i++) {
+                            JSONObject ev = eArr.optJSONObject(i);
+                            if (ev != null && !MainActivity.this.isStockEvent(ev)) {
+                                nonStockEvents.put(ev);
+                            }
+                        }
+                        if (nonStockEvents.length() > 0 && MainActivity.this.events.length() == 0) {
+                            MainActivity.this.events = nonStockEvents;
+                            changed = true;
+                        }
+                    }
+                    JSONArray smArr = resp.optJSONArray("stock_movements");
+                    if (smArr != null && smArr.length() > 0 && MainActivity.this.stockMovements.length() == 0) {
+                        MainActivity.this.stockMovements = smArr;
                         MainActivity.this.deduplicateStockMovements();
                         changed = true;
                     }
