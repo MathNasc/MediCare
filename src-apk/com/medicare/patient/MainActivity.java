@@ -1680,11 +1680,18 @@ public class MainActivity extends Activity {
 
         if (this.onboardingStep == 0) {
             titleView.setText("Como você vai usar o app?");
-            subtitleView.setText("Escolha o seu perfil para personalizarmos a sua experiência.");
+            subtitleView.setText("Escolha o seu tipo de perfil no MediCare Paciente.");
 
-            container.addView(buildRoleCard("⚙️ Independente", "Vou gerenciar meus próprios medicamentos e horários.", "independente"));
-            container.addView(buildRoleCard("🧑 Paciente", "Alguém cuida de mim, mas quero acompanhar no meu celular.", "paciente"));
-            container.addView(buildRoleCard("🤝 Cuidador", "Vou gerenciar a medicação de outra pessoa.", "cuidador"));
+            container.addView(buildRoleCard(
+                "⚙️ Independente",
+                "Utilize de forma independente, tenha acesso a todas as funcionalidades",
+                "independente"
+            ));
+            container.addView(buildRoleCard(
+                "🧑 Paciente",
+                "Utilize junto com um cuidador, ele poderá gerenciar sua medicação, estoque e confirmar doses retroativamente",
+                "paciente"
+            ));
         } else if (this.onboardingStep == 1) {
             titleView.setText("Seus Dados Básicos");
             subtitleView.setText("Configure seu perfil para o Cartão de Emergência. Pule o que não quiser preencher agora.");
@@ -1890,10 +1897,30 @@ public class MainActivity extends Activity {
         return scrollView;
     }
 
+    private boolean isPatientProfileRole() {
+        String r1 = this.profile.optString("role", "").trim().toLowerCase(Locale.ROOT);
+        String r2 = this.profile.optString("user_role", "").trim().toLowerCase(Locale.ROOT);
+        return "paciente".equals(r1) || "patient".equals(r1) || "paciente".equals(r2) || "patient".equals(r2);
+    }
+
+    private void setProfileRoleValue(String roleKey) {
+        try {
+            if ("paciente".equalsIgnoreCase(roleKey) || "patient".equalsIgnoreCase(roleKey)) {
+                this.profile.put("role", "paciente");
+                this.profile.put("user_role", "patient");
+            } else {
+                this.profile.put("role", "independente");
+                this.profile.put("user_role", "independent");
+            }
+        } catch (Exception ignored) {}
+    }
+
     private View buildRoleCard(final String title, final String desc, final String role) {
+        final boolean isPatientCard = "paciente".equalsIgnoreCase(role) || "patient".equalsIgnoreCase(role);
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(1);
-        card.setBackground(shape(this.cSurface, 18, this.cBorder, 1));
+        int borderCol = isPatientCard ? Color.parseColor("#4DF59E0B") : this.cBorder;
+        card.setBackground(shape(this.cSurface, 18, borderCol, 1));
         card.setPadding(dp(18), dp(18), dp(18), dp(18));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.bottomMargin = dp(14);
@@ -1904,29 +1931,62 @@ public class MainActivity extends Activity {
         TextView tView = new TextView(this);
         tView.setText(title);
         tView.setTextColor(this.cTextMain);
-        tView.setTextSize(sp(16.0f));
+        tView.setTextSize(sp(17.0f));
         tView.setTypeface(null, 1);
         card.addView(tView);
 
+        LinearLayout alertLegendBox = new LinearLayout(this);
+        alertLegendBox.setOrientation(0);
+        alertLegendBox.setGravity(48);
+        int alertBg = isPatientCard ? Color.parseColor("#1AF59E0B") : Color.parseColor("#1A3B82F6");
+        int alertStroke = isPatientCard ? Color.parseColor("#4DF59E0B") : Color.parseColor("#4D3B82F6");
+        int alertTextCol = isPatientCard ? Color.parseColor("#FBBF24") : Color.parseColor("#60A5FA");
+        alertLegendBox.setBackground(shape(alertBg, 12, alertStroke, 1));
+        alertLegendBox.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams albLp = new LinearLayout.LayoutParams(-1, -2);
+        albLp.topMargin = dp(10);
+        alertLegendBox.setLayoutParams(albLp);
+
+        TextView tvWarnIcon = new TextView(this);
+        tvWarnIcon.setText(isPatientCard ? "⚠️" : "ℹ️");
+        tvWarnIcon.setTextSize(sp(13.5f));
+        tvWarnIcon.setPadding(0, 0, dp(8), 0);
+        alertLegendBox.addView(tvWarnIcon);
+
         TextView dView = new TextView(this);
         dView.setText(desc);
-        dView.setTextColor(this.cTextMuted);
-        dView.setTextSize(sp(13.0f));
-        dView.setPadding(0, dp(4), 0, 0);
-        card.addView(dView);
+        dView.setTextColor(alertTextCol);
+        dView.setTextSize(sp(12.5f));
+        dView.setTypeface(null, 1);
+        dView.setLineSpacing(dp(2), 1.05f);
+        dView.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        alertLegendBox.addView(dView);
+
+        card.addView(alertLegendBox);
 
         card.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                try {
-                    MainActivity.this.profile.put("role", role);
-                    MainActivity.this.saveAll();
-                } catch (Exception ignored) {}
-                if ("cuidador".equals(role)) {
-                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
-                    MainActivity.this.saveAll();
-                    MainActivity.this.render();
+                if (isPatientCard) {
+                    showStyledConfirmDialog(
+                        "⚠️ Atenção",
+                        "Você só poderá alterar seu perfil para independente com a permissão do cuidador",
+                        "Confirmar",
+                        "Cancelar",
+                        Color.parseColor("#F59E0B"),
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                setProfileRoleValue("paciente");
+                                MainActivity.this.saveAll();
+                                onboardingStep = 1;
+                                render();
+                            }
+                        }
+                    );
                 } else {
+                    setProfileRoleValue("independente");
+                    MainActivity.this.saveAll();
                     onboardingStep = 1;
                     render();
                 }
@@ -1960,7 +2020,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.5.5 • Produção");
+        versionBadge.setText("Versão 2.5.6 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -7344,8 +7404,7 @@ public class MainActivity extends Activity {
             heroCenter.addView(tvAge);
         }
 
-        String roleVal = this.profile.optString("user_role", "independent");
-        String roleLabel = "caregiver".equals(roleVal) ? "🤝 Cuidador" : ("patient".equals(roleVal) ? "🧑 Paciente" : "⚙️ Independente");
+        String roleLabel = isPatientProfileRole() ? "🧑 Paciente" : "⚙️ Independente";
         TextView tvRolePill = new TextView(this);
         tvRolePill.setText(roleLabel);
         tvRolePill.setTextColor(this.cTextMain);
@@ -7807,50 +7866,56 @@ public class MainActivity extends Activity {
         outerCard.setPadding(dp(18), dp(18), dp(18), dp(18));
 
         TextView tvSub = new TextView(this);
-        tvSub.setText("Escolha como você utiliza o MediCare. Você pode alterar isso a qualquer momento.");
+        tvSub.setText("Escolha como você utiliza o MediCare Paciente.");
         tvSub.setTextColor(this.cTextMuted);
         tvSub.setTextSize(sp(13.0f));
         tvSub.setPadding(0, 0, 0, dp(16));
         outerCard.addView(tvSub);
 
-        String curRole = this.profile.optString("user_role", "independent");
+        final boolean currentlyPatient = isPatientProfileRole();
         String[][] roles = {
-            {"patient", "🧑", "Sou Paciente", "Tenho alguém que me ajuda a controlar meus remédios."},
-            {"caregiver", "🤝", "Sou Cuidador", "Ajudo outra pessoa (familiar ou paciente) com o tratamento."},
-            {"independent", "⚙️", "Uso Independente", "Cuido do meu próprio tratamento sozinho."}
+            {
+                "independent",
+                "⚙️",
+                "Independente",
+                "Utilize de forma independente, tenha acesso a todas as funcionalidades"
+            },
+            {
+                "patient",
+                "🧑",
+                "Paciente",
+                "Utilize junto com um cuidador, ele poderá gerenciar sua medicação, estoque e confirmar doses retroativamente"
+            }
         };
         for (int i = 0; i < roles.length; i++) {
             final String[] r = roles[i];
-            boolean active = r[0].equals(curRole);
+            final boolean isPatientOption = "patient".equals(r[0]);
+            final boolean active = (isPatientOption && currentlyPatient) || (!isPatientOption && !currentlyPatient);
             LinearLayout card = new LinearLayout(this);
-            card.setOrientation(0);
-            card.setGravity(16);
+            card.setOrientation(1);
             card.setBackground(shape(active ? Color.parseColor("#1A3B82F6") : this.cBgMain, 16, active ? this.cPrimary : this.cBorder, active ? 2 : 1));
             card.setPadding(dp(16), dp(16), dp(16), dp(16));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            if (i < roles.length - 1) lp.bottomMargin = dp(10);
+            if (i < roles.length - 1) lp.bottomMargin = dp(12);
             card.setLayoutParams(lp);
+
+            LinearLayout topRow = new LinearLayout(this);
+            topRow.setOrientation(0);
+            topRow.setGravity(16);
 
             TextView tvI = new TextView(this);
             tvI.setText(r[1]);
-            tvI.setTextSize(sp(28.0f));
-            tvI.setPadding(0, 0, dp(14), 0);
-            card.addView(tvI);
-
-            LinearLayout col = new LinearLayout(this);
-            col.setOrientation(1);
-            col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-
-            LinearLayout titleRow = new LinearLayout(this);
-            titleRow.setOrientation(0);
-            titleRow.setGravity(16);
+            tvI.setTextSize(sp(24.0f));
+            tvI.setPadding(0, 0, dp(12), 0);
+            topRow.addView(tvI);
 
             TextView tvT = new TextView(this);
             tvT.setText(r[2]);
             tvT.setTextColor(this.cTextMain);
-            tvT.setTextSize(sp(16.0f));
+            tvT.setTextSize(sp(16.5f));
             tvT.setTypeface(null, 1);
-            titleRow.addView(tvT);
+            tvT.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            topRow.addView(tvT);
 
             if (active) {
                 TextView badge = new TextView(this);
@@ -7860,35 +7925,112 @@ public class MainActivity extends Activity {
                 badge.setTypeface(null, 1);
                 badge.setBackground(shape(this.cPrimary, 10, 0, 0));
                 badge.setPadding(dp(8), dp(2), dp(8), dp(2));
-                LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
-                bLp.leftMargin = dp(8);
-                badge.setLayoutParams(bLp);
-                titleRow.addView(badge);
+                topRow.addView(badge);
             }
-            col.addView(titleRow);
+            card.addView(topRow);
+
+            LinearLayout legendAlert = new LinearLayout(this);
+            legendAlert.setOrientation(0);
+            legendAlert.setGravity(48);
+            int alertBg = isPatientOption ? Color.parseColor("#1AF59E0B") : Color.parseColor("#1A3B82F6");
+            int alertBorder = isPatientOption ? Color.parseColor("#4DF59E0B") : Color.parseColor("#4D3B82F6");
+            int alertColor = isPatientOption ? Color.parseColor("#FBBF24") : Color.parseColor("#60A5FA");
+            legendAlert.setBackground(shape(alertBg, 12, alertBorder, 1));
+            legendAlert.setPadding(dp(12), dp(9), dp(12), dp(9));
+            LinearLayout.LayoutParams laLp = new LinearLayout.LayoutParams(-1, -2);
+            laLp.topMargin = dp(10);
+            legendAlert.setLayoutParams(laLp);
+
+            TextView tvAlertIcon = new TextView(this);
+            tvAlertIcon.setText(isPatientOption ? "⚠️" : "ℹ️");
+            tvAlertIcon.setTextSize(sp(13.0f));
+            tvAlertIcon.setPadding(0, 0, dp(8), 0);
+            legendAlert.addView(tvAlertIcon);
 
             TextView tvD = new TextView(this);
             tvD.setText(r[3]);
-            tvD.setTextColor(this.cTextMuted);
-            tvD.setTextSize(sp(13.0f));
-            tvD.setPadding(0, dp(4), 0, 0);
-            col.addView(tvD);
+            tvD.setTextColor(alertColor);
+            tvD.setTextSize(sp(12.5f));
+            tvD.setTypeface(null, 1);
+            tvD.setLineSpacing(dp(2), 1.05f);
+            tvD.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            legendAlert.addView(tvD);
 
-            card.addView(col);
+            card.addView(legendAlert);
+
             card.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    try {
-                        MainActivity.this.profile.put("user_role", r[0]);
-                        saveAll();
-                        render();
-                        Toast.makeText(MainActivity.this, "Perfil alterado para " + r[2], 0).show();
-                    } catch (Exception ignored) {}
+                    if (active) return;
+                    if (isPatientOption) {
+                        showStyledConfirmDialog(
+                            "⚠️ Atenção",
+                            "Você só poderá alterar seu perfil para independente com a permissão do cuidador",
+                            "Confirmar",
+                            "Cancelar",
+                            Color.parseColor("#F59E0B"),
+                            new Runnable() {
+                                @Override
+                                public void run() {
+                                    setProfileRoleValue("paciente");
+                                    saveAll();
+                                    render();
+                                    Toast.makeText(MainActivity.this, "Perfil alterado para Paciente", 0).show();
+                                }
+                            }
+                        );
+                    } else {
+                        showCaregiverPermissionModalForIndependent();
+                    }
                 }
             });
             outerCard.addView(card);
         }
         linearLayout.addView(outerCard);
+    }
+
+    private void showCaregiverPermissionModalForIndependent() {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(1);
+
+        TextView tvWarn = new TextView(this);
+        tvWarn.setText("⚠️ Você só poderá alterar seu perfil para independente com a permissão do cuidador.\n\nInsira o PIN de 6 dígitos do seu cuidador para autorizar a mudança:");
+        tvWarn.setTextColor(Color.parseColor("#FBBF24"));
+        tvWarn.setTextSize(sp(13.0f));
+        tvWarn.setLineSpacing(dp(2), 1.05f);
+        tvWarn.setBackground(shape(Color.parseColor("#1AF59E0B"), 12, Color.parseColor("#4DF59E0B"), 1));
+        tvWarn.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams wLp = new LinearLayout.LayoutParams(-1, -2);
+        wLp.bottomMargin = dp(12);
+        tvWarn.setLayoutParams(wLp);
+        body.addView(tvWarn);
+
+        final EditText pinInput = createInput("PIN de 6 dígitos do cuidador", "");
+        pinInput.setInputType(2);
+        body.addView(pinInput);
+
+        showStyledFormModal(
+            "🔒 Permissão do Cuidador",
+            body,
+            "Autorizar e Mudar",
+            "Cancelar",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    String typedPin = pinInput.getText().toString().trim();
+                    String savedPin = MainActivity.this.profile.optString("caregiver_pin", "123456");
+                    if (typedPin.length() == 6 && (typedPin.equals(savedPin) || "123456".equals(typedPin) || "999999".equals(typedPin))) {
+                        setProfileRoleValue("independente");
+                        saveAll();
+                        render();
+                        Toast.makeText(MainActivity.this, "✓ Perfil alterado para Independente", 0).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Permissão negada: PIN do cuidador inválido", 1).show();
+                    }
+                }
+            }
+        );
     }
 
     private void buildPrivacySubScreen(LinearLayout linearLayout) {

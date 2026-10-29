@@ -801,35 +801,102 @@ fun PatientProfileScreen(
             "role_swap" -> {
                 var targetRole by remember { mutableStateOf(user.role) }
                 var pinInput by remember { mutableStateOf("") }
+                var showPatientAlertModal by remember { mutableStateOf(false) }
 
                 Text("🔄 Mudar Modo de Perfil", color = tokens.txt, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                Text("Pacientes supervisionados requerem o PIN de 6 dígitos do cuidador para desbloquear edições sensíveis.", color = tokens.sub, fontSize = 13.sp)
+                Text("Escolha como você utiliza o MediCare Paciente.", color = tokens.sub, fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(14.dp))
 
                 UserRole.entries.forEach { r ->
                     val sel = targetRole == r.code
-                    Row(
+                    val isPatientOption = r == UserRole.PACIENTE
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .padding(vertical = 6.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(if (sel) MediCareColors.Blue.copy(alpha = 0.16f) else tokens.bg1)
-                            .border(1.5.dp, if (sel) MediCareColors.Blue else tokens.bdr, RoundedCornerShape(14.dp))
-                            .clickable { targetRole = r.code }
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .border(1.5.dp, if (sel) MediCareColors.Blue else tokens.bdr, RoundedCornerShape(16.dp))
+                            .clickable {
+                                if (isPatientOption && targetRole != "paciente") {
+                                    showPatientAlertModal = true
+                                } else {
+                                    targetRole = r.code
+                                }
+                            }
+                            .padding(16.dp)
                     ) {
-                        Text(if (sel) "●" else "○", color = if (sel) MediCareColors.Blue else tokens.muted, fontSize = 18.sp)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(r.label, color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("Código: ${r.code}", color = tokens.sub, fontSize = 11.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (isPatientOption) "🧑" else "⚙️", fontSize = 22.sp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(r.label, color = tokens.txt, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                            Text(if (sel) "●" else "○", color = if (sel) MediCareColors.Blue else tokens.muted, fontSize = 18.sp)
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (isPatientOption) MediCareColors.Amber.copy(alpha = 0.14f)
+                                    else MediCareColors.Blue.copy(alpha = 0.14f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isPatientOption) MediCareColors.Amber.copy(alpha = 0.45f)
+                                    else MediCareColors.Blue.copy(alpha = 0.45f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text(if (isPatientOption) "⚠️" else "ℹ️", fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = r.description,
+                                color = if (isPatientOption) MediCareColors.Amber else MediCareColors.Blue,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
 
+                if (showPatientAlertModal) {
+                    AlertDialog(
+                        onDismissRequest = { showPatientAlertModal = false },
+                        title = { Text("⚠️ Atenção", fontWeight = FontWeight.Black) },
+                        text = {
+                            Text("Você só poderá alterar seu perfil para independente com a permissão do cuidador")
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    targetRole = "paciente"
+                                    showPatientAlertModal = false
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Amber)
+                            ) {
+                                Text("Confirmar", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showPatientAlertModal = false }) {
+                                Text("Cancelar")
+                            }
+                        }
+                    )
+                }
+
                 if (user.role == "paciente" && targetRole != "paciente") {
                     Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "⚠️ Você só poderá alterar seu perfil para independente com a permissão do cuidador.",
+                        color = MediCareColors.Amber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
                     OutlinedTextField(
                         value = pinInput,
                         onValueChange = { pinInput = it.filter { ch -> ch.isDigit() }.take(6) },

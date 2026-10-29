@@ -4,10 +4,19 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class UserRole(val code: String, val label: String) {
-    @SerialName("independente") INDEPENDENTE("independente", "Independente"),
-    @SerialName("paciente") PACIENTE("paciente", "Paciente Supervisionado"),
-    @SerialName("cuidador") CUIDADOR("cuidador", "Cuidador");
+enum class UserRole(val code: String, val label: String, val description: String) {
+    @SerialName("independente")
+    INDEPENDENTE(
+        "independente",
+        "Independente",
+        "Utilize de forma independente, tenha acesso a todas as funcionalidades"
+    ),
+    @SerialName("paciente")
+    PACIENTE(
+        "paciente",
+        "Paciente",
+        "Utilize junto com um cuidador, ele poderá gerenciar sua medicação, estoque e confirmar doses retroativamente"
+    );
 
     companion object {
         fun fromCode(code: String?): UserRole =
