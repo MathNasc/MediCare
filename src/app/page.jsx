@@ -1,142 +1,137 @@
+import Link from 'next/link';
+import { Shield, ArrowRight, Download, CheckCircle, Calendar, HeartHandshake } from 'lucide-react';
+
 export default function HomePage() {
   return (
-    <main style={{ minHeight: '100vh', padding: '2.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ maxWidth: '820px', width: '100%', backgroundColor: '#131d31', borderRadius: '1.25rem', border: '1px solid #1e293b', padding: '2.5rem', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)' }}>
+    <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-between py-10 px-4 sm:px-6 lg:px-8 antialiased">
+      <div className="max-w-4xl mx-auto w-full space-y-12 my-auto">
         
-        {/* Header Badge */}
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', backgroundColor: '#1e293b', padding: '0.35rem 0.85rem', borderRadius: '9999px', fontSize: '0.8125rem', color: '#60a5fa', marginBottom: '1.25rem', fontWeight: 600 }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }}></span>
-          Monorepo MediCare • Android & Cuidador Web
-        </div>
+        {/* BLOCO A — APRESENTAÇÃO */}
+        <section className="text-center space-y-4 max-w-2xl mx-auto pt-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold tracking-wide">
+            <HeartHandshake className="w-3.5 h-3.5 text-blue-400" />
+            <span>Cuidado e Saúde Compartilhada</span>
+          </div>
 
-        {/* Title */}
-        <h1 style={{ fontSize: '2.25rem', fontWeight: 800, letterSpacing: '-0.025em', color: '#ffffff', marginBottom: '0.75rem' }}>
-          Portal MediCare
-        </h1>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-tight">
+            Sua saúde, acompanhada de perto.
+          </h1>
 
-        <p style={{ fontSize: '1.05rem', color: '#94a3b8', lineHeight: 1.6, marginBottom: '2rem' }}>
-          Ecossistema integrado de saúde para controle rigoroso de posologia, supervisão por cuidadores e persistência sincronizada no PostgreSQL na Oracle Cloud.
-        </p>
+          <p className="text-base sm:text-lg text-slate-300 leading-relaxed font-normal">
+            O MediCare conecta pacientes e cuidadores para facilitar a organização de medicamentos,
+            o acompanhamento dos tratamentos e a rotina de cuidados.
+          </p>
+        </section>
 
-        {/* Action Cards (Android APK + Cuidador Web) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
-          
-          {/* Card 1: Cuidador Web */}
-          <div style={{ backgroundColor: '#18243c', borderRadius: '1rem', border: '1px solid #2b3956', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ display: 'inline-flex', padding: '0.25rem 0.65rem', borderRadius: '0.5rem', backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-                PWA RESPONSIVA • NOVO
+        {/* BLOCO B — ACESSO ÀS APLICAÇÕES */}
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Cartão 1: MediCare Cuidador (Destaque Azul) */}
+          <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-7 flex flex-col justify-between shadow-xl shadow-black/20 hover:border-blue-500/40 transition-all group">
+            <div className="space-y-3">
+              <div className="w-11 h-11 rounded-xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center text-blue-400 mb-2">
+                <Shield className="w-5 h-5" />
               </div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.35rem' }}>
-                MediCare Cuidador Web
+              
+              <h2 className="text-xl font-bold text-white tracking-tight group-hover:text-blue-400 transition-colors">
+                MediCare Cuidador
               </h2>
-              <p style={{ fontSize: '0.875rem', color: '#94a3b8', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                Acompanhamento em tempo real, visualização de administrações, agenda e confirmação de doses retroativas.
+
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Organize o cuidado, acompanhe seus pacientes e consulte administrações,
+                compromissos e histórico em um só lugar.
               </p>
             </div>
 
-            <a
-              href="/cuidador"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#2563eb',
-                color: '#ffffff',
-                fontWeight: 700,
-                fontSize: '0.9rem',
-                padding: '0.75rem 1.25rem',
-                borderRadius: '0.75rem',
-                boxShadow: '0 8px 16px -4px rgba(37, 99, 235, 0.4)',
-                textAlign: 'center',
-              }}
-            >
-              💻 Abrir MediCare Cuidador →
-            </a>
+            <div className="pt-6 mt-2">
+              <Link
+                href="/cuidador"
+                className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-sm py-3 px-5 rounded-xl transition-colors shadow-lg shadow-blue-600/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
+              >
+                <span>Acessar MediCare Cuidador</span>
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </div>
           </div>
 
-          {/* Card 2: Paciente Android APK */}
-          <div style={{ backgroundColor: '#18243c', borderRadius: '1rem', border: '1px solid #2b3956', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ display: 'inline-flex', padding: '0.25rem 0.65rem', borderRadius: '0.5rem', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-                APLICATIVO ANDROID NATIVO
+          {/* Cartão 2: MediCare Paciente (Destaque Verde) */}
+          <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-7 flex flex-col justify-between shadow-xl shadow-black/20 hover:border-emerald-500/40 transition-all group">
+            <div className="space-y-3">
+              <div className="w-11 h-11 rounded-xl bg-emerald-600/15 border border-emerald-500/25 flex items-center justify-center text-emerald-400 mb-2">
+                <Download className="w-5 h-5" />
               </div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.35rem' }}>
-                MediCare Paciente (APK)
+
+              <h2 className="text-xl font-bold text-white tracking-tight group-hover:text-emerald-400 transition-colors">
+                MediCare Paciente
               </h2>
-              <p style={{ fontSize: '0.875rem', color: '#94a3b8', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                Instalador nativo assinado (v2/v3) com notificações exatas AlarmManager e sincronização offline.
+
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Consulte seus medicamentos, acompanhe seus horários e utilize os recursos de
+                lembretes do aplicativo Android.
               </p>
             </div>
 
-            <a
-              href="/api/apk"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#059669',
-                color: '#ffffff',
-                fontWeight: 700,
-                fontSize: '0.9rem',
-                padding: '0.75rem 1.25rem',
-                borderRadius: '0.75rem',
-                boxShadow: '0 8px 16px -4px rgba(5, 150, 105, 0.4)',
-                textAlign: 'center',
-              }}
-            >
-              📥 Baixar APK Atualizado
-            </a>
+            <div className="pt-6 mt-2">
+              <a
+                href="/api/apk"
+                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold text-sm py-3 px-5 rounded-xl transition-colors shadow-lg shadow-emerald-600/20 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
+              >
+                <span>Baixar aplicativo Android</span>
+                <Download className="w-4 h-4" />
+              </a>
+            </div>
           </div>
+        </section>
 
-        </div>
+        {/* BLOCO C — APRESENTAÇÃO DOS BENEFÍCIOS */}
+        <section className="bg-[#131d31]/70 rounded-2xl border border-slate-800/80 p-6 sm:p-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Benefício 1 */}
+            <div className="flex items-start gap-3.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
+                <CheckCircle className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Organização</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Medicamentos, horários e compromissos centralizados em um fluxo simples.
+                </p>
+              </div>
+            </div>
 
-        {/* System Architecture Overview */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
-          <div style={{ backgroundColor: '#18243c', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 700, marginBottom: '0.35rem' }}>
-              Mobile
+            {/* Benefício 2 */}
+            <div className="flex items-start gap-3.5">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
+                <HeartHandshake className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Acompanhamento</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Informações seguras disponíveis para pacientes e seus cuidadores autorizados.
+                </p>
+              </div>
             </div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 600, color: '#38bdf8' }}>
-              Android Nativo (Kotlin)
+
+            {/* Benefício 3 */}
+            <div className="flex items-start gap-3.5">
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 mt-0.5">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">Continuidade</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Registros e histórico integrados à rotina diária de saúde da família.
+                </p>
+              </div>
             </div>
-            <p style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.35rem' }}>
-              AlarmManager, persistência local e interface otimizada para pacientes.
-            </p>
           </div>
-
-          <div style={{ backgroundColor: '#18243c', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 700, marginBottom: '0.35rem' }}>
-              Web & PWA
-            </div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 600, color: '#a78bfa' }}>
-              Cuidador Web (React)
-            </div>
-            <p style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.35rem' }}>
-              Acompanhamento de múltiplos pacientes, relatórios e auditoria.
-            </p>
-          </div>
-
-          <div style={{ backgroundColor: '#18243c', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 700, marginBottom: '0.35rem' }}>
-              Backend & BD
-            </div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 600, color: '#34d399' }}>
-              Oracle Cloud (PostgreSQL 16)
-            </div>
-            <p style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.35rem' }}>
-              APIs REST, procedimentos RPC e trilha de auditoria clínica.
-            </p>
-          </div>
-        </div>
-
-        {/* Footer Note */}
-        <div style={{ borderTop: '1px solid #1e293b', paddingTop: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8125rem', color: '#64748b' }}>
-          <span>MediCare Ecosystem • Etapa 2 Fundação Ativa</span>
-          <span>Build: <code>MediCare-Paciente.apk</code></span>
-        </div>
+        </section>
 
       </div>
-    </main>
+
+      {/* Rodapé discreto */}
+      <footer className="text-center pt-8 text-xs text-slate-500">
+        MediCare • Gestão de Saúde e Cuidado Compartilhado
+      </footer>
+    </div>
   );
 }

@@ -1,13 +1,15 @@
+import './globals.css';
+
 export const metadata = {
   metadataBase: new URL('https://medicare-amber-five.vercel.app'),
   title: {
-    default: 'MediCare — Servidor & Paciente Android',
+    default: 'MediCare — Sua saúde, acompanhada de perto',
     template: '%s | MediCare',
   },
   description:
-    'MediCare Paciente Android — Servidor de API, sincronização em tempo real e distribuição do APK oficial.',
-  keywords: ['medicare', 'android', 'apk', 'saude', 'medicamentos', 'api'],
-  authors: [{ name: 'MediCare Team' }],
+    'O MediCare conecta pacientes e cuidadores para facilitar a organização de medicamentos, o acompanhamento dos tratamentos e a rotina de cuidados.',
+  keywords: ['medicare', 'saude', 'medicamentos', 'cuidador', 'paciente', 'android'],
+  authors: [{ name: 'MediCare' }],
   icons: {
     icon: [
       { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
@@ -19,8 +21,8 @@ export const metadata = {
   openGraph: {
     type: 'website',
     siteName: 'MediCare',
-    title: 'MediCare — Servidor & Paciente Android',
-    description: 'Serviços de backend e distribuição do APK oficial do MediCare Paciente.',
+    title: 'MediCare — Sua saúde, acompanhada de perto',
+    description: 'Organização de medicamentos e rotina de cuidados para pacientes e cuidadores.',
     images: [
       {
         url: '/icon-512.png',
@@ -34,7 +36,7 @@ export const metadata = {
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#0a0e1a',
+  themeColor: '#0b1120',
 };
 
 export default function RootLayout({ children }) {
@@ -48,26 +50,10 @@ export default function RootLayout({ children }) {
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
-        <style dangerouslySetInnerHTML={{ __html: `
-          *, *::before, *::after {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
-          html, body {
-            background-color: #0b1120;
-            color: #f1f5f9;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            min-height: 100vh;
-            -webkit-font-smoothing: antialiased;
-          }
-          a {
-            color: inherit;
-            text-decoration: none;
-          }
-        `}} />
       </head>
-      <body>{children}</body>
+      <body className="bg-[#0b1120] text-slate-100 min-h-screen antialiased selection:bg-blue-600 selection:text-white">
+        {children}
+      </body>
     </html>
   );
 }
