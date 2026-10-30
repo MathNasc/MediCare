@@ -68,7 +68,11 @@ EOF
   echo "✓ Arquivo .env.production gerado com permissões restritas (chmod 600)."
 fi
 
-# 3. Compila a aplicação Next.js para produção
+# 3. Garante dependências instaladas e compila a aplicação Next.js
+echo ""
+echo "Instalando dependências (npm install)..."
+npm install --include=dev
+
 echo ""
 echo "Compilando backend (npm run build)..."
 npm run build
