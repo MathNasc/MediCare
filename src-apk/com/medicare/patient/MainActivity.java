@@ -3691,9 +3691,10 @@ public class MainActivity extends Activity {
             tBadge.setLayoutParams(tbLp);
             subBadgeRow.addView(tBadge);
 
-            String unitStr = med.optString("unidade", med.optString("forma", "comprimido"));
+            String unitStr = optCleanString(med, "unidade", optCleanString(med, "forma", "comprimido"));
+            String doseStr = optCleanString(med, "dosagem", "");
             TextView doseSub = new TextView(this);
-            doseSub.setText(med.optString("dosagem") + " · " + unitStr);
+            doseSub.setText((doseStr.isEmpty() ? "" : doseStr + " · ") + unitStr);
             doseSub.setTextColor(this.cTextMuted);
             doseSub.setTextSize(sp(13.0f));
             doseSub.setSingleLine(true);
@@ -3736,20 +3737,37 @@ public class MainActivity extends Activity {
             topRow.addView(delBtn);
             col.addView(topRow);
 
-            String obs = med.optString("observacoes", med.optString("instrucoes", ""));
-            if (isSOS || !obs.isEmpty()) {
+            JSONArray hrsCard = med.optJSONArray("horarios");
+            String scheduleText;
+            if (isSOS) {
+                scheduleText = "⏰ Uso conforme necessidade";
+            } else if (hrsCard != null && hrsCard.length() > 0) {
+                String joinedHrs = joinArray(hrsCard).trim();
+                scheduleText = (hrsCard.length() > 1 ? "⏰ Horários: " : "⏰ Horário: ") + (joinedHrs.isEmpty() || "null".equalsIgnoreCase(joinedHrs) ? "Não preenchido" : joinedHrs);
+            } else {
+                scheduleText = "⏰ Horário: Não preenchido";
+            }
+            TextView schedTv = new TextView(this);
+            schedTv.setText(scheduleText);
+            schedTv.setTextColor(this.cTextMuted);
+            schedTv.setTextSize(sp(12.5f));
+            schedTv.setPadding(0, dp(6), 0, 0);
+            col.addView(schedTv);
+
+            String obs = optCleanString(med, "observacoes", optCleanString(med, "instrucoes", ""));
+            if (!obs.isEmpty()) {
                 TextView obsTv = new TextView(this);
-                obsTv.setText(isSOS && obs.isEmpty() ? "Uso conforme necessidade" : obs);
+                obsTv.setText("📝 " + obs);
                 obsTv.setTextColor(this.cTextLight);
                 obsTv.setTextSize(sp(12.0f));
-                obsTv.setPadding(0, dp(6), 0, 0);
+                obsTv.setPadding(0, dp(4), 0, 0);
                 col.addView(obsTv);
             }
 
             if (isTemp) {
                 int durDays = med.optInt("duration_days", 7);
                 TextView tempInfo = new TextView(this);
-                tempInfo.setText("📅 Tratamento por " + durDays + " dias · Início: " + med.optString("start_date", today));
+                tempInfo.setText("📅 Tratamento por " + durDays + " dias · Início: " + optCleanString(med, "start_date", today));
                 tempInfo.setTextColor(this.cWarning);
                 tempInfo.setTextSize(sp(11.5f));
                 tempInfo.setPadding(0, dp(6), 0, 0);
@@ -3942,18 +3960,24 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(1);
 
-        String pa = med.optString("principio_ativo", "");
-        if (!pa.isEmpty()) {
-            TextView paTv = new TextView(this);
-            paTv.setText("Princípio ativo: " + pa);
-            paTv.setTextColor(this.cTextMuted);
-            paTv.setTextSize(sp(13.0f));
-            paTv.setPadding(0, 0, 0, dp(4));
-            box.addView(paTv);
-        }
+        String pa = optCleanString(med, "principio_ativo", optCleanString(med, "active_ingredient", ""));
+        TextView paTv = new TextView(this);
+        paTv.setText("🧪 Princípio ativo: " + (pa.isEmpty() ? "Não preenchido" : pa));
+        paTv.setTextColor(this.cTextMuted);
+        paTv.setTextSize(sp(13.0f));
+        paTv.setPadding(0, 0, 0, dp(4));
+        box.addView(paTv);
+
+        String fab = optCleanString(med, "fabricante", optCleanString(med, "manufacturer", ""));
+        TextView fabTv = new TextView(this);
+        fabTv.setText("🏭 Fabricante: " + (fab.isEmpty() ? "Não preenchido" : fab));
+        fabTv.setTextColor(this.cTextMuted);
+        fabTv.setTextSize(sp(13.0f));
+        fabTv.setPadding(0, 0, 0, dp(4));
+        box.addView(fabTv);
 
         int stock = getMedStock(med);
-        String unit = med.optString("unidade", med.optString("forma", "comprimido"));
+        String unit = optCleanString(med, "unidade", optCleanString(med, "forma", "comprimido"));
         TextView stTv = new TextView(this);
         stTv.setText("📦 Estoque disponível: " + stock + " " + unit + "s");
         stTv.setTextColor(stock <= 5 ? this.cDanger : (stock <= 10 ? this.cWarning : this.cSuccess));
@@ -3963,24 +3987,23 @@ public class MainActivity extends Activity {
         box.addView(stTv);
 
         JSONArray hrs = med.optJSONArray("horarios");
-        if (hrs != null && hrs.length() > 0 && !"sos".equals(getMedType(med))) {
+        if (!"sos".equals(getMedType(med))) {
+            String hrsStr = (hrs != null && hrs.length() > 0) ? joinArray(hrs).trim() : "";
             TextView hTv = new TextView(this);
-            hTv.setText("⏰ Horários: " + joinArray(hrs));
+            hTv.setText("⏰ Horários: " + (hrsStr.isEmpty() || "null".equalsIgnoreCase(hrsStr) ? "Não preenchido" : hrsStr));
             hTv.setTextColor(this.cTextMain);
             hTv.setTextSize(sp(13.0f));
             hTv.setPadding(0, 0, 0, dp(8));
             box.addView(hTv);
         }
 
-        String obs = med.optString("observacoes", med.optString("instrucoes", ""));
-        if (!obs.isEmpty()) {
-            TextView oTv = new TextView(this);
-            oTv.setText("📝 Observações: " + obs);
-            oTv.setTextColor(this.cTextMuted);
-            oTv.setTextSize(sp(13.0f));
-            oTv.setPadding(0, 0, 0, dp(10));
-            box.addView(oTv);
-        }
+        String obs = optCleanString(med, "observacoes", optCleanString(med, "instrucoes", ""));
+        TextView oTv = new TextView(this);
+        oTv.setText("📝 Observações: " + (obs.isEmpty() ? "Não preenchido" : obs));
+        oTv.setTextColor(this.cTextMuted);
+        oTv.setTextSize(sp(13.0f));
+        oTv.setPadding(0, 0, 0, dp(10));
+        box.addView(oTv);
 
         TextView histHdr = new TextView(this);
         histHdr.setText("Histórico recente deste medicamento");
@@ -5054,12 +5077,12 @@ public class MainActivity extends Activity {
         body.addView(colorRow);
 
         // Fields
-        String initName = isEditing ? jSONObject.optString("nome") : (catalogItem != null ? catalogItem[1] : "");
-        String initActive = isEditing ? jSONObject.optString("principio_ativo") : (catalogItem != null ? catalogItem[2] : "");
-        String initDose = isEditing ? jSONObject.optString("dosagem") : (catalogItem != null ? catalogItem[3] : "");
-        String initUnit = isEditing ? jSONObject.optString("unidade", jSONObject.optString("forma", "comprimido")) : (catalogItem != null ? catalogItem[5] : "comprimido");
-        String initManuf = isEditing ? jSONObject.optString("fabricante") : (catalogItem != null ? catalogItem[6] : "");
-        String initObs = isEditing ? jSONObject.optString("observacoes", jSONObject.optString("instrucoes", "")) : "";
+        String initName = isEditing ? optCleanString(jSONObject, "nome", "") : (catalogItem != null ? catalogItem[1] : "");
+        String initActive = isEditing ? optCleanString(jSONObject, "principio_ativo", optCleanString(jSONObject, "active_ingredient", "")) : (catalogItem != null ? catalogItem[2] : "");
+        String initDose = isEditing ? optCleanString(jSONObject, "dosagem", "") : (catalogItem != null ? catalogItem[3] : "");
+        String initUnit = isEditing ? optCleanString(jSONObject, "unidade", optCleanString(jSONObject, "forma", "comprimido")) : (catalogItem != null ? catalogItem[5] : "comprimido");
+        String initManuf = isEditing ? optCleanString(jSONObject, "fabricante", optCleanString(jSONObject, "manufacturer", "")) : (catalogItem != null ? catalogItem[6] : "");
+        String initObs = isEditing ? optCleanString(jSONObject, "observacoes", optCleanString(jSONObject, "instrucoes", "")) : "";
 
         body.addView(createFormLabel("NOME *"));
         final EditText nameIn = createInput("Nome do medicamento", initName);

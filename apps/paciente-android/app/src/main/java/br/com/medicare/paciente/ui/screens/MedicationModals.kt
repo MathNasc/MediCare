@@ -674,14 +674,21 @@ fun MedDetailDialog(
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(med.nome, color = tokens.txt, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                val cleanActive = med.activeIngredient?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+                val cleanManuf = med.manufacturer?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
                 Text(
                     text = buildString {
                         append("${med.dosagem} · ${med.unidade}")
-                        if (!med.activeIngredient.isNullOrBlank()) append(" · ${med.activeIngredient}")
-                        if (!med.manufacturer.isNullOrBlank()) append(" (${med.manufacturer})")
+                        if (cleanManuf != null) append(" ($cleanManuf)")
                     },
                     color = tokens.sub,
                     fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "🧪 Princípio ativo: ${cleanActive ?: "Não preenchido"}",
+                    color = tokens.sub,
+                    fontSize = 12.sp
                 )
             }
 
@@ -732,12 +739,13 @@ fun MedDetailDialog(
                     }
                 }
 
-                if (med.horarios.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text("Horários programados", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+                Text("Horários programados", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                val cleanHorarios = med.horarios.filter { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+                if (cleanHorarios.isNotEmpty()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        med.horarios.forEach { h ->
+                        cleanHorarios.forEach { h ->
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
@@ -748,12 +756,13 @@ fun MedDetailDialog(
                             }
                         }
                     }
+                } else {
+                    Text("Não preenchido", color = tokens.muted, fontSize = 12.sp)
                 }
 
-                if (!med.observacoes.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Observações: ${med.observacoes}", color = tokens.sub, fontSize = 13.sp)
-                }
+                val cleanObs = med.observacoes?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Observações: ${cleanObs ?: "Não preenchido"}", color = tokens.sub, fontSize = 13.sp)
 
                 Spacer(modifier = Modifier.height(14.dp))
                 Text("Histórico recente", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)

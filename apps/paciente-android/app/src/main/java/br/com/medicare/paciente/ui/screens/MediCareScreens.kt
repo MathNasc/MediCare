@@ -520,15 +520,25 @@ fun PatientMedsScreen(
                                         TreatmentTypeBadge(tType, if (isFinished) "finalizado" else m.status)
                                     }
                                     Text(
-                                        text = "${m.dosagem} · ${m.unidade} · ${
-                                            if (tType == TreatmentType.SOS) "Uso sob demanda"
-                                            else m.horarios.joinToString(", ")
-                                        }",
+                                        text = "${m.dosagem} · ${m.unidade}",
                                         color = tokens.muted,
                                         fontSize = 12.sp
                                     )
-                                    if (!m.observacoes.isNullOrBlank()) {
-                                        Text("📝 ${m.observacoes}", color = tokens.sub, fontSize = 11.sp)
+                                    val cleanTimes = m.horarios.filter { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+                                    Text(
+                                        text = if (tType == TreatmentType.SOS) {
+                                            "⏰ Uso conforme necessidade"
+                                        } else if (cleanTimes.isNotEmpty()) {
+                                            "⏰ ${if (cleanTimes.size > 1) "Horários" else "Horário"}: ${cleanTimes.joinToString(", ")}"
+                                        } else {
+                                            "⏰ Horário: Não preenchido"
+                                        },
+                                        color = tokens.sub,
+                                        fontSize = 12.sp
+                                    )
+                                    val cleanObs = m.observacoes?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+                                    if (cleanObs != null) {
+                                        Text("📝 $cleanObs", color = tokens.sub, fontSize = 11.sp)
                                     }
                                 }
                             }
