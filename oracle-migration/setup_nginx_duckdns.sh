@@ -6,6 +6,7 @@
 set -e
 
 DOMAIN="${1:-medicare-cuidador.duckdns.org}"
+EMAIL="${2:-}"
 
 echo "======================================================================"
 echo " CONFIGURANDO NGINX + SSL PARA: $DOMAIN"
@@ -52,4 +53,14 @@ echo "✓ NGINX CONFIGURADO COM SUCESSO!"
 echo "Agora, executando o Certbot para gerar o certificado SSL com HTTPS..."
 echo "======================================================================"
 
-sudo certbot --nginx -d "$DOMAIN"
+if [ -n "$EMAIL" ]; then
+  sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL"
+else
+  sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
+fi
+
+echo ""
+echo "======================================================================"
+echo "✓ HTTPS ATIVO COM SUCESSO!"
+echo "Acesse seu sistema em: https://$DOMAIN"
+echo "======================================================================"
