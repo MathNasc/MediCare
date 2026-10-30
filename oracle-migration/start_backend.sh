@@ -23,6 +23,20 @@ if ! docker ps --format '{{.Names}}' | grep -q "^medicare_db$"; then
   docker start medicare_db || true
 fi
 
+# 1.1 Garante Node.js >= 20 para Next.js
+CURRENT_NODE_MAJOR=$(node -v 2>/dev/null | sed -E 's/v([0-9]+).*/\1/' || echo "0")
+if [ "$CURRENT_NODE_MAJOR" -lt 20 ]; then
+  echo "Node.js atual é $(node -v 2>/dev/null || echo 'desconhecido'). Next.js requer Node.js >= 20.9.0."
+  if command -v sudo >/dev/null 2>&1; then
+    echo "Atualizando Node.js para versão 20 LTS via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    echo "✓ Node.js atualizado: $(node -v)"
+  else
+    echo "AVISO: Node.js está abaixo da versão 20 e não foi possível rodar sudo para atualizar automaticamente."
+  fi
+fi
+
 # 2. Configura .env.production se não existir
 ENV_PROD="${PROJECT_ROOT}/.env.production"
 if [ ! -f "$ENV_PROD" ]; then
