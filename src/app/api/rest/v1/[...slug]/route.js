@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
+import { forwardToOracleBackend } from '@/lib/oracleProxy';
 import { extractAuthenticatedUser } from '@/lib/oracleAuth';
 
 const corsHeaders = {
@@ -596,10 +597,8 @@ async function handleRestRequest(req, { params }) {
 
   const pool = getPgPool();
   if (!pool) {
-    return NextResponse.json(
-      { error: 'PostgreSQL Oracle ainda não configurado no servidor.' },
-      { status: 503, headers: corsHeaders }
-    );
+    const slugStr = slug.join('/');
+    return forwardToOracleBackend(req, `/api/rest/v1/${slugStr}`);
   }
 
   const claims = extractAuthenticatedUser(req);

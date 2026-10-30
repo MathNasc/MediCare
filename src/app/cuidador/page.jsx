@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import {
   Home,
   Users,
@@ -51,9 +50,15 @@ export default function CuidadorWebPage() {
   const [notification, setNotification] = useState(null);
 
   // Auth form states (campos vazios por padrão, sem expor credenciais)
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup'
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [signupNome, setSignupNome] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
   const [authError, setAuthError] = useState(null);
   const [showRecoverModal, setShowRecoverModal] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState('');
@@ -161,6 +166,61 @@ export default function CuidadorWebPage() {
       showToast('Bem-vindo ao MediCare Cuidador!');
     } catch (err) {
       setAuthError(err.message || 'E-mail ou senha incorretos. Tente novamente.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+
+    if (!signupNome.trim()) {
+      setAuthError('Informe seu nome completo.');
+      return;
+    }
+    if (signupPassword.length < 6) {
+      setAuthError('A senha deve ter no mínimo 6 caracteres.');
+      return;
+    }
+    if (signupPassword !== signupConfirmPassword) {
+      setAuthError('As senhas digitadas não coincidem.');
+      return;
+    }
+
+    setActionLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/v1/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: signupEmail.trim().toLowerCase(),
+          password: signupPassword,
+          data: {
+            nome: signupNome.trim(),
+            role: 'cuidador',
+          },
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Não foi possível cadastrar. Verifique os dados informados.');
+      }
+
+      setToken(data.access_token);
+      setCurrentUser(data.user || {
+        email: signupEmail.trim().toLowerCase(),
+        user_metadata: { nome: signupNome.trim(), role: 'cuidador' },
+      });
+      if (data.access_token) {
+        localStorage.setItem('medicare_cuidador_jwt', data.access_token);
+      }
+      showToast('Conta de Cuidador criada com sucesso!');
+    } catch (err) {
+      setAuthError(err.message || 'Erro ao criar conta de cuidador.');
     } finally {
       setActionLoading(false);
     }
@@ -571,16 +631,44 @@ export default function CuidadorWebPage() {
         <div className="w-full max-w-[420px] bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-8 shadow-2xl shadow-black/40">
           
           {/* Logo / Header */}
-          <div className="text-center mb-7">
+          <div className="text-center mb-6">
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 font-black text-xl mb-3 shadow-md shadow-blue-600/20">
               M
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              Bem-vindo ao MediCare Cuidador
+              {authMode === 'signup' ? 'Criar Conta de Cuidador' : 'Bem-vindo ao MediCare Cuidador'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-1.5 leading-relaxed">
-              Acesse o painel para acompanhar os tratamentos e a rotina de saúde dos seus pacientes.
+              {authMode === 'signup'
+                ? 'Cadastre-se para gerenciar seus pacientes, acompanhar medicações e receber alertas.'
+                : 'Acesse o painel para acompanhar os tratamentos e a rotina de saúde dos seus pacientes.'}
             </p>
+          </div>
+
+          {/* Alternador de Modo: Entrar / Criar Conta */}
+          <div className="flex bg-[#0b1120] p-1 rounded-xl mb-5 border border-slate-800">
+            <button
+              type="button"
+              onClick={() => { setAuthMode('login'); setAuthError(null); }}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                authMode === 'login'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Entrar
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('signup'); setAuthError(null); }}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                authMode === 'signup'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Criar Conta
+            </button>
           </div>
 
           {/* Mensagem de Erro Acessível */}
@@ -594,95 +682,236 @@ export default function CuidadorWebPage() {
             </div>
           )}
 
-          {/* Formulário de Login */}
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label
-                htmlFor="login-email"
-                className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
-              >
-                E-mail
-              </label>
-              <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="login-email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  placeholder="seu.email@exemplo.com"
-                  className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
+          {authMode === 'login' ? (
+            /* Formulário de Login */
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
                 <label
-                  htmlFor="login-password"
-                  className="block text-xs font-semibold text-slate-300 uppercase tracking-wider"
+                  htmlFor="login-email"
+                  className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
                 >
-                  Senha
+                  E-mail
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowRecoverModal(true)}
-                  className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
-                >
-                  Esqueceu a senha?
-                </button>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="login-email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="seu.email@exemplo.com"
+                    className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
+                  />
+                </div>
               </div>
-              <div className="relative">
-                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="login-password"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  autoComplete="current-password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="Sua senha de acesso"
-                  className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-11 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? 'Ocultar senha' : 'Exibir senha'}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
 
-            {/* Botão Principal "Entrar" */}
-            <button
-              type="submit"
-              disabled={actionLoading}
-              className="w-full mt-2 min-h-[44px] py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
-            >
-              {actionLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>Entrando...</span>
-                </>
-              ) : (
-                <span>Entrar</span>
-              )}
-            </button>
-          </form>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label
+                    htmlFor="login-password"
+                    className="block text-xs font-semibold text-slate-300 uppercase tracking-wider"
+                  >
+                    Senha
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowRecoverModal(true)}
+                    className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+                  >
+                    Esqueceu a senha?
+                  </button>
+                </div>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="current-password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="Sua senha de acesso"
+                    className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-11 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Ocultar senha' : 'Exibir senha'}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Botão Principal "Entrar" */}
+              <button
+                type="submit"
+                disabled={actionLoading}
+                className="w-full mt-2 min-h-[44px] py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
+              >
+                {actionLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Entrando...</span>
+                  </>
+                ) : (
+                  <span>Entrar</span>
+                )}
+              </button>
+
+              <div className="text-center pt-2">
+                <span className="text-xs text-slate-400">Não tem uma conta? </span>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('signup'); setAuthError(null); }}
+                  className="text-xs text-blue-400 hover:text-blue-300 font-semibold underline underline-offset-2 transition-colors"
+                >
+                  Criar conta de cuidador
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* Formulário de Cadastro de Cuidador */
+            <form onSubmit={handleSignup} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="signup-nome"
+                  className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
+                >
+                  Nome Completo
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="signup-nome"
+                    type="text"
+                    required
+                    autoComplete="name"
+                    value={signupNome}
+                    onChange={(e) => setSignupNome(e.target.value)}
+                    placeholder="Seu nome completo"
+                    className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="signup-email"
+                  className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
+                >
+                  E-mail
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="signup-email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    placeholder="seu.email@exemplo.com"
+                    className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="signup-password"
+                  className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
+                >
+                  Senha (mínimo 6 caracteres)
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="signup-password"
+                    type={showSignupPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
+                    placeholder="Crie sua senha segura"
+                    className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-11 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSignupPassword(!showSignupPassword)}
+                    aria-label={showSignupPassword ? 'Ocultar senha' : 'Exibir senha'}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition-colors"
+                  >
+                    {showSignupPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="signup-confirm-password"
+                  className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
+                >
+                  Confirmar Senha
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="signup-confirm-password"
+                    type={showSignupPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={signupConfirmPassword}
+                    onChange={(e) => setSignupConfirmPassword(e.target.value)}
+                    placeholder="Confirme sua senha"
+                    className="w-full bg-[#0b1120] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Botão "Criar Conta de Cuidador" */}
+              <button
+                type="submit"
+                disabled={actionLoading}
+                className="w-full mt-2 min-h-[44px] py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
+              >
+                {actionLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Criando conta...</span>
+                  </>
+                ) : (
+                  <span>Criar Conta de Cuidador</span>
+                )}
+              </button>
+
+              <div className="text-center pt-2">
+                <span className="text-xs text-slate-400">Já possui uma conta? </span>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('login'); setAuthError(null); }}
+                  className="text-xs text-blue-400 hover:text-blue-300 font-semibold underline underline-offset-2 transition-colors"
+                >
+                  Entrar aqui
+                </button>
+              </div>
+            </form>
+          )}
 
           {/* Link "Voltar ao portal" */}
           <div className="mt-6 pt-5 border-t border-slate-800/80 text-center">
-            <Link
+            <a
               href="/"
               className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors py-1 px-2 rounded-lg"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Voltar ao portal</span>
-            </Link>
+            </a>
           </div>
         </div>
 

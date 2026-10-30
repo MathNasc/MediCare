@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
+import { forwardToOracleBackend } from '@/lib/oracleProxy';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -180,10 +181,7 @@ export async function GET(request) {
 
   const pool = getPgPool();
   if (!pool) {
-    return NextResponse.json(
-      { ok: false, configured: false, error: 'PostgreSQL Oracle não configurado no ambiente (.env).' },
-      { status: 503, headers: corsHeaders }
-    );
+    return forwardToOracleBackend(request, '/api/v1/sync');
   }
 
   const client = await pool.connect();
@@ -265,14 +263,7 @@ export async function GET(request) {
 export async function POST(request) {
   const pool = getPgPool();
   if (!pool) {
-    return NextResponse.json(
-      {
-        ok: false,
-        configured: false,
-        error: 'Banco PostgreSQL Oracle ainda não configurado no servidor (defina DATABASE_URL ou ORACLE_PG_HOST).',
-      },
-      { status: 503, headers: corsHeaders }
-    );
+    return forwardToOracleBackend(request, '/api/v1/sync');
   }
 
   let body;

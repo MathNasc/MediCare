@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
+import { forwardToOracleBackend } from '@/lib/oracleProxy';
 import {
   checkRateLimit,
   extractAuthenticatedUser,
@@ -20,6 +21,11 @@ export async function OPTIONS() {
 
 export async function GET(req, { params }) {
   const action = (await params).action?.[0] || '';
+  const pool = getPgPool();
+  if (!pool) {
+    return forwardToOracleBackend(req, `/api/auth/v1/${action}`);
+  }
+
   if (action === 'user') {
     const claims = extractAuthenticatedUser(req);
     if (!claims) {
@@ -51,10 +57,7 @@ export async function POST(req, { params }) {
 
   const pool = getPgPool();
   if (!pool) {
-    return NextResponse.json(
-      { error: 'PostgreSQL Oracle ainda não configurado no servidor.' },
-      { status: 503, headers: corsHeaders }
-    );
+    return forwardToOracleBackend(req, `/api/auth/v1/${action}`);
   }
 
   const client = await pool.connect();
