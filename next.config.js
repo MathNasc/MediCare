@@ -5,7 +5,7 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_APP_URL:
       process.env.NEXT_PUBLIC_APP_URL ||
-      'https://medicare-amber-five.vercel.app',
+      'https://medicare-cuidador.duckdns.org',
   },
   compiler: {
     removeConsole:
@@ -57,14 +57,14 @@ const nextConfig = {
         source: '/manifest.json',
         headers: [
           { key: 'Content-Type',  value: 'application/manifest+json' },
-          { key: 'Cache-Control', value: 'public, max-age=86400' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
         ],
       },
       {
         source: '/.well-known/assetlinks.json',
         headers: [
           { key: 'Content-Type',  value: 'application/json' },
-          { key: 'Cache-Control', value: 'public, max-age=3600' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
           { key: 'Access-Control-Allow-Origin', value: '*' },
         ],
       },
