@@ -33,3 +33,5 @@ npm-debug.log*
 # Testing
 coverage/
 .env
+.last_built_commit
+

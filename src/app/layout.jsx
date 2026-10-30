@@ -10,14 +10,14 @@ export const metadata = {
     'O MediCare conecta pacientes e cuidadores para facilitar a organização de medicamentos, o acompanhamento dos tratamentos e a rotina de cuidados.',
   keywords: ['medicare', 'saude', 'medicamentos', 'cuidador', 'paciente', 'android'],
   authors: [{ name: 'MediCare' }],
-  manifest: '/manifest.json',
+  manifest: '/manifest.json?v=4',
   icons: {
     icon: [
-      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
-      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-16x16.png?v=4', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png?v=4', sizes: '32x32', type: 'image/png' },
     ],
-    apple: '/apple-touch-icon.png',
-    shortcut: '/favicon.ico',
+    apple: '/apple-touch-icon.png?v=4',
+    shortcut: '/favicon.ico?v=4',
   },
   openGraph: {
     type: 'website',
@@ -26,7 +26,7 @@ export const metadata = {
     description: 'Organização de medicamentos e rotina de cuidados para pacientes e cuidadores.',
     images: [
       {
-        url: '/icon-512.png',
+        url: '/icon-512.png?v=4',
         width: 512,
         height: 512,
       },
