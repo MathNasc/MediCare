@@ -200,7 +200,8 @@ class MainActivity : ComponentActivity() {
                                     onDeleteProfessional = viewModel::deleteHealthcareProfessional,
                                     onCreateCaregiverInvite = viewModel::createCaregiverInvite,
                                     onUpdateCaregiver = viewModel::updateCaregiverRelationship,
-                                    onLogout = viewModel::logout
+                                    onLogout = viewModel::logout,
+                                    onDeleteAccount = viewModel::deleteAccount
                                 )
                                 PatientTab.STATS -> PatientStatsScreen(
                                     state = state,

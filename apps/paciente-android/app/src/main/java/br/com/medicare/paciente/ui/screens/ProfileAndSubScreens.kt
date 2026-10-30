@@ -57,12 +57,14 @@ fun PatientProfileScreen(
     onDeleteProfessional: (String) -> Unit,
     onCreateCaregiverInvite: (String?, String, String, (CaregiverRelationship) -> Unit) -> Unit,
     onUpdateCaregiver: (CaregiverRelationship) -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onDeleteAccount: () -> Unit = onLogout
 ) {
     val tokens = LocalMediCareTokens.current
     val context = LocalContext.current
     var subView by remember { mutableStateOf("main") }
     var showNotifWarningModal by remember { mutableStateOf(false) }
+    var showDeleteConfirmModal by remember { mutableStateOf(false) }
 
     BackHandler(enabled = subView != "main") {
         subView = "main"
@@ -1014,12 +1016,47 @@ fun PatientProfileScreen(
                     )
                     Spacer(modifier = Modifier.height(18.dp))
                     Button(
-                        onClick = onLogout,
+                        onClick = { showDeleteConfirmModal = true },
                         colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Red.copy(alpha = 0.15f)),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().height(50.dp)
                     ) {
                         Text("🗑️ Excluir minha conta e dados", color = MediCareColors.Red, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    if (showDeleteConfirmModal) {
+                        AlertDialog(
+                            onDismissRequest = { showDeleteConfirmModal = false },
+                            title = {
+                                Text("Excluir Conta Definitivamente", color = tokens.txt, fontWeight = FontWeight.Bold)
+                            },
+                            text = {
+                                Text(
+                                    "Tem certeza que deseja apagar sua conta e todos os seus registros? Seus medicamentos, histórico, dados de saúde e conta serão excluídos permanentemente deste dispositivo e do banco de dados no servidor.\n\nEsta ação NÃO pode ser desfeita.",
+                                    color = tokens.sub,
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showDeleteConfirmModal = false
+                                        onDeleteAccount()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Red),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Sim, excluir conta e dados", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showDeleteConfirmModal = false }) {
+                                    Text("Cancelar", color = tokens.sub)
+                                }
+                            },
+                            containerColor = tokens.bg1
+                        )
                     }
                 }
             }

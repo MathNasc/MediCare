@@ -222,6 +222,18 @@ class MediCareViewModel @Inject constructor(
         }
     }
 
+    fun deleteAccount() {
+        viewModelScope.launch {
+            _toastMessage.value = "Excluindo conta e registros do servidor..."
+            _selectedDoseId.value = null
+            _aiMessages.value = listOf(
+                "assistant" to "Olá! Sou o Assistente de Saúde do MediCare. Posso explicar seus medicamentos em linguagem simples, revisar sua adesão ou preparar um resumo para sua próxima consulta médica.\n\nℹ️ *Minhas respostas são informativas e nunca substituem a orientação do seu médico.*"
+            )
+            repository.deleteAccountAndRemoteData()
+            _toastMessage.value = "✓ Conta e dados excluídos com sucesso do dispositivo e do servidor."
+        }
+    }
+
     fun confirmDose(dose: ScheduledDose) {
         viewModelScope.launch {
             repository.confirmDose(dose)

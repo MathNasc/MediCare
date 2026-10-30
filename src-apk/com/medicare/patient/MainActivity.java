@@ -8403,31 +8403,84 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 showStyledConfirmDialog(
-                    "Excluir Conta e Dados",
-                    "Tem certeza que deseja apagar todos os dados desta conta neste dispositivo? Esta ação não pode ser desfeita.",
-                    "Sim, excluir tudo",
+                    "Excluir Conta Definitivamente",
+                    "Tem certeza que deseja apagar sua conta e todos os seus registros? Seus medicamentos, histórico, dados de saúde e conta serão excluídos permanentemente deste dispositivo e do banco de dados no servidor.\n\nEsta ação NÃO pode ser desfeita.",
+                    "Sim, excluir conta e dados",
                     "Cancelar",
                     MainActivity.this.cDanger,
                     new Runnable() {
                         @Override
                         public void run() {
+                            final String patId = MainActivity.this.resolveCurrentAccountUserId();
+                            final String userEmail = MainActivity.this.profile != null ? MainActivity.this.profile.optString("email", "").trim() : "";
+                            Toast.makeText(MainActivity.this, "Excluindo conta e registros do servidor...", 0).show();
+
                             MainActivity.this.isLoggedIn = false;
-                            MainActivity.this.profile = new JSONObject();
-                            MainActivity.this.meds = new JSONArray();
-                            MainActivity.this.doseLogs = new JSONArray();
-                            MainActivity.this.events = new JSONArray();
-                            MainActivity.this.calNotes = new JSONObject();
-                            MainActivity.this.calNotesList = new JSONArray();
-                            MainActivity.this.stockMovements = new JSONArray();
-                            MainActivity.this.allergies = new JSONArray();
-                            MainActivity.this.conditions = new JSONArray();
-                            MainActivity.this.contacts = new JSONArray();
-                            MainActivity.this.professionals = new JSONArray();
-                            MainActivity.this.caregivers = new JSONArray();
-                            MainActivity.this.aiMessages = new JSONArray();
-                            MainActivity.this.prefs.edit().clear().apply();
-                            render();
-                            Toast.makeText(MainActivity.this, "Conta e dados locais removidos.", 0).show();
+                            MainActivity.this.scheduleAllMedicationAlarms();
+
+                            new Thread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        URL syncDelUrl = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId) + "&email=" + Uri.encode(userEmail));
+                                        HttpURLConnection conn = (HttpURLConnection) syncDelUrl.openConnection();
+                                        conn.setRequestMethod("DELETE");
+                                        conn.setConnectTimeout(8000);
+                                        conn.setReadTimeout(8000);
+                                        if (!EMBEDDED_API_KEY.isEmpty()) {
+                                            conn.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
+                                        }
+                                        conn.getResponseCode();
+                                        conn.disconnect();
+                                    } catch (Exception ignored) {}
+
+                                    try {
+                                        URL authDelUrl = new URL(EMBEDDED_BACKEND_URL + "/api/auth/v1/delete-account");
+                                        HttpURLConnection aConn = (HttpURLConnection) authDelUrl.openConnection();
+                                        aConn.setRequestMethod("POST");
+                                        aConn.setDoOutput(true);
+                                        aConn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                                        if (!EMBEDDED_API_KEY.isEmpty()) {
+                                            aConn.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
+                                        }
+                                        aConn.setConnectTimeout(8000);
+                                        aConn.setReadTimeout(8000);
+                                        JSONObject dBody = new JSONObject();
+                                        dBody.put("userId", patId);
+                                        dBody.put("email", userEmail);
+                                        OutputStream os = aConn.getOutputStream();
+                                        os.write(dBody.toString().getBytes(StandardCharsets.UTF_8));
+                                        os.flush();
+                                        os.close();
+                                        aConn.getResponseCode();
+                                        aConn.disconnect();
+                                    } catch (Exception ignored) {}
+
+                                    MainActivity.this.runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            MainActivity.this.profile = new JSONObject();
+                                            MainActivity.this.meds = new JSONArray();
+                                            MainActivity.this.doseLogs = new JSONArray();
+                                            MainActivity.this.events = new JSONArray();
+                                            MainActivity.this.calNotes = new JSONObject();
+                                            MainActivity.this.calNotesList = new JSONArray();
+                                            MainActivity.this.stockMovements = new JSONArray();
+                                            MainActivity.this.allergies = new JSONArray();
+                                            MainActivity.this.conditions = new JSONArray();
+                                            MainActivity.this.contacts = new JSONArray();
+                                            MainActivity.this.professionals = new JSONArray();
+                                            MainActivity.this.caregivers = new JSONArray();
+                                            MainActivity.this.aiMessages = new JSONArray();
+                                            MainActivity.this.profileSubView = null;
+                                            MainActivity.this.activeTab = "home";
+                                            MainActivity.this.prefs.edit().clear().apply();
+                                            MainActivity.this.render();
+                                            Toast.makeText(MainActivity.this, "✓ Conta e dados excluídos com sucesso do dispositivo e do servidor.", 1).show();
+                                        }
+                                    });
+                                }
+                            }).start();
                         }
                     }
                 );

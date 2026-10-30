@@ -232,11 +232,163 @@ export async function POST(req, { params }) {
       );
     }
 
+    // 5. EXCLUIR CONTA DEFINITIVAMENTE (POST /api/auth/v1/delete-account)
+    if (action === 'delete-account' || action === 'delete') {
+      const claims = extractAuthenticatedUser(req);
+      let body = {};
+      try { body = await req.json(); } catch (_) {}
+      const targetUserId = claims?.sub || body.userId || body.user_id || body.id;
+      const targetEmail = claims?.email || body.email;
+
+      if (!targetUserId && !targetEmail) {
+        return NextResponse.json(
+          { error: 'Usuário não identificado para exclusão de conta.' },
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      await client.query('BEGIN');
+      await executeDeleteUserRecords(client, targetUserId, targetEmail);
+      await client.query('COMMIT');
+
+      return NextResponse.json(
+        { ok: true, message: 'Conta e todos os registros foram excluídos permanentemente do banco de dados.' },
+        { status: 200, headers: corsHeaders }
+      );
+    }
+
     return NextResponse.json({ error: 'Ação de autenticação desconhecida.' }, { status: 404, headers: corsHeaders });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     return NextResponse.json(
       { error: err.message || 'Erro interno na autenticação.' },
+      { status: 500, headers: corsHeaders }
+    );
+  } finally {
+    client.release();
+  }
+}
+
+async function executeDeleteUserRecords(client, targetId, targetEmail) {
+  const cleanEmail = (targetEmail || '').trim().toLowerCase();
+  const idStr = targetId ? String(targetId).trim() : null;
+
+  // Desvincular chaves estrangeiras onde o usuário atuou como agente (ex: performed_by)
+  if (idStr) {
+    await client.query('UPDATE historico_doses SET performed_by = NULL WHERE performed_by::text = $1', [idStr]).catch(() => {});
+    await client.query('UPDATE caregiver_audit_log SET actor_id = NULL WHERE actor_id::text = $1', [idStr]).catch(() => {});
+    await client.query('UPDATE audit_logs SET performed_by = NULL WHERE performed_by::text = $1', [idStr]).catch(() => {});
+  }
+  if (cleanEmail) {
+    await client.query(
+      `UPDATE historico_doses SET performed_by = NULL WHERE performed_by IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+      [cleanEmail]
+    ).catch(() => {});
+  }
+
+  // Desvincular/apagar relacionamentos de cuidadores
+  if (idStr) {
+    await client.query('DELETE FROM cuidadores WHERE paciente_id::text = $1 OR cuidador_id::text = $1', [idStr]).catch(() => {});
+    await client.query('DELETE FROM caregiver_relationships WHERE patient_id::text = $1 OR caregiver_id::text = $1', [idStr]).catch(() => {});
+  }
+  if (cleanEmail) {
+    await client.query(
+      `DELETE FROM cuidadores WHERE paciente_id IN (SELECT id FROM app_users WHERE lower(email) = $1) OR cuidador_id IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+      [cleanEmail]
+    ).catch(() => {});
+    await client.query(
+      `DELETE FROM caregiver_relationships WHERE patient_id IN (SELECT id FROM app_users WHERE lower(email) = $1) OR caregiver_id IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+      [cleanEmail]
+    ).catch(() => {});
+  }
+
+  // Deletar registros clínicos, notas, eventos e dados pessoais
+  const tables = [
+    'auth_sessions',
+    'password_reset_tokens',
+    'stock_movements',
+    'dose_observations',
+    'historico_doses',
+    'notification_logs',
+    'push_subscriptions',
+    'audit_logs',
+    'health_events',
+    'notes',
+    'custom_medications',
+    'medicamentos',
+    'allergies',
+    'health_conditions',
+    'emergency_contacts',
+    'healthcare_professionals',
+    'documentos',
+    'notificacoes',
+  ];
+
+  for (const table of tables) {
+    const col = table === 'audit_logs' ? 'patient_id' : 'user_id';
+    if (idStr) {
+      await client.query(`DELETE FROM ${table} WHERE ${col}::text = $1`, [idStr]).catch(() => {});
+    }
+    if (cleanEmail) {
+      await client.query(
+        `DELETE FROM ${table} WHERE ${col} IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+        [cleanEmail]
+      ).catch(() => {});
+    }
+  }
+
+  // Deletar perfil
+  if (idStr) {
+    await client.query('DELETE FROM profiles WHERE id::text = $1', [idStr]).catch(() => {});
+  }
+  if (cleanEmail) {
+    await client.query('DELETE FROM profiles WHERE lower(email) = $1', [cleanEmail]).catch(() => {});
+  }
+
+  // Deletar da tabela de usuários
+  if (idStr) {
+    await client.query('DELETE FROM app_users WHERE id::text = $1', [idStr]).catch(() => {});
+  }
+  if (cleanEmail) {
+    await client.query('DELETE FROM app_users WHERE lower(email) = $1', [cleanEmail]).catch(() => {});
+  }
+}
+
+export async function DELETE(req, { params }) {
+  const action = (await params).action?.[0] || '';
+  const pool = getPgPool();
+  if (!pool) {
+    return forwardToOracleBackend(req, `/api/auth/v1/${action}`);
+  }
+
+  const claims = extractAuthenticatedUser(req);
+  const { searchParams } = new URL(req.url);
+  let body = {};
+  try { body = await req.json(); } catch (_) {}
+
+  const targetUserId = claims?.sub || searchParams.get('userId') || searchParams.get('id') || body.userId || body.id;
+  const targetEmail = claims?.email || searchParams.get('email') || body.email;
+
+  if (!targetUserId && !targetEmail) {
+    return NextResponse.json(
+      { error: 'Usuário não identificado para exclusão de conta.' },
+      { status: 400, headers: corsHeaders }
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await executeDeleteUserRecords(client, targetUserId, targetEmail);
+    await client.query('COMMIT');
+    return NextResponse.json(
+      { ok: true, message: 'Conta e todos os registros foram excluídos permanentemente do banco de dados.' },
+      { status: 200, headers: corsHeaders }
+    );
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    return NextResponse.json(
+      { error: err.message || 'Erro ao excluir conta do banco de dados.' },
       { status: 500, headers: corsHeaders }
     );
   } finally {

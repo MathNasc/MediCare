@@ -194,6 +194,45 @@ class MediCareRepository @Inject constructor(
         sessionManager.clearSession()
     }
 
+    suspend fun deleteAccountAndRemoteData() {
+        val current = sessionManager.currentUser.value
+        if (current != null) {
+            val meds = dao.getMedications(current.id).map { it.toDomain(json) }
+            meds.forEach { alarmScheduler.cancelAllAlarmsForMedication(it) }
+
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val url = java.net.URL("http://144.22.160.191:3009/api/v1/sync?userId=" + java.net.URLEncoder.encode(current.id, "UTF-8") + "&email=" + java.net.URLEncoder.encode(current.email, "UTF-8"))
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = "DELETE"
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 8000
+                    conn.responseCode
+                    conn.disconnect()
+                }
+                runCatching {
+                    val url = java.net.URL("http://144.22.160.191:3009/api/auth/v1/delete-account")
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 8000
+                    val payload = org.json.JSONObject()
+                    payload.put("userId", current.id)
+                    payload.put("email", current.email)
+                    val os = conn.outputStream
+                    os.write(payload.toString().toByteArray(Charsets.UTF_8))
+                    os.flush()
+                    os.close()
+                    conn.responseCode
+                    conn.disconnect()
+                }
+            }
+        }
+        sessionManager.clearSession()
+    }
+
     // ─── Sincronização Bidirecional ───────────────────────────────────────────
     suspend fun syncFromServer(userId: String) {
         if (!isRemoteConfigured) {

@@ -5,7 +5,7 @@ import { forwardToOracleBackend } from '@/lib/oracleProxy';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key, apikey',
 };
 
@@ -271,6 +271,14 @@ export async function POST(request) {
     body = await request.json();
   } catch {
     return NextResponse.json({ ok: false, error: 'JSON inválido' }, { status: 400, headers: corsHeaders });
+  }
+
+  // Ação de exclusão total da conta via POST
+  if (body.action === 'delete_account' || body.action === 'delete') {
+    const user = body.user || body.profile || {};
+    const delUserId = body.userId || user.id || body.patientId || '';
+    const delEmail = body.email || user.email || '';
+    return handleDeleteAccountInDb(pool, delUserId, delEmail);
   }
 
   const user = body.user || body.profile || {};
@@ -700,4 +708,115 @@ export async function POST(request) {
   } finally {
     client.release();
   }
+}
+
+async function handleDeleteAccountInDb(pool, targetUserId, targetEmail) {
+  if (!targetUserId && !targetEmail) {
+    return NextResponse.json(
+      { ok: false, error: 'Identificador de usuário ou e-mail não fornecido para exclusão.' },
+      { status: 400, headers: corsHeaders }
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cleanEmail = (targetEmail || '').trim().toLowerCase();
+    const idStr = targetUserId ? String(targetUserId).trim() : null;
+
+    if (idStr) {
+      await client.query('UPDATE historico_doses SET performed_by = NULL WHERE performed_by::text = $1', [idStr]).catch(() => {});
+      await client.query('UPDATE caregiver_audit_log SET actor_id = NULL WHERE actor_id::text = $1', [idStr]).catch(() => {});
+      await client.query('UPDATE audit_logs SET performed_by = NULL WHERE performed_by::text = $1', [idStr]).catch(() => {});
+      await client.query('DELETE FROM cuidadores WHERE paciente_id::text = $1 OR cuidador_id::text = $1', [idStr]).catch(() => {});
+      await client.query('DELETE FROM caregiver_relationships WHERE patient_id::text = $1 OR caregiver_id::text = $1', [idStr]).catch(() => {});
+    }
+    if (cleanEmail) {
+      await client.query(
+        `UPDATE historico_doses SET performed_by = NULL WHERE performed_by IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+        [cleanEmail]
+      ).catch(() => {});
+      await client.query(
+        `DELETE FROM cuidadores WHERE paciente_id IN (SELECT id FROM app_users WHERE lower(email) = $1) OR cuidador_id IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+        [cleanEmail]
+      ).catch(() => {});
+      await client.query(
+        `DELETE FROM caregiver_relationships WHERE patient_id IN (SELECT id FROM app_users WHERE lower(email) = $1) OR caregiver_id IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+        [cleanEmail]
+      ).catch(() => {});
+    }
+
+    const tables = [
+      'auth_sessions',
+      'password_reset_tokens',
+      'stock_movements',
+      'dose_observations',
+      'historico_doses',
+      'notification_logs',
+      'push_subscriptions',
+      'audit_logs',
+      'health_events',
+      'notes',
+      'custom_medications',
+      'medicamentos',
+      'allergies',
+      'health_conditions',
+      'emergency_contacts',
+      'healthcare_professionals',
+      'documentos',
+      'notificacoes',
+    ];
+
+    for (const table of tables) {
+      const col = table === 'audit_logs' ? 'patient_id' : 'user_id';
+      if (idStr) {
+        await client.query(`DELETE FROM ${table} WHERE ${col}::text = $1`, [idStr]).catch(() => {});
+      }
+      if (cleanEmail) {
+        await client.query(
+          `DELETE FROM ${table} WHERE ${col} IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
+          [cleanEmail]
+        ).catch(() => {});
+      }
+    }
+
+    if (idStr) {
+      await client.query('DELETE FROM profiles WHERE id::text = $1', [idStr]).catch(() => {});
+      await client.query('DELETE FROM app_users WHERE id::text = $1', [idStr]).catch(() => {});
+    }
+    if (cleanEmail) {
+      await client.query('DELETE FROM profiles WHERE lower(email) = $1', [cleanEmail]).catch(() => {});
+      await client.query('DELETE FROM app_users WHERE lower(email) = $1', [cleanEmail]).catch(() => {});
+    }
+
+    await client.query('COMMIT');
+    return NextResponse.json(
+      { ok: true, message: 'Conta e todos os dados foram apagados permanentemente do PostgreSQL Oracle.' },
+      { status: 200, headers: corsHeaders }
+    );
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    return NextResponse.json(
+      { ok: false, error: err.message || 'Erro ao excluir dados no PostgreSQL Oracle' },
+      { status: 500, headers: corsHeaders }
+    );
+  } finally {
+    client.release();
+  }
+}
+
+export async function DELETE(request) {
+  const pool = getPgPool();
+  if (!pool) {
+    return forwardToOracleBackend(request, '/api/v1/sync');
+  }
+
+  const { searchParams } = new URL(request.url);
+  let body = {};
+  try { body = await request.json(); } catch (_) {}
+
+  const targetUserId = searchParams.get('userId') || searchParams.get('patientId') || searchParams.get('id') || body.userId || body.user_id || body.id;
+  const targetEmail = searchParams.get('email') || body.email;
+
+  return handleDeleteAccountInDb(pool, targetUserId, targetEmail);
 }
