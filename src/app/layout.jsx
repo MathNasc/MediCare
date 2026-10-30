@@ -10,6 +10,7 @@ export const metadata = {
     'O MediCare conecta pacientes e cuidadores para facilitar a organização de medicamentos, o acompanhamento dos tratamentos e a rotina de cuidados.',
   keywords: ['medicare', 'saude', 'medicamentos', 'cuidador', 'paciente', 'android'],
   authors: [{ name: 'MediCare' }],
+  manifest: '/manifest.json',
   icons: {
     icon: [
       { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
