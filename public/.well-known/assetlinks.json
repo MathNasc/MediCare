@@ -1,8 +1,14 @@
-[{
-      "relation": ["delegate_permission/common.handle_all_urls"],
-      "target": {
-        "namespace": "android_app",
-        "package_name": "app.vercel.medicare_amber_five.twa",
-        "sha256_cert_fingerprints": ["4B:1F:8F:84:10:03:8C:C5:ED:79:06:BB:A4:D5:91:21:D1:F4:C1:35:9F:77:1D:DD:7B:D1:4F:A7:C2:CE:C1:62"]
-      }
-    }]
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "org.mathnasc.medicare_cuidador.twa",
+      "sha256_cert_fingerprints": [
+        "96:43:B8:64:7A:12:E2:F1:46:29:4F:26:FF:8D:16:5C:EB:FA:E4:BB:F1:1B:BC:4F:87:87:08:E4:C8:1F:AC:F2"
+      ]
+    }
+  }
+]

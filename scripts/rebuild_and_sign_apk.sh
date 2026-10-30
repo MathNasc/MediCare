@@ -30,18 +30,10 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-echo "=== [2/6] Sincronizando ícones e empacotando recursos com aapt ==="
-mkdir -p src-apk/res/mipmap-mdpi src-apk/res/mipmap-hdpi src-apk/res/mipmap-xhdpi src-apk/res/mipmap-xxhdpi src-apk/res/mipmap-xxxhdpi
-cp -f public/icon-72.png src-apk/res/mipmap-mdpi/ic_launcher.png
-cp -f public/icon-72.png src-apk/res/mipmap-mdpi/ic_launcher_round.png
-cp -f public/icon-72.png src-apk/res/mipmap-hdpi/ic_launcher.png
-cp -f public/icon-72.png src-apk/res/mipmap-hdpi/ic_launcher_round.png
-cp -f public/icon-96.png src-apk/res/mipmap-xhdpi/ic_launcher.png
-cp -f public/icon-96.png src-apk/res/mipmap-xhdpi/ic_launcher_round.png
-cp -f public/icon-144.png src-apk/res/mipmap-xxhdpi/ic_launcher.png
-cp -f public/icon-144.png src-apk/res/mipmap-xxhdpi/ic_launcher_round.png
-cp -f public/icon-192.png src-apk/res/mipmap-xxxhdpi/ic_launcher.png
-cp -f public/icon-192.png src-apk/res/mipmap-xxxhdpi/ic_launcher_round.png
+echo "=== [2/6] Verificando ícones do MediCare Paciente e empacotando recursos com aapt ==="
+if [ ! -f "src-apk/res/mipmap-xxxhdpi/ic_launcher.png" ]; then
+  bash "$SCRIPT_DIR/generate_app_icons.sh"
+fi
 
 aapt package -f -m \
   -J src-apk \

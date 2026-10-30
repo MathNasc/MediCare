@@ -167,7 +167,7 @@ cp -f "$ROOT_DIR/public/icon-192.png" "$ROOT_DIR/apps/cuidador-web/public/icon-1
 cp -f "$ROOT_DIR/public/favicon-32x32.png" "$ROOT_DIR/apps/cuidador-web/public/favicon-32x32.png"
 cp -f "$ROOT_DIR/public/favicon.ico" "$ROOT_DIR/apps/cuidador-web/public/favicon.ico"
 
-echo "2. Renderizando ícones Android do MediCare Paciente em src-apk/res/mipmap-*..."
+echo "2. Renderizando ícones Android do MediCare Paciente em src-apk/res/mipmap-* e apps/paciente-android..."
 mkdir -p src-apk/res/mipmap-mdpi src-apk/res/mipmap-hdpi src-apk/res/mipmap-xhdpi src-apk/res/mipmap-xxhdpi src-apk/res/mipmap-xxxhdpi
 rsvg-convert -w 72 -h 72 "$TMP_DIR/paciente.svg" -o "$ROOT_DIR/src-apk/res/mipmap-mdpi/ic_launcher.png"
 rsvg-convert -w 72 -h 72 "$TMP_DIR/paciente.svg" -o "$ROOT_DIR/src-apk/res/mipmap-mdpi/ic_launcher_round.png"
@@ -179,6 +179,12 @@ rsvg-convert -w 144 -h 144 "$TMP_DIR/paciente.svg" -o "$ROOT_DIR/src-apk/res/mip
 rsvg-convert -w 144 -h 144 "$TMP_DIR/paciente.svg" -o "$ROOT_DIR/src-apk/res/mipmap-xxhdpi/ic_launcher_round.png"
 rsvg-convert -w 192 -h 192 "$TMP_DIR/paciente.svg" -o "$ROOT_DIR/src-apk/res/mipmap-xxxhdpi/ic_launcher.png"
 rsvg-convert -w 192 -h 192 "$TMP_DIR/paciente.svg" -o "$ROOT_DIR/src-apk/res/mipmap-xxxhdpi/ic_launcher_round.png"
+
+for dir in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
+  mkdir -p "$ROOT_DIR/apps/paciente-android/app/src/main/res/$dir"
+  cp -f "$ROOT_DIR/src-apk/res/$dir/ic_launcher.png" "$ROOT_DIR/apps/paciente-android/app/src/main/res/$dir/ic_launcher.png"
+  cp -f "$ROOT_DIR/src-apk/res/$dir/ic_launcher_round.png" "$ROOT_DIR/apps/paciente-android/app/src/main/res/$dir/ic_launcher_round.png"
+done
 
 echo "✓ SUCESSO: Ícones de cápsulas médicas para Paciente e Cuidador gerados e sincronizados!"
 
