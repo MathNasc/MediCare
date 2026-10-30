@@ -273,36 +273,108 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
   const cleanEmail = (targetEmail || '').trim().toLowerCase();
   const idStr = targetId ? String(targetId).trim() : null;
 
-  // Desvincular chaves estrangeiras onde o usuário atuou como agente (ex: performed_by)
+  const foundUserIds = new Set();
+  const foundEmails = new Set();
+
   if (idStr) {
-    await client.query('UPDATE historico_doses SET performed_by = NULL WHERE performed_by::text = $1', [idStr]).catch(() => {});
-    await client.query('UPDATE caregiver_audit_log SET actor_id = NULL WHERE actor_id::text = $1', [idStr]).catch(() => {});
-    await client.query('UPDATE audit_logs SET performed_by = NULL WHERE performed_by::text = $1', [idStr]).catch(() => {});
-  }
-  if (cleanEmail) {
-    await client.query(
-      `UPDATE historico_doses SET performed_by = NULL WHERE performed_by IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
-      [cleanEmail]
-    ).catch(() => {});
+    foundUserIds.add(idStr);
+    const uById = await client.query('SELECT id, email FROM app_users WHERE id::text = $1', [idStr]).catch(() => ({ rows: [] }));
+    uById.rows.forEach(r => {
+      if (r.id) foundUserIds.add(String(r.id));
+      if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
+    });
+    const pById = await client.query('SELECT id, email FROM profiles WHERE id::text = $1', [idStr]).catch(() => ({ rows: [] }));
+    pById.rows.forEach(r => {
+      if (r.id) foundUserIds.add(String(r.id));
+      if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
+    });
   }
 
-  // Desvincular/apagar relacionamentos de cuidadores
-  if (idStr) {
-    await client.query('DELETE FROM cuidadores WHERE paciente_id::text = $1 OR cuidador_id::text = $1', [idStr]).catch(() => {});
-    await client.query('DELETE FROM caregiver_relationships WHERE patient_id::text = $1 OR caregiver_id::text = $1', [idStr]).catch(() => {});
-  }
   if (cleanEmail) {
-    await client.query(
-      `DELETE FROM cuidadores WHERE paciente_id IN (SELECT id FROM app_users WHERE lower(email) = $1) OR cuidador_id IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
-      [cleanEmail]
-    ).catch(() => {});
-    await client.query(
-      `DELETE FROM caregiver_relationships WHERE patient_id IN (SELECT id FROM app_users WHERE lower(email) = $1) OR caregiver_id IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
-      [cleanEmail]
-    ).catch(() => {});
+    foundEmails.add(cleanEmail);
+    const uByEmail = await client.query('SELECT id, email FROM app_users WHERE lower(email) = $1', [cleanEmail]).catch(() => ({ rows: [] }));
+    uByEmail.rows.forEach(r => {
+      if (r.id) foundUserIds.add(String(r.id));
+      if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
+    });
+    const pByEmail = await client.query('SELECT id, email FROM profiles WHERE lower(email) = $1', [cleanEmail]).catch(() => ({ rows: [] }));
+    pByEmail.rows.forEach(r => {
+      if (r.id) foundUserIds.add(String(r.id));
+      if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
+    });
   }
 
-  // Deletar registros clínicos, notas, eventos e dados pessoais
+  const userIdsArray = Array.from(foundUserIds);
+  const emailsArray = Array.from(foundEmails);
+
+  if (userIdsArray.length === 0 && emailsArray.length === 0) {
+    return;
+  }
+
+  // 1. Desvincular chaves estrangeiras de agente / autor
+  await client.query(
+    `UPDATE historico_doses SET performed_by = NULL
+     WHERE performed_by::text = ANY($1::text[])
+        OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+    [userIdsArray, emailsArray]
+  ).catch(() => {});
+
+  await client.query(
+    `UPDATE caregiver_audit_log SET actor_id = NULL
+     WHERE actor_id::text = ANY($1::text[])
+        OR actor_id IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+    [userIdsArray, emailsArray]
+  ).catch(() => {});
+
+  await client.query(
+    `UPDATE audit_logs SET performed_by = NULL
+     WHERE performed_by::text = ANY($1::text[])
+        OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+    [userIdsArray, emailsArray]
+  ).catch(() => {});
+
+  // 2. Apagar logs e notas de cuidadores associados
+  await client.query(
+    `DELETE FROM caregiver_audit_log
+     WHERE relationship_id IN (
+       SELECT id FROM caregiver_relationships
+       WHERE patient_id::text = ANY($1::text[])
+          OR caregiver_id::text = ANY($1::text[])
+          OR lower(invite_email) = ANY($2::text[])
+     )`,
+    [userIdsArray, emailsArray]
+  ).catch(() => {});
+
+  await client.query(
+    `DELETE FROM caregiver_notes
+     WHERE patient_id::text = ANY($1::text[])
+        OR caregiver_id::text = ANY($1::text[])
+        OR relationship_id IN (
+          SELECT id FROM caregiver_relationships
+          WHERE patient_id::text = ANY($1::text[])
+             OR caregiver_id::text = ANY($1::text[])
+             OR lower(invite_email) = ANY($2::text[])
+        )`,
+    [userIdsArray, emailsArray]
+  ).catch(() => {});
+
+  // 3. Apagar relacionamentos de cuidadores
+  await client.query(
+    `DELETE FROM caregiver_relationships
+     WHERE patient_id::text = ANY($1::text[])
+        OR caregiver_id::text = ANY($1::text[])
+        OR lower(invite_email) = ANY($2::text[])`,
+    [userIdsArray, emailsArray]
+  ).catch(() => {});
+
+  await client.query(
+    `DELETE FROM cuidadores
+     WHERE paciente_id::text = ANY($1::text[])
+        OR cuidador_id::text = ANY($1::text[])`,
+    [userIdsArray]
+  ).catch(() => {});
+
+  // 4. Apagar registros das tabelas dependentes
   const tables = [
     'auth_sessions',
     'password_reset_tokens',
@@ -314,6 +386,7 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
     'audit_logs',
     'health_events',
     'notes',
+    'calendar_notes',
     'custom_medications',
     'medicamentos',
     'allergies',
@@ -326,32 +399,28 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
 
   for (const table of tables) {
     const col = table === 'audit_logs' ? 'patient_id' : 'user_id';
-    if (idStr) {
-      await client.query(`DELETE FROM ${table} WHERE ${col}::text = $1`, [idStr]).catch(() => {});
-    }
-    if (cleanEmail) {
-      await client.query(
-        `DELETE FROM ${table} WHERE ${col} IN (SELECT id FROM app_users WHERE lower(email) = $1)`,
-        [cleanEmail]
-      ).catch(() => {});
-    }
+    await client.query(
+      `DELETE FROM ${table}
+       WHERE ${col}::text = ANY($1::text[])
+          OR ${col} IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+      [userIdsArray, emailsArray]
+    ).catch(() => {});
   }
 
-  // Deletar perfil
-  if (idStr) {
-    await client.query('DELETE FROM profiles WHERE id::text = $1', [idStr]).catch(() => {});
-  }
-  if (cleanEmail) {
-    await client.query('DELETE FROM profiles WHERE lower(email) = $1', [cleanEmail]).catch(() => {});
-  }
+  // 5. Apagar do perfil e usuários
+  await client.query(
+    `DELETE FROM profiles
+     WHERE id::text = ANY($1::text[])
+        OR lower(email) = ANY($2::text[])`,
+    [userIdsArray, emailsArray]
+  ).catch(() => {});
 
-  // Deletar da tabela de usuários
-  if (idStr) {
-    await client.query('DELETE FROM app_users WHERE id::text = $1', [idStr]).catch(() => {});
-  }
-  if (cleanEmail) {
-    await client.query('DELETE FROM app_users WHERE lower(email) = $1', [cleanEmail]).catch(() => {});
-  }
+  await client.query(
+    `DELETE FROM app_users
+     WHERE id::text = ANY($1::text[])
+        OR lower(email) = ANY($2::text[])`,
+    [userIdsArray, emailsArray]
+  );
 }
 
 export async function DELETE(req, { params }) {
