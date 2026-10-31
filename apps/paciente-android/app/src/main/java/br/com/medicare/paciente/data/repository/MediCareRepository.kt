@@ -35,7 +35,7 @@ class MediCareRepository @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true }
 
     val isRemoteConfigured: Boolean
-        get() = BuildConfig.BACKEND_URL.isNotBlank() && BuildConfig.BACKEND_ANON_KEY.isNotBlank()
+        get() = BuildConfig.BACKEND_URL.isNotBlank()
 
     // ─── Streams Reativos (Offline-First via Room) ────────────────────────────
     fun observeMedications(userId: String): Flow<List<Medication>> =

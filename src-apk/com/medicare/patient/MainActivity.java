@@ -27,6 +27,8 @@ import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.Editable;
@@ -55,6 +57,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.text.Normalizer;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -62,8 +65,11 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -136,6 +142,18 @@ public class MainActivity extends Activity {
     private String selectedStockMedId = "";
     private String lastSyncTimestamp = "Sincronização automática ativa";
     private boolean backendStatusOk = true;
+    private volatile boolean hasUnsyncedLocalChanges = false;
+    private boolean isActivityResumed = false;
+    private final Handler syncPollHandler = new Handler(Looper.getMainLooper());
+    private final Runnable syncPollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (MainActivity.this.isLoggedIn && MainActivity.this.isActivityResumed) {
+                MainActivity.this.pullFromBackendIfEmptyOrUpdated();
+                MainActivity.this.syncPollHandler.postDelayed(this, 15000L);
+            }
+        }
+    };
 
     @Override // android.app.Activity
     protected void onCreate(Bundle bundle) {
@@ -153,16 +171,25 @@ public class MainActivity extends Activity {
         this.rootContainer = frameLayout;
         setContentView(frameLayout);
         render();
-        syncWithBackendSilently(false);
         pullFromBackendIfEmptyOrUpdated();
     }
 
     @Override // android.app.Activity
     protected void onResume() {
         super.onResume();
+        this.isActivityResumed = true;
+        this.syncPollHandler.removeCallbacks(this.syncPollRunnable);
         if (this.isLoggedIn) {
-            syncWithBackendSilently(false);
+            pullFromBackendIfEmptyOrUpdated();
+            this.syncPollHandler.postDelayed(this.syncPollRunnable, 15000L);
         }
+    }
+
+    @Override // android.app.Activity
+    protected void onPause() {
+        this.isActivityResumed = false;
+        this.syncPollHandler.removeCallbacks(this.syncPollRunnable);
+        super.onPause();
     }
 
     private void ensureNotificationChannel() {
@@ -1252,6 +1279,9 @@ public class MainActivity extends Activity {
             this.aiSubView = "main";
         }
         render();
+        if (this.isLoggedIn) {
+            pullFromBackendIfEmptyOrUpdated();
+        }
     }
 
     private String todayIso() {
@@ -1724,6 +1754,7 @@ public class MainActivity extends Activity {
     }
 
     private void saveAll() {
+        this.hasUnsyncedLocalChanges = true;
         saveLocalStateOnly();
         if (this.isLoggedIn) {
             syncWithBackendSilently(false);
@@ -2292,7 +2323,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.5.8 • Produção");
+        versionBadge.setText("Versão 2.6.1 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -2684,6 +2715,10 @@ public class MainActivity extends Activity {
             JSONObject log = this.doseLogs.optJSONObject(i);
             if (log != null && medId.equals(log.optString("med_id"))) {
                 String d = log.optString("data", "");
+                if (d.isEmpty() && log.has("dose_date")) {
+                    String dd = log.optString("dose_date", "");
+                    if (dd.length() >= 10) d = dd.substring(0, 10);
+                }
                 if (d.isEmpty() && log.has("created_at")) {
                     String ca = log.optString("created_at", "");
                     if (ca.length() >= 10) d = ca.substring(0, 10);
@@ -2705,6 +2740,10 @@ public class MainActivity extends Activity {
             JSONObject log = this.doseLogs.optJSONObject(i);
             if (log != null && medId.equals(log.optString("med_id"))) {
                 String d = log.optString("data", "");
+                if (d.isEmpty() && log.has("dose_date")) {
+                    String dd = log.optString("dose_date", "");
+                    if (dd.length() >= 10) d = dd.substring(0, 10);
+                }
                 if (d.isEmpty() && log.has("created_at")) {
                     String ca = log.optString("created_at", "");
                     if (ca.length() >= 10) d = ca.substring(0, 10);
@@ -3845,10 +3884,13 @@ public class MainActivity extends Activity {
         showStyledConfirmDialog("🗑 Excluir medicamento?", msg, "Excluir", "Cancelar", this.cDanger, new Runnable() {
             @Override
             public void run() {
+                String delId = med != null ? med.optString("id", "") : "";
                 MainActivity.this.meds.remove(index);
+                deleteRemoteRecord("medicamentos", delId, "med");
+                scheduleAllMedicationAlarms();
                 saveAll();
                 render();
-                Toast.makeText(MainActivity.this, "🗑 " + med.optString("nome") + " excluído", 0).show();
+                Toast.makeText(MainActivity.this, "🗑 " + (med != null ? med.optString("nome") : "Medicamento") + " excluído", 0).show();
             }
         });
     }
@@ -5408,8 +5450,9 @@ public class MainActivity extends Activity {
                     }
                     JSONObject mObj = isEditing ? jSONObject : new JSONObject();
                     if (!isEditing) {
-                        mObj.put("id", "med-" + System.currentTimeMillis());
+                        mObj.put("id", UUID.randomUUID().toString());
                     }
+                    mObj.put("_local_unsynced", true);
                     mObj.put("ativo", true);
                     mObj.put("nome", nomeVal);
                     mObj.put("principio_ativo", activeIn.getText().toString().trim());
@@ -6663,7 +6706,9 @@ public class MainActivity extends Activity {
                 btnDelN.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String delId = nObj.optString("id", "");
                         MainActivity.this.calNotesList.remove(nIdx);
+                        deleteRemoteRecord("calendar_notes", delId, "note");
                         saveAll();
                         render();
                         dlg.dismiss();
@@ -6727,7 +6772,9 @@ public class MainActivity extends Activity {
                     btnDelE.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View v) {
+                            String delId = ev.optString("id", "");
                             MainActivity.this.events.remove(eIdx);
+                            deleteRemoteRecord("health_events", delId, "evt");
                             saveAll();
                             render();
                             dlg.dismiss();
@@ -6785,7 +6832,9 @@ public class MainActivity extends Activity {
                 btnDelS.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String delId = sm.optString("id", "");
                         MainActivity.this.stockMovements.remove(sIdx);
+                        deleteRemoteRecord("stock_movements", delId, "stk");
                         saveAll();
                         render();
                         dlg.dismiss();
@@ -9564,7 +9613,9 @@ public class MainActivity extends Activity {
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String delId = a.optString("id", "");
                         MainActivity.this.allergies.remove(idx);
+                        deleteRemoteRecord("allergies", delId, "alg");
                         saveAll();
                         render();
                     }
@@ -9694,7 +9745,9 @@ public class MainActivity extends Activity {
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String delId = c.optString("id", "");
                         MainActivity.this.conditions.remove(idx);
+                        deleteRemoteRecord("health_conditions", delId, "cond");
                         saveAll();
                         render();
                     }
@@ -9949,7 +10002,9 @@ public class MainActivity extends Activity {
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String delId = c.optString("id", "");
                         MainActivity.this.contacts.remove(idx);
+                        deleteRemoteRecord("emergency_contacts", delId, "cnt");
                         saveAll();
                         render();
                     }
@@ -10163,7 +10218,9 @@ public class MainActivity extends Activity {
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String delId = p.optString("id", "");
                         MainActivity.this.professionals.remove(idx);
+                        deleteRemoteRecord("healthcare_professionals", delId, "prof");
                         saveAll();
                         render();
                     }
@@ -10380,7 +10437,9 @@ public class MainActivity extends Activity {
                 btnRevoke.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        String delId = cg.optString("id", "");
                         MainActivity.this.caregivers.remove(idx);
+                        deleteRemoteRecord("caregiver_relationships", delId, "cg");
                         saveAll();
                         render();
                     }
@@ -10924,6 +10983,615 @@ public class MainActivity extends Activity {
         performLogout();
     }
 
+    private String toDeterministicServerUuid(String rawId, String prefix) {
+        if (rawId == null) return "";
+        String trimmed = rawId.trim();
+        if (trimmed.isEmpty()) return "";
+        if (trimmed.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")) {
+            return trimmed.toLowerCase(Locale.ROOT);
+        }
+        try {
+            String seed = (prefix != null ? prefix : "id") + ":" + trimmed;
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(seed.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 16 && i < hash.length; i++) {
+                hex.append(String.format(Locale.US, "%02x", hash[i] & 0xFF));
+            }
+            String h = hex.toString();
+            String v = Integer.toHexString((Integer.parseInt(h.substring(16, 17), 16) & 0x3) | 0x8);
+            return h.substring(0, 8) + "-" + h.substring(8, 12) + "-4" + h.substring(13, 16) + "-" + v + h.substring(17, 20) + "-" + h.substring(20, 32);
+        } catch (Exception e) {
+            return trimmed;
+        }
+    }
+
+    private synchronized Set<String> getDeletedRecordIds() {
+        Set<String> res = new HashSet<>();
+        try {
+            String raw = this.prefs.getString("deleted_record_ids", "[]");
+            JSONArray arr = new JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) {
+                String v = arr.optString(i, "").trim().toLowerCase(Locale.ROOT);
+                if (!v.isEmpty()) res.add(v);
+            }
+        } catch (Exception ignored) {}
+        return res;
+    }
+
+    private synchronized void addDeletedRecordId(String id) {
+        if (id == null || id.trim().isEmpty()) return;
+        Set<String> set = getDeletedRecordIds();
+        set.add(id.trim().toLowerCase(Locale.ROOT));
+        JSONArray arr = new JSONArray();
+        for (String s : set) arr.put(s);
+        this.prefs.edit().putString("deleted_record_ids", arr.toString()).apply();
+    }
+
+    private synchronized void removeDeletedRecordId(String id) {
+        if (id == null || id.trim().isEmpty()) return;
+        Set<String> set = getDeletedRecordIds();
+        if (set.remove(id.trim().toLowerCase(Locale.ROOT))) {
+            JSONArray arr = new JSONArray();
+            for (String s : set) arr.put(s);
+            this.prefs.edit().putString("deleted_record_ids", arr.toString()).apply();
+        }
+    }
+
+    private void deleteRemoteRecord(final String table, final String rawId, final String idPrefix) {
+        if (rawId == null || rawId.trim().isEmpty()) return;
+        final String resolvedUuid = toDeterministicServerUuid(rawId, idPrefix);
+        addDeletedRecordId(rawId);
+        addDeletedRecordId(resolvedUuid);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/rest/v1/" + table + "?id=eq." + Uri.encode(resolvedUuid));
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("DELETE");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+                    int code = conn.getResponseCode();
+                    if (code >= 200 && code < 300) {
+                        removeDeletedRecordId(rawId);
+                        removeDeletedRecordId(resolvedUuid);
+                    }
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private JSONObject normalizeRemoteMed(JSONObject rm) {
+        if (rm == null) return null;
+        try {
+            JSONObject m = new JSONObject(rm.toString());
+            String nome = optCleanString(m, "nome", optCleanString(m, "name", ""));
+            m.put("nome", nome);
+            String pa = optCleanString(m, "principio_ativo", optCleanString(m, "active_ingredient", ""));
+            m.put("principio_ativo", pa);
+            String dos = optCleanString(m, "dosagem", optCleanString(m, "dosage", ""));
+            m.put("dosagem", dos);
+            String uni = optCleanString(m, "unidade", optCleanString(m, "forma", optCleanString(m, "unit", "comprimido(s)")));
+            if (uni.isEmpty()) uni = "comprimido(s)";
+            m.put("unidade", uni);
+            m.put("forma", uni);
+
+            JSONArray horariosArr = m.optJSONArray("horarios");
+            if (horariosArr == null) {
+                String rawH = m.optString("horarios", "").trim();
+                horariosArr = new JSONArray();
+                if (rawH.startsWith("[")) {
+                    try { horariosArr = new JSONArray(rawH); } catch (Exception ignored) {}
+                } else if (!rawH.isEmpty() && !"null".equalsIgnoreCase(rawH)) {
+                    for (String p : rawH.split(",")) {
+                        if (!p.trim().isEmpty()) horariosArr.put(p.trim());
+                    }
+                }
+            }
+            JSONArray cleanHorarios = new JSONArray();
+            for (int i = 0; i < horariosArr.length(); i++) {
+                String h = horariosArr.optString(i, "").trim();
+                if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
+                if (!h.isEmpty()) cleanHorarios.put(h);
+            }
+            String tType = optCleanString(m, "treatment_type", optCleanString(m, "tipo_uso", "continuous")).toLowerCase(Locale.ROOT);
+            if ("temporario".equals(tType) || "temporary".equals(tType)) {
+                tType = "temporary";
+            } else if ("sos".equals(tType)) {
+                tType = "sos";
+            } else {
+                tType = "continuous";
+            }
+            m.put("treatment_type", tType);
+            m.put("tipo_uso", "temporary".equals(tType) ? "temporario" : ("sos".equals(tType) ? "sos" : "continuo"));
+
+            if (cleanHorarios.length() == 0 && !"sos".equals(tType)) {
+                cleanHorarios.put("08:00");
+            }
+            m.put("horarios", cleanHorarios);
+            if (optCleanString(m, "frequencia", "").isEmpty()) {
+                m.put("frequencia", cleanHorarios.length() + "x ao dia");
+            }
+
+            JSONArray diasArr = m.optJSONArray("dias_semana");
+            if (diasArr == null) {
+                diasArr = new JSONArray();
+                for (int d = 0; d < 7; d++) diasArr.put(d);
+            }
+            m.put("dias_semana", diasArr);
+
+            int q = m.has("quantidade") && !m.isNull("quantidade")
+                ? m.optInt("quantidade", 30)
+                : m.optInt("estoque_atual", 30);
+            m.put("quantidade", q);
+            m.put("estoque_atual", q);
+            if (!m.has("estoque_minimo") || m.isNull("estoque_minimo")) {
+                m.put("estoque_minimo", 5);
+            }
+            m.put("ativo", m.optBoolean("ativo", true));
+
+            String obs = optCleanString(m, "observacoes", optCleanString(m, "instrucoes", ""));
+            m.put("observacoes", obs);
+            m.put("instrucoes", obs);
+            m.put("fabricante", optCleanString(m, "fabricante", ""));
+            String cor = optCleanString(m, "cor", "#3B82F6");
+            if (cor.isEmpty()) cor = "#3B82F6";
+            m.put("cor", cor);
+            return m;
+        } catch (Exception e) {
+            return rm;
+        }
+    }
+
+    private boolean mergeRemoteMeds(JSONArray remoteMeds) {
+        if (remoteMeds == null) return false;
+        try {
+            Set<String> deletedIds = getDeletedRecordIds();
+            JSONArray merged = new JSONArray();
+            Set<String> matchedLocalIndices = new HashSet<>();
+
+            for (int r = 0; r < remoteMeds.length(); r++) {
+                JSONObject rmRaw = remoteMeds.optJSONObject(r);
+                if (rmRaw == null) continue;
+                JSONObject rm = normalizeRemoteMed(rmRaw);
+                String rId = rm.optString("id", "").trim();
+                if (rId.isEmpty()) continue;
+                if (deletedIds.contains(rId.toLowerCase(Locale.ROOT))) {
+                    deleteRemoteRecord("medicamentos", rId, "med");
+                    continue;
+                }
+
+                int matchedIdx = -1;
+                String rName = optCleanString(rm, "nome", "").toLowerCase(Locale.ROOT);
+                String rDose = optCleanString(rm, "dosagem", "").toLowerCase(Locale.ROOT);
+
+                for (int l = 0; l < this.meds.length(); l++) {
+                    if (matchedLocalIndices.contains(String.valueOf(l))) continue;
+                    JSONObject lm = this.meds.optJSONObject(l);
+                    if (lm == null) continue;
+                    String lId = lm.optString("id", "").trim();
+                    String lResolved = toDeterministicServerUuid(lId, "med");
+                    if (rId.equalsIgnoreCase(lId) || rId.equalsIgnoreCase(lResolved)) {
+                        matchedIdx = l;
+                        break;
+                    }
+                    String lName = optCleanString(lm, "nome", "").toLowerCase(Locale.ROOT);
+                    String lDose = optCleanString(lm, "dosagem", "").toLowerCase(Locale.ROOT);
+                    if (!rName.isEmpty() && rName.equals(lName) && rDose.equals(lDose) && !lId.matches("^[0-9a-fA-F-]{36}$")) {
+                        matchedIdx = l;
+                        break;
+                    }
+                }
+
+                if (matchedIdx >= 0) {
+                    matchedLocalIndices.add(String.valueOf(matchedIdx));
+                    JSONObject lm = this.meds.optJSONObject(matchedIdx);
+                    if (lm != null && lm.optBoolean("_local_unsynced", false) && this.hasUnsyncedLocalChanges) {
+                        lm.put("id", rId);
+                        merged.put(lm);
+                    } else {
+                        if (lm != null) {
+                            Iterator<String> keys = lm.keys();
+                            while (keys.hasNext()) {
+                                String k = keys.next();
+                                if (!rm.has(k) && !"_local_unsynced".equals(k)) {
+                                    rm.put(k, lm.opt(k));
+                                }
+                            }
+                        }
+                        merged.put(rm);
+                    }
+                } else {
+                    merged.put(rm);
+                }
+            }
+
+            // Keep any unsynced local-only medications that haven't been pushed yet
+            for (int l = 0; l < this.meds.length(); l++) {
+                if (matchedLocalIndices.contains(String.valueOf(l))) continue;
+                JSONObject lm = this.meds.optJSONObject(l);
+                if (lm == null) continue;
+                String lId = lm.optString("id", "").trim();
+                if (deletedIds.contains(lId.toLowerCase(Locale.ROOT))) continue;
+                if (lm.optBoolean("_local_unsynced", false) || this.hasUnsyncedLocalChanges) {
+                    merged.put(lm);
+                }
+            }
+
+            boolean isDiff = !merged.toString().equals(this.meds.toString());
+            if (isDiff) {
+                this.meds = merged;
+            }
+            return isDiff;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean mergeRemoteDoseLogs(JSONArray remoteLogs) {
+        if (remoteLogs == null) return false;
+        try {
+            JSONArray merged = new JSONArray();
+            Set<String> seenKeys = new HashSet<>();
+
+            for (int r = 0; r < remoteLogs.length(); r++) {
+                JSONObject rlRaw = remoteLogs.optJSONObject(r);
+                if (rlRaw == null) continue;
+                JSONObject rl = new JSONObject(rlRaw.toString());
+                String d = optCleanString(rl, "data", "");
+                if (d.isEmpty()) {
+                    String dd = optCleanString(rl, "dose_date", "");
+                    if (dd.length() >= 10) d = dd.substring(0, 10);
+                }
+                if (d.isEmpty()) {
+                    String ca = optCleanString(rl, "created_at", "");
+                    if (ca.length() >= 10) d = ca.substring(0, 10);
+                }
+                if (!d.isEmpty()) rl.put("data", d);
+                String h = optCleanString(rl, "horario", optCleanString(rl, "hora", ""));
+                if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
+                if (!h.isEmpty()) {
+                    rl.put("horario", h);
+                    rl.put("hora", h);
+                }
+                String mId = optCleanString(rl, "med_id", "");
+                String key = mId + "|" + d + "|" + h;
+                if (!mId.isEmpty() && !d.isEmpty() && !h.isEmpty()) {
+                    seenKeys.add(key);
+                }
+                String rId = optCleanString(rl, "id", "");
+                if (!rId.isEmpty()) seenKeys.add("id:" + rId.toLowerCase(Locale.ROOT));
+                merged.put(rl);
+            }
+
+            for (int l = 0; l < this.doseLogs.length(); l++) {
+                JSONObject ll = this.doseLogs.optJSONObject(l);
+                if (ll == null) continue;
+                String mId = optCleanString(ll, "med_id", "");
+                String d = optCleanString(ll, "data", "");
+                if (d.isEmpty() && ll.has("dose_date")) {
+                    String dd = optCleanString(ll, "dose_date", "");
+                    if (dd.length() >= 10) d = dd.substring(0, 10);
+                }
+                String h = optCleanString(ll, "horario", optCleanString(ll, "hora", ""));
+                if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
+                String key = mId + "|" + d + "|" + h;
+                String lId = toDeterministicServerUuid(optCleanString(ll, "id", ""), "dose");
+                if (!seenKeys.contains(key) && !seenKeys.contains("id:" + lId.toLowerCase(Locale.ROOT))) {
+                    merged.put(ll);
+                }
+            }
+
+            boolean isDiff = !merged.toString().equals(this.doseLogs.toString());
+            if (isDiff) {
+                this.doseLogs = merged;
+            }
+            return isDiff;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean mergeGenericEntityArray(JSONArray remoteArr, String targetField, String idPrefix, String tableName) {
+        if (remoteArr == null) return false;
+        try {
+            Set<String> deletedIds = getDeletedRecordIds();
+            JSONArray localArr;
+            if ("events".equals(targetField)) localArr = this.events;
+            else if ("notes".equals(targetField)) localArr = this.calNotesList;
+            else if ("stock_movements".equals(targetField)) localArr = this.stockMovements;
+            else if ("allergies".equals(targetField)) localArr = this.allergies;
+            else if ("conditions".equals(targetField)) localArr = this.conditions;
+            else if ("contacts".equals(targetField)) localArr = this.contacts;
+            else if ("professionals".equals(targetField)) localArr = this.professionals;
+            else if ("caregivers".equals(targetField)) localArr = this.caregivers;
+            else return false;
+
+            JSONArray merged = new JSONArray();
+            Set<String> seenIds = new HashSet<>();
+
+            for (int r = 0; r < remoteArr.length(); r++) {
+                JSONObject roRaw = remoteArr.optJSONObject(r);
+                if (roRaw == null) continue;
+                JSONObject ro = new JSONObject(roRaw.toString());
+                String rId = optCleanString(ro, "id", "");
+                if (!rId.isEmpty() && deletedIds.contains(rId.toLowerCase(Locale.ROOT))) {
+                    deleteRemoteRecord(tableName, rId, idPrefix);
+                    continue;
+                }
+                if ("events".equals(targetField)) {
+                    if (isStockEvent(ro)) continue;
+                    String t = optCleanString(ro, "title", optCleanString(ro, "titulo", ""));
+                    ro.put("title", t);
+                    ro.put("titulo", t);
+                    String dt = optCleanString(ro, "date", optCleanString(ro, "data", ""));
+                    if (dt.length() >= 10) dt = dt.substring(0, 10);
+                    ro.put("date", dt);
+                    ro.put("data", dt);
+                    String tm = optCleanString(ro, "time", optCleanString(ro, "hora", ""));
+                    if (tm.length() >= 5 && tm.charAt(2) == ':') tm = tm.substring(0, 5);
+                    ro.put("time", tm);
+                    ro.put("hora", tm);
+                    String loc = optCleanString(ro, "location", optCleanString(ro, "local", ""));
+                    ro.put("location", loc);
+                    ro.put("local", loc);
+                    String nts = optCleanString(ro, "notes", optCleanString(ro, "notas", ""));
+                    ro.put("notes", nts);
+                    ro.put("notas", nts);
+                } else if ("notes".equals(targetField)) {
+                    String dt = optCleanString(ro, "date", "");
+                    if (dt.length() >= 10) dt = dt.substring(0, 10);
+                    ro.put("date", dt);
+                } else if ("allergies".equals(targetField)) {
+                    String nm = optCleanString(ro, "nome", optCleanString(ro, "name", optCleanString(ro, "allergen", "")));
+                    ro.put("nome", nm);
+                    ro.put("name", nm);
+                    ro.put("allergen", nm);
+                    String rc = optCleanString(ro, "reacao", optCleanString(ro, "reaction", ""));
+                    ro.put("reacao", rc);
+                    ro.put("reaction", rc);
+                    String sv = optCleanString(ro, "gravidade", optCleanString(ro, "severity", "Moderada"));
+                    ro.put("gravidade", sv);
+                    ro.put("severity", sv);
+                } else if ("conditions".equals(targetField)) {
+                    String nm = optCleanString(ro, "nome", optCleanString(ro, "name", optCleanString(ro, "condition_name", "")));
+                    ro.put("nome", nm);
+                    ro.put("name", nm);
+                    ro.put("condition_name", nm);
+                    String nt = optCleanString(ro, "notas", optCleanString(ro, "notes", ""));
+                    ro.put("notas", nt);
+                    ro.put("notes", nt);
+                } else if ("contacts".equals(targetField)) {
+                    String nm = optCleanString(ro, "nome", optCleanString(ro, "name", ""));
+                    ro.put("nome", nm);
+                    ro.put("name", nm);
+                    String rl = optCleanString(ro, "relacao", optCleanString(ro, "relationship", ""));
+                    ro.put("relacao", rl);
+                    ro.put("relationship", rl);
+                    String ph = optCleanString(ro, "telefone", optCleanString(ro, "phone", ""));
+                    ro.put("telefone", ph);
+                    ro.put("phone", ph);
+                    boolean pr = ro.optBoolean("principal", ro.optBoolean("is_primary", false));
+                    ro.put("principal", pr);
+                    ro.put("is_primary", pr);
+                } else if ("professionals".equals(targetField)) {
+                    String nm = optCleanString(ro, "nome", optCleanString(ro, "name", ""));
+                    ro.put("nome", nm);
+                    ro.put("name", nm);
+                    String sp = optCleanString(ro, "especialidade", optCleanString(ro, "specialty", ""));
+                    ro.put("especialidade", sp);
+                    ro.put("specialty", sp);
+                    String cl = optCleanString(ro, "clinica", optCleanString(ro, "clinic", optCleanString(ro, "clinic_address", "")));
+                    ro.put("clinica", cl);
+                    ro.put("clinic", cl);
+                    ro.put("clinic_address", cl);
+                    String ph = optCleanString(ro, "telefone", optCleanString(ro, "phone", ""));
+                    ro.put("telefone", ph);
+                    ro.put("phone", ph);
+                } else if ("caregivers".equals(targetField)) {
+                    String nm = optCleanString(ro, "nome", optCleanString(ro, "caregiver_name", "Cuidador"));
+                    ro.put("nome", nm);
+                    String rl = optCleanString(ro, "relacao", optCleanString(ro, "relationship", "Familiar"));
+                    ro.put("relacao", rl);
+                    String st = optCleanString(ro, "status", "Ativo");
+                    ro.put("status", st);
+                    String cd = optCleanString(ro, "codigo_convite", optCleanString(ro, "invite_code", ""));
+                    if (!cd.isEmpty()) ro.put("codigo_convite", cd);
+                }
+
+                if (!rId.isEmpty()) {
+                    seenIds.add(rId.toLowerCase(Locale.ROOT));
+                }
+                merged.put(ro);
+            }
+
+            if (this.hasUnsyncedLocalChanges) {
+                for (int l = 0; l < localArr.length(); l++) {
+                    JSONObject lo = localArr.optJSONObject(l);
+                    if (lo == null) continue;
+                    String lId = optCleanString(lo, "id", "");
+                    String lRes = toDeterministicServerUuid(lId, idPrefix);
+                    if (!lId.isEmpty() && deletedIds.contains(lId.toLowerCase(Locale.ROOT))) continue;
+                    if (!seenIds.contains(lId.toLowerCase(Locale.ROOT)) && !seenIds.contains(lRes.toLowerCase(Locale.ROOT))) {
+                        merged.put(lo);
+                    }
+                }
+            }
+
+            boolean isDiff = !merged.toString().equals(localArr.toString());
+            if (isDiff) {
+                if ("events".equals(targetField)) this.events = merged;
+                else if ("notes".equals(targetField)) {
+                    this.calNotesList = merged;
+                    JSONObject rebuiltNotes = new JSONObject();
+                    for (int i = 0; i < merged.length(); i++) {
+                        JSONObject n = merged.optJSONObject(i);
+                        if (n != null) {
+                            String d = optCleanString(n, "date", "");
+                            String t = optCleanString(n, "text", "");
+                            if (!d.isEmpty() && !t.isEmpty()) rebuiltNotes.put(d, t);
+                        }
+                    }
+                    this.calNotes = rebuiltNotes;
+                } else if ("stock_movements".equals(targetField)) {
+                    this.stockMovements = merged;
+                    deduplicateStockMovements();
+                } else if ("allergies".equals(targetField)) this.allergies = merged;
+                else if ("conditions".equals(targetField)) this.conditions = merged;
+                else if ("contacts".equals(targetField)) this.contacts = merged;
+                else if ("professionals".equals(targetField)) this.professionals = merged;
+                else if ("caregivers".equals(targetField)) this.caregivers = merged;
+            }
+            return isDiff;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean pullAndMergeFromBackendSync() {
+        try {
+            if (!this.isLoggedIn) return false;
+            final String patId = resolveCurrentAccountUserId();
+            final String myEmail = this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
+            URL url = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId) + "&email=" + Uri.encode(myEmail));
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+            int code = conn.getResponseCode();
+            if (code != 200) return false;
+            BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line);
+            }
+            br.close();
+            final JSONObject resp = new JSONObject(sb.toString());
+            if (!resp.optBoolean("ok", false)) return false;
+            if (!this.isLoggedIn) return false;
+
+            String respUserId = resp.optString("userId", "").trim();
+            JSONObject u = resp.optJSONObject("user");
+            String respEmail = u != null ? u.optString("email", "").trim().toLowerCase(Locale.ROOT) : "";
+
+            if (!respUserId.isEmpty() && !respUserId.equalsIgnoreCase(patId)) {
+                if (myEmail.isEmpty() || !myEmail.equalsIgnoreCase(respEmail)) {
+                    return false;
+                }
+            }
+
+            JSONArray mArr = resp.optJSONArray("meds");
+            if (hasLeakedOldProfileData(this.profile, mArr)) {
+                wipeRemoteLeakedDataForUser(
+                    patId,
+                    this.profile.optString("nome", ""),
+                    myEmail,
+                    this.profile.optString("role", "independente")
+                );
+                return false;
+            }
+
+            boolean changed = false;
+            if (u != null) {
+                if (!respUserId.isEmpty() && !respUserId.equals(this.profile.optString("id", ""))) {
+                    this.profile.put("id", respUserId);
+                    changed = true;
+                }
+                String uNome = optCleanString(u, "nome", "");
+                if (!uNome.isEmpty() && !uNome.equals(this.profile.optString("nome", ""))) {
+                    this.profile.put("nome", uNome);
+                    this.profile.put("full_name", uNome);
+                    changed = true;
+                }
+                String uSocial = optCleanString(u, "social_name", "");
+                if (!uSocial.isEmpty() && !uSocial.equals(this.profile.optString("social_name", ""))) {
+                    this.profile.put("social_name", uSocial);
+                    this.profile.put("apelido", uSocial);
+                    changed = true;
+                }
+                String uDob = optCleanString(u, "dob", "");
+                if (uDob.length() >= 10) uDob = uDob.substring(0, 10);
+                if (!uDob.isEmpty() && this.profile.optString("data_nascimento", "").trim().isEmpty()) {
+                    this.profile.put("data_nascimento", uDob);
+                    this.profile.put("dob", uDob);
+                    changed = true;
+                }
+                String uSex = optCleanString(u, "sex", "");
+                if (!uSex.isEmpty() && !uSex.equals(this.profile.optString("sexo", ""))) {
+                    this.profile.put("sexo", uSex);
+                    this.profile.put("sex", uSex);
+                    this.profile.put("gender", uSex);
+                    changed = true;
+                }
+                String uCpf = optCleanString(u, "cpf", "");
+                if (!uCpf.isEmpty() && !uCpf.equals(this.profile.optString("cpf", ""))) {
+                    this.profile.put("cpf", uCpf);
+                    changed = true;
+                }
+                String uPhone = optCleanString(u, "phone", "");
+                if (!uPhone.isEmpty() && !uPhone.equals(this.profile.optString("telefone", ""))) {
+                    this.profile.put("telefone", uPhone);
+                    this.profile.put("phone", uPhone);
+                    changed = true;
+                }
+                String uAddr = optCleanString(u, "address", "");
+                if (!uAddr.isEmpty() && !uAddr.equals(this.profile.optString("endereco", ""))) {
+                    this.profile.put("endereco", uAddr);
+                    this.profile.put("address", uAddr);
+                    changed = true;
+                }
+                String uWeight = optCleanString(u, "weight", "");
+                if (!uWeight.isEmpty() && !uWeight.equals(this.profile.optString("peso", ""))) {
+                    this.profile.put("peso", uWeight);
+                    this.profile.put("weight", uWeight);
+                    changed = true;
+                }
+                String uHeight = optCleanString(u, "height", "");
+                if (!uHeight.isEmpty() && !uHeight.equals(this.profile.optString("altura", ""))) {
+                    this.profile.put("altura", uHeight);
+                    this.profile.put("height", uHeight);
+                    changed = true;
+                }
+                String uBlood = optCleanString(u, "blood_type", "");
+                if (!uBlood.isEmpty() && !uBlood.equals(this.profile.optString("tipo_sanguineo", ""))) {
+                    this.profile.put("tipo_sanguineo", uBlood);
+                    this.profile.put("blood_type", uBlood);
+                    changed = true;
+                }
+                String uFoto = optCleanString(u, "foto_url", "");
+                if (!uFoto.isEmpty() && this.profile.optString("foto_url", "").trim().isEmpty()) {
+                    this.profile.put("foto_url", uFoto);
+                    changed = true;
+                }
+                String uRole = optCleanString(u, "role", "");
+                if (!uRole.isEmpty()) {
+                    String prevRole = this.profile.optString("role", "");
+                    setProfileRoleValue(uRole);
+                    if (!prevRole.equals(this.profile.optString("role", ""))) {
+                        changed = true;
+                    }
+                }
+            }
+
+            if (mergeRemoteMeds(mArr)) changed = true;
+            if (mergeRemoteDoseLogs(resp.optJSONArray("history"))) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("events"), "events", "evt", "health_events")) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("notes"), "notes", "note", "calendar_notes")) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("stock_movements"), "stock_movements", "stk", "stock_movements")) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("allergies"), "allergies", "alg", "allergies")) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("conditions"), "conditions", "cond", "health_conditions")) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("contacts"), "contacts", "cnt", "emergency_contacts")) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("professionals"), "professionals", "prof", "healthcare_professionals")) changed = true;
+            if (mergeGenericEntityArray(resp.optJSONArray("caregivers"), "caregivers", "cg", "caregiver_relationships")) changed = true;
+
+            return changed;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private void syncWithBackendSilently(final boolean z) {
         if (!this.isLoggedIn) {
             return;
@@ -10944,6 +11612,9 @@ public class MainActivity extends Activity {
     public /* synthetic */ void m24x90e7608c(final boolean z) {
         try {
             if (!this.isLoggedIn) return;
+            // First pull and merge any caregiver additions/updates so we never overwrite them
+            final boolean pulledChanges = pullAndMergeFromBackendSync();
+
             HttpURLConnection httpURLConnection = (HttpURLConnection) new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync").openConnection();
             httpURLConnection.setRequestMethod("POST");
             httpURLConnection.setConnectTimeout(8000);
@@ -11057,10 +11728,22 @@ public class MainActivity extends Activity {
                 this.prefs.edit().putString("profile", this.profile.toString()).apply();
             }
             final boolean optBoolean = jSONObject2.optBoolean("ok", z2);
+            if (optBoolean) {
+                this.hasUnsyncedLocalChanges = false;
+                for (int i = 0; i < this.meds.length(); i++) {
+                    JSONObject m = this.meds.optJSONObject(i);
+                    if (m != null) m.remove("_local_unsynced");
+                }
+            }
             final String format = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(new Date());
             runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda8
                 @Override // java.lang.Runnable
                 public final void run() {
+                    if (pulledChanges) {
+                        MainActivity.this.saveLocalStateOnly();
+                        MainActivity.this.scheduleAllMedicationAlarms();
+                        MainActivity.this.render();
+                    }
                     MainActivity.this.m22xc335e10a(optBoolean, format, z);
                 }
             });
@@ -11083,168 +11766,17 @@ public class MainActivity extends Activity {
             public void run() {
                 try {
                     if (!MainActivity.this.isLoggedIn) return;
-                    final String patId = MainActivity.this.resolveCurrentAccountUserId();
-                    final String myEmail = MainActivity.this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
-                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId) + "&email=" + Uri.encode(myEmail));
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setConnectTimeout(8000);
-                    conn.setReadTimeout(8000);
-                    int code = conn.getResponseCode();
-                    if (code != 200) return;
-                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        sb.append(line);
-                    }
-                    br.close();
-                    final JSONObject resp = new JSONObject(sb.toString());
-                    if (!resp.optBoolean("ok", false)) return;
-                    if (!MainActivity.this.isLoggedIn) return;
-
-                    String respUserId = resp.optString("userId", "").trim();
-                    JSONObject u = resp.optJSONObject("user");
-                    String respEmail = u != null ? u.optString("email", "").trim().toLowerCase(Locale.ROOT) : "";
-
-                    // Garantir que os dados retornados realmente pertencem ao usuário logado
-                    if (!respUserId.isEmpty() && !respUserId.equalsIgnoreCase(patId)) {
-                        if (myEmail.isEmpty() || !myEmail.equalsIgnoreCase(respEmail)) {
-                            return;
-                        }
-                    }
-
-                    JSONArray mArr = resp.optJSONArray("meds");
-                    if (MainActivity.this.hasLeakedOldProfileData(MainActivity.this.profile, mArr)) {
-                        MainActivity.this.wipeRemoteLeakedDataForUser(
-                            patId,
-                            MainActivity.this.profile.optString("nome", ""),
-                            myEmail,
-                            MainActivity.this.profile.optString("role", "independente")
-                        );
-                        return;
-                    }
-
-                    boolean changed = false;
-                    if (u != null) {
-                        if (MainActivity.this.profile.optString("nome", "").trim().isEmpty() && !u.optString("nome", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("nome", u.optString("nome", "").trim());
-                            MainActivity.this.profile.put("full_name", u.optString("nome", "").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("social_name", "").trim().isEmpty() && !u.isNull("social_name") && !u.optString("social_name", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("social_name", u.optString("social_name").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("data_nascimento", "").trim().isEmpty() && !u.isNull("dob") && !u.optString("dob", "").trim().isEmpty()) {
-                            String dobStr = u.optString("dob").trim();
-                            if (dobStr.length() >= 10) dobStr = dobStr.substring(0, 10);
-                            MainActivity.this.profile.put("data_nascimento", dobStr);
-                            MainActivity.this.profile.put("dob", dobStr);
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("sexo", "").trim().isEmpty() && !u.isNull("sex") && !u.optString("sex", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("sexo", u.optString("sex").trim());
-                            MainActivity.this.profile.put("sex", u.optString("sex").trim());
-                            MainActivity.this.profile.put("gender", u.optString("sex").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("cpf", "").trim().isEmpty() && !u.isNull("cpf") && !u.optString("cpf", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("cpf", u.optString("cpf").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("telefone", "").trim().isEmpty() && !u.isNull("phone") && !u.optString("phone", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("telefone", u.optString("phone").trim());
-                            MainActivity.this.profile.put("phone", u.optString("phone").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("endereco", "").trim().isEmpty() && !u.isNull("address") && !u.optString("address", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("endereco", u.optString("address").trim());
-                            MainActivity.this.profile.put("address", u.optString("address").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("peso", "").trim().isEmpty() && !u.isNull("weight") && !u.optString("weight", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("peso", u.optString("weight").trim());
-                            MainActivity.this.profile.put("weight", u.optString("weight").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("altura", "").trim().isEmpty() && !u.isNull("height") && !u.optString("height", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("altura", u.optString("height").trim());
-                            MainActivity.this.profile.put("height", u.optString("height").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("tipo_sanguineo", "").trim().isEmpty() && !u.isNull("blood_type") && !u.optString("blood_type", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("tipo_sanguineo", u.optString("blood_type").trim());
-                            MainActivity.this.profile.put("blood_type", u.optString("blood_type").trim());
-                            changed = true;
-                        }
-                        if (MainActivity.this.profile.optString("foto_url", "").trim().isEmpty() && !u.isNull("foto_url") && !u.optString("foto_url", "").trim().isEmpty()) {
-                            MainActivity.this.profile.put("foto_url", u.optString("foto_url").trim());
-                            changed = true;
-                        }
-                        if (!u.isNull("role") && !u.optString("role", "").trim().isEmpty()) {
-                            MainActivity.this.setProfileRoleValue(u.optString("role").trim());
-                        }
-                    }
-                    if (mArr != null && mArr.length() > 0 && MainActivity.this.meds.length() == 0) {
-                        MainActivity.this.meds = mArr;
-                        changed = true;
-                    }
-                    JSONArray hArr = resp.optJSONArray("history");
-                    if (hArr != null && hArr.length() > 0 && MainActivity.this.doseLogs.length() == 0) {
-                        MainActivity.this.doseLogs = hArr;
-                        changed = true;
-                    }
-                    JSONArray eArr = resp.optJSONArray("events");
-                    if (eArr != null && eArr.length() > 0) {
-                        JSONArray nonStockEvents = new JSONArray();
-                        for (int i = 0; i < eArr.length(); i++) {
-                            JSONObject ev = eArr.optJSONObject(i);
-                            if (ev != null && !MainActivity.this.isStockEvent(ev)) {
-                                nonStockEvents.put(ev);
-                            }
-                        }
-                        if (nonStockEvents.length() > 0 && MainActivity.this.events.length() == 0) {
-                            MainActivity.this.events = nonStockEvents;
-                            changed = true;
-                        }
-                    }
-                    JSONArray smArr = resp.optJSONArray("stock_movements");
-                    if (smArr != null && smArr.length() > 0 && MainActivity.this.stockMovements.length() == 0) {
-                        MainActivity.this.stockMovements = smArr;
-                        MainActivity.this.deduplicateStockMovements();
-                        changed = true;
-                    }
-                    JSONArray aArr = resp.optJSONArray("allergies");
-                    if (aArr != null && aArr.length() > 0 && MainActivity.this.allergies.length() == 0) {
-                        MainActivity.this.allergies = aArr;
-                        changed = true;
-                    }
-                    JSONArray condArr = resp.optJSONArray("conditions");
-                    if (condArr != null && condArr.length() > 0 && MainActivity.this.conditions.length() == 0) {
-                        MainActivity.this.conditions = condArr;
-                        changed = true;
-                    }
-                    JSONArray cArr = resp.optJSONArray("contacts");
-                    if (cArr != null && cArr.length() > 0 && MainActivity.this.contacts.length() == 0) {
-                        MainActivity.this.contacts = cArr;
-                        changed = true;
-                    }
-                    JSONArray pArr = resp.optJSONArray("professionals");
-                    if (pArr != null && pArr.length() > 0 && MainActivity.this.professionals.length() == 0) {
-                        MainActivity.this.professionals = pArr;
-                        changed = true;
-                    }
-                    JSONArray cgArr = resp.optJSONArray("caregivers");
-                    if (cgArr != null && cgArr.length() > 0 && MainActivity.this.caregivers.length() == 0) {
-                        MainActivity.this.caregivers = cgArr;
-                        changed = true;
-                    }
+                    boolean changed = MainActivity.this.pullAndMergeFromBackendSync();
                     if (changed) {
+                        final String format = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(new Date());
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                MainActivity.this.backendStatusOk = true;
+                                MainActivity.this.lastSyncTimestamp = "Sincronizado em " + format;
+                                MainActivity.this.prefs.edit().putString("last_sync_timestamp", MainActivity.this.lastSyncTimestamp).apply();
                                 MainActivity.this.saveLocalStateOnly();
+                                MainActivity.this.scheduleAllMedicationAlarms();
                                 MainActivity.this.render();
                             }
                         });
