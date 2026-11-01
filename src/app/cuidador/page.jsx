@@ -42,6 +42,7 @@ import {
 
 export default function CuidadorWebPage() {
   const [token, setToken] = useState(null);
+  const [authChecking, setAuthChecking] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [selectedPatientId, setSelectedPatientId] = useState(null);
@@ -122,21 +123,69 @@ export default function CuidadorWebPage() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Verifica token salvo ao inicializar
+  const persistSession = (accessToken, refreshToken, userObj) => {
+    if (accessToken) {
+      localStorage.setItem('medicare_cuidador_jwt', accessToken);
+      document.cookie = 'medicare_cuidador_logged_in=1; path=/; max-age=31536000; SameSite=Lax';
+    }
+    if (refreshToken) {
+      localStorage.setItem('medicare_cuidador_refresh_token', refreshToken);
+    }
+    if (userObj) {
+      localStorage.setItem('medicare_cuidador_user', JSON.stringify(userObj));
+    }
+  };
+
+  // Verifica token salvo ao inicializar e renova automaticamente se necessário
   useEffect(() => {
     const savedToken = localStorage.getItem('medicare_cuidador_jwt');
+    const savedRefresh = localStorage.getItem('medicare_cuidador_refresh_token');
+    const savedUserRaw = localStorage.getItem('medicare_cuidador_user');
+
+    if (savedUserRaw) {
+      try {
+        setCurrentUser(JSON.parse(savedUserRaw));
+      } catch {
+        // ignore invalid json
+      }
+    }
+
     if (savedToken) {
       setToken(savedToken);
+      document.cookie = 'medicare_cuidador_logged_in=1; path=/; max-age=31536000; SameSite=Lax';
+      setAuthChecking(false);
+
       fetch('/api/auth/v1/user', {
         headers: { Authorization: `Bearer ${savedToken}` },
       })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((u) => {
-          if (u) {
-            setCurrentUser(u);
+        .then(async (res) => {
+          if (res.ok) {
+            const u = await res.json();
+            if (u) {
+              setCurrentUser(u);
+              localStorage.setItem('medicare_cuidador_user', JSON.stringify(u));
+            }
+            return;
+          }
+          if (res.status === 401 && savedRefresh) {
+            const refreshRes = await fetch('/api/auth/v1/token?grant_type=refresh_token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh_token: savedRefresh }),
+            });
+            if (refreshRes.ok) {
+              const refreshData = await refreshRes.json();
+              if (refreshData.access_token) {
+                setToken(refreshData.access_token);
+                if (refreshData.user) setCurrentUser(refreshData.user);
+                persistSession(refreshData.access_token, refreshData.refresh_token, refreshData.user);
+              }
+            }
           }
         })
         .catch(() => {});
+    } else {
+      setAuthChecking(false);
     }
   }, []);
 
@@ -160,9 +209,7 @@ export default function CuidadorWebPage() {
 
       setToken(data.access_token);
       setCurrentUser(data.user);
-      if (data.access_token) {
-        localStorage.setItem('medicare_cuidador_jwt', data.access_token);
-      }
+      persistSession(data.access_token, data.refresh_token, data.user);
       showToast('Bem-vindo ao MediCare Cuidador!');
     } catch (err) {
       setAuthError(err.message || 'E-mail ou senha incorretos. Tente novamente.');
@@ -210,14 +257,13 @@ export default function CuidadorWebPage() {
         throw new Error(data.error || 'Não foi possível cadastrar. Verifique os dados informados.');
       }
 
-      setToken(data.access_token);
-      setCurrentUser(data.user || {
+      const resolvedUser = data.user || {
         email: signupEmail.trim().toLowerCase(),
         user_metadata: { nome: signupNome.trim(), role: 'cuidador' },
-      });
-      if (data.access_token) {
-        localStorage.setItem('medicare_cuidador_jwt', data.access_token);
-      }
+      };
+      setToken(data.access_token);
+      setCurrentUser(resolvedUser);
+      persistSession(data.access_token, data.refresh_token, resolvedUser);
       showToast('Conta de Cuidador criada com sucesso!');
     } catch (err) {
       setAuthError(err.message || 'Erro ao criar conta de cuidador.');
@@ -248,6 +294,9 @@ export default function CuidadorWebPage() {
     setToken(null);
     setCurrentUser(null);
     localStorage.removeItem('medicare_cuidador_jwt');
+    localStorage.removeItem('medicare_cuidador_refresh_token');
+    localStorage.removeItem('medicare_cuidador_user');
+    document.cookie = 'medicare_cuidador_logged_in=; path=/; max-age=0; SameSite=Lax';
     showToast('Sessão encerrada com segurança.');
   };
 
@@ -625,6 +674,14 @@ export default function CuidadorWebPage() {
   // ─────────────────────────────────────────────────────────────
   // REFORMULAÇÃO DA TELA DE LOGIN DO CUIDADOR (SEÇÃO 4)
   // ─────────────────────────────────────────────────────────────
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-center items-center p-4 antialiased">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
   if (!token) {
     return (
       <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 antialiased selection:bg-blue-600 selection:text-white">
@@ -906,7 +963,7 @@ export default function CuidadorWebPage() {
           {/* Link "Voltar ao portal" */}
           <div className="mt-6 pt-5 border-t border-slate-800/80 text-center">
             <a
-              href="/"
+              href="/?portal=1"
               className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors py-1 px-2 rounded-lg"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -1078,7 +1135,7 @@ export default function CuidadorWebPage() {
             </h2>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={loadData}
               title="Recarregar dados"
@@ -1086,6 +1143,13 @@ export default function CuidadorWebPage() {
               className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
             >
               <Loader2 className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={handleLogout}
+              title="Encerrar sessão"
+              className="md:hidden p-2 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </header>

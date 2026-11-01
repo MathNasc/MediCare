@@ -3,7 +3,7 @@ export default function manifest() {
     name: 'MediCare Cuidador — Portal de Acompanhamento',
     short_name: 'Cuidador',
     description: 'Acompanhamento profissional e familiar de medicamentos, histórico de doses e saúde dos seus pacientes.',
-    start_url: '/',
+    start_url: '/cuidador',
     id: '/',
     display: 'standalone',
     orientation: 'portrait',

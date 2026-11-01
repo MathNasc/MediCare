@@ -1,8 +1,26 @@
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { Shield, ArrowRight, Download, CheckCircle, Calendar, HeartHandshake } from 'lucide-react';
+import CuidadorAutoRedirect from './CuidadorAutoRedirect';
 
-export default function HomePage() {
+export default async function HomePage({ searchParams }) {
+  const resolvedParams = await searchParams;
+  const forcePortal = resolvedParams?.portal === '1';
+
+  if (!forcePortal) {
+    const cookieStore = await cookies();
+    const isLoggedCookie =
+      cookieStore.get('medicare_cuidador_logged_in')?.value === '1' ||
+      Boolean(cookieStore.get('medicare_cuidador_jwt')?.value);
+
+    if (isLoggedCookie) {
+      redirect('/cuidador');
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-between py-10 px-4 sm:px-6 lg:px-8 antialiased">
+      <CuidadorAutoRedirect />
       <div className="max-w-4xl mx-auto w-full space-y-12 my-auto">
         
         {/* BLOCO A — APRESENTAÇÃO */}
