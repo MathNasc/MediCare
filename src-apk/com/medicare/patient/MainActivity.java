@@ -2710,25 +2710,66 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private String extractDoseLogDate(JSONObject log) {
+        if (log == null) return "";
+        String[] fields = {"data", "dose_date", "date", "created_at"};
+        for (int i = 0; i < fields.length; i++) {
+            String raw = optCleanString(log, fields[i], "");
+            if (raw.length() >= 10) {
+                return raw.substring(0, 10);
+            }
+            if (!raw.isEmpty()) {
+                return raw;
+            }
+        }
+        return "";
+    }
+
+    private String extractDoseLogTime(JSONObject log) {
+        if (log == null) return "";
+        String h = optCleanString(log, "horario", optCleanString(log, "hora", optCleanString(log, "horario_programado", "")));
+        if (h.length() >= 5 && h.charAt(2) == ':') {
+            return h.substring(0, 5);
+        }
+        return h;
+    }
+
+    private boolean doesDoseLogMatchMed(JSONObject log, String medId) {
+        if (log == null || medId == null || medId.trim().isEmpty()) return false;
+        String logMedId = optCleanString(log, "med_id", optCleanString(log, "medId", ""));
+        if (logMedId.isEmpty()) return false;
+        if (medId.trim().equalsIgnoreCase(logMedId)) return true;
+        String detLocal = toDeterministicServerUuid(medId, "med");
+        if (!detLocal.isEmpty() && detLocal.equalsIgnoreCase(logMedId)) return true;
+        String detLog = toDeterministicServerUuid(logMedId, "med");
+        return !detLog.isEmpty() && detLog.equalsIgnoreCase(medId.trim());
+    }
+
+    private String normalizeDoseStatusLocal(String st) {
+        if (st == null) return "pendente";
+        String s = st.trim().toLowerCase(Locale.ROOT);
+        if ("confirmed".equals(s) || "tomado".equals(s) || "tomada".equals(s) || "taken".equals(s) || "concluida".equals(s)) {
+            return "tomado";
+        }
+        if ("missed".equals(s) || "pulado".equals(s) || "pulada".equals(s) || "perdida".equals(s) || "skipped".equals(s)) {
+            return "pulado";
+        }
+        if ("pending".equals(s) || "pendente".equals(s)) {
+            return "pendente";
+        }
+        return s;
+    }
+
     private String getDoseStatus(String medId, String dateStr, String horaStr) {
-        for (int i = 0; i < this.doseLogs.length(); i++) {
+        String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : "");
+        String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "");
+        for (int i = this.doseLogs.length() - 1; i >= 0; i--) {
             JSONObject log = this.doseLogs.optJSONObject(i);
-            if (log != null && medId.equals(log.optString("med_id"))) {
-                String d = log.optString("data", "");
-                if (d.isEmpty() && log.has("dose_date")) {
-                    String dd = log.optString("dose_date", "");
-                    if (dd.length() >= 10) d = dd.substring(0, 10);
-                }
-                if (d.isEmpty() && log.has("created_at")) {
-                    String ca = log.optString("created_at", "");
-                    if (ca.length() >= 10) d = ca.substring(0, 10);
-                }
-                String h = log.optString("horario", log.optString("hora", ""));
-                if (dateStr.equals(d) && horaStr.equals(h)) {
-                    String st = log.optString("status", "pendente");
-                    if ("confirmed".equals(st)) return "tomado";
-                    if ("missed".equals(st)) return "pulado";
-                    return st;
+            if (log != null && doesDoseLogMatchMed(log, medId)) {
+                String d = extractDoseLogDate(log);
+                String h = extractDoseLogTime(log);
+                if (normDate.equals(d) && normHora.equals(h)) {
+                    return normalizeDoseStatusLocal(log.optString("status", "pendente"));
                 }
             }
         }
@@ -2736,20 +2777,17 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject getDoseLogObject(String medId, String dateStr, String horaStr) {
-        for (int i = 0; i < this.doseLogs.length(); i++) {
+        String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : "");
+        String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "");
+        for (int i = this.doseLogs.length() - 1; i >= 0; i--) {
             JSONObject log = this.doseLogs.optJSONObject(i);
-            if (log != null && medId.equals(log.optString("med_id"))) {
-                String d = log.optString("data", "");
-                if (d.isEmpty() && log.has("dose_date")) {
-                    String dd = log.optString("dose_date", "");
-                    if (dd.length() >= 10) d = dd.substring(0, 10);
-                }
-                if (d.isEmpty() && log.has("created_at")) {
-                    String ca = log.optString("created_at", "");
-                    if (ca.length() >= 10) d = ca.substring(0, 10);
-                }
-                String h = log.optString("horario", log.optString("hora", ""));
-                if (dateStr.equals(d) && horaStr.equals(h)) {
+            if (log != null && doesDoseLogMatchMed(log, medId)) {
+                String d = extractDoseLogDate(log);
+                String h = extractDoseLogTime(log);
+                if (normDate.equals(d) && normHora.equals(h)) {
+                    if ("pendente".equals(normalizeDoseStatusLocal(log.optString("status", "pendente")))) {
+                        return null;
+                    }
                     return log;
                 }
             }
@@ -2769,6 +2807,7 @@ public class MainActivity extends Activity {
             int val = Math.max(0, newQty);
             med.put("quantidade", val);
             med.put("estoque_atual", val);
+            med.put("_local_unsynced", true);
         } catch (Exception ignored) {}
     }
 
@@ -2784,56 +2823,78 @@ public class MainActivity extends Activity {
     private void registerDose(JSONObject med, String dateStr, String horaStr, String targetStatus) {
         try {
             String medId = med.optString("id");
-            int foundIdx = -1;
+            String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : todayIso());
+            String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "08:00");
+
             String prevStatus = "pendente";
+            String preservedId = "";
+            ArrayList<String> matchedIds = new ArrayList<>();
+            JSONArray cleanedLogs = new JSONArray();
+
             for (int i = 0; i < this.doseLogs.length(); i++) {
                 JSONObject log = this.doseLogs.optJSONObject(i);
-                if (log != null && medId.equals(log.optString("med_id"))) {
-                    String d = log.optString("data", "");
-                    if (d.isEmpty() && log.has("created_at")) {
-                        String ca = log.optString("created_at", "");
-                        if (ca.length() >= 10) d = ca.substring(0, 10);
+                if (log == null) continue;
+                if (doesDoseLogMatchMed(log, medId)
+                        && normDate.equals(extractDoseLogDate(log))
+                        && normHora.equals(extractDoseLogTime(log))) {
+                    prevStatus = normalizeDoseStatusLocal(log.optString("status", "pendente"));
+                    String existingId = optCleanString(log, "id", "");
+                    if (!existingId.isEmpty()) {
+                        matchedIds.add(existingId);
+                        if (preservedId.isEmpty()) {
+                            preservedId = existingId;
+                        }
                     }
-                    String h = log.optString("horario", log.optString("hora", ""));
-                    if (dateStr.equals(d) && horaStr.equals(h)) {
-                        foundIdx = i;
-                        prevStatus = log.optString("status", "pendente");
-                        if ("confirmed".equals(prevStatus)) prevStatus = "tomado";
-                        break;
-                    }
+                } else {
+                    cleanedLogs.put(log);
                 }
             }
-            String newStatus = targetStatus;
-            if (prevStatus.equals(newStatus)) {
+
+            String newStatus = normalizeDoseStatusLocal(targetStatus);
+            if (!"pendente".equals(targetStatus) && prevStatus.equals(newStatus)) {
                 newStatus = "pendente";
             }
+
+            if ("pendente".equals(newStatus)) {
+                for (int k = 0; k < matchedIds.size(); k++) {
+                    deleteRemoteRecord("historico_doses", matchedIds.get(k), "dose");
+                }
+            }
+
             String nowTime = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
             int atrasoMin = 0;
             try {
-                String[] p1 = horaStr.split(":");
+                String[] p1 = normHora.split(":");
                 String[] p2 = nowTime.split(":");
                 int mSched = Integer.parseInt(p1[0]) * 60 + Integer.parseInt(p1[1]);
                 int mNow = Integer.parseInt(p2[0]) * 60 + Integer.parseInt(p2[1]);
                 if (mNow > mSched) atrasoMin = mNow - mSched;
             } catch (Exception ignored) {}
 
+            String entryId = !preservedId.isEmpty()
+                ? preservedId
+                : UUID.nameUUIDFromBytes(("dose:" + medId + ":" + normDate + ":" + normHora).getBytes(StandardCharsets.UTF_8)).toString();
+            if (!"pendente".equals(newStatus)) {
+                removeDeletedRecordId(entryId);
+            }
+
             JSONObject logEntry = new JSONObject();
-            logEntry.put("id", "log-" + System.currentTimeMillis());
+            logEntry.put("id", entryId);
             logEntry.put("med_id", medId);
             logEntry.put("med_nome", med.optString("nome") + " " + med.optString("dosagem"));
-            logEntry.put("data", dateStr);
-            logEntry.put("created_at", dateStr + "T" + nowTime + ":00.000Z");
-            logEntry.put("horario", horaStr);
-            logEntry.put("hora", horaStr);
+            logEntry.put("data", normDate);
+            logEntry.put("dose_date", normDate);
+            logEntry.put("created_at", normDate + "T" + nowTime + ":00.000Z");
+            logEntry.put("horario", normHora);
+            logEntry.put("hora", normHora);
             logEntry.put("status", newStatus);
             logEntry.put("hora_real", nowTime);
             logEntry.put("atraso_minutos", atrasoMin);
+            logEntry.put("_local_unsynced", true);
+            logEntry.put("updated_at_ms", System.currentTimeMillis());
 
-            if (foundIdx >= 0) {
-                this.doseLogs.put(foundIdx, logEntry);
-            } else {
-                this.doseLogs.put(logEntry);
-            }
+            cleanedLogs.put(logEntry);
+            this.doseLogs = cleanedLogs;
 
             int currentStock = getMedStock(med);
             if ("tomado".equals(newStatus) && !"tomado".equals(prevStatus)) {
@@ -2856,13 +2917,13 @@ public class MainActivity extends Activity {
                     .put("quantity_before", currentStock)
                     .put("new_quantity", nextStock)
                     .put("quantity_after", nextStock)
-                    .put("date", dateStr)
+                    .put("date", normDate)
                     .put("time", nowTime)
                     .put("hora", nowTime)
-                    .put("data", dateStr + " " + nowTime)
-                    .put("created_at", dateStr + "T" + nowTime + ":00.000Z")
-                    .put("motivo", "Dose confirmada (" + horaStr + ")")
-                    .put("notes", "Dose confirmada (" + horaStr + ")"));
+                    .put("data", normDate + " " + nowTime)
+                    .put("created_at", normDate + "T" + nowTime + ":00.000Z")
+                    .put("motivo", "Dose confirmada (" + normHora + ")")
+                    .put("notes", "Dose confirmada (" + normHora + ")"));
             } else if (!"tomado".equals(newStatus) && "tomado".equals(prevStatus)) {
                 int nextStock = currentStock + 1;
                 setMedStock(med, nextStock);
@@ -2883,13 +2944,13 @@ public class MainActivity extends Activity {
                     .put("quantity_before", currentStock)
                     .put("new_quantity", nextStock)
                     .put("quantity_after", nextStock)
-                    .put("date", dateStr)
+                    .put("date", normDate)
                     .put("time", nowTime)
                     .put("hora", nowTime)
-                    .put("data", dateStr + " " + nowTime)
-                    .put("created_at", dateStr + "T" + nowTime + ":00.000Z")
-                    .put("motivo", "Estorno de dose desfeita (" + horaStr + ")")
-                    .put("notes", "Estorno de dose desfeita (" + horaStr + ")"));
+                    .put("data", normDate + " " + nowTime)
+                    .put("created_at", normDate + "T" + nowTime + ":00.000Z")
+                    .put("motivo", "Estorno de dose desfeita (" + normHora + ")")
+                    .put("notes", "Estorno de dose desfeita (" + normHora + ")"));
             }
             saveAll();
             render();
@@ -3192,6 +3253,25 @@ public class MainActivity extends Activity {
                     }
                 });
                 heroCard.addView(btnSnooze);
+            } else {
+                TextView btnHeroUndo = new TextView(this);
+                btnHeroUndo.setText("↩  Desfazer confirmação");
+                btnHeroUndo.setTextColor(this.cTextMuted);
+                btnHeroUndo.setTextSize(sp(13.0f));
+                btnHeroUndo.setTypeface(null, 1);
+                btnHeroUndo.setGravity(17);
+                btnHeroUndo.setPadding(dp(12), dp(10), dp(12), dp(10));
+                btnHeroUndo.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
+                LinearLayout.LayoutParams bhuLp = new LinearLayout.LayoutParams(-1, -2);
+                bhuLp.topMargin = dp(12);
+                btnHeroUndo.setLayoutParams(bhuLp);
+                btnHeroUndo.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showUndoConfirmDialog(heroMed, today, heroHora);
+                    }
+                });
+                heroCard.addView(btnHeroUndo);
             }
             linearLayout.addView(heroCard);
         }
@@ -4059,11 +4139,12 @@ public class MainActivity extends Activity {
         int count = 0;
         for (int i = this.doseLogs.length() - 1; i >= 0 && count < 8; i--) {
             JSONObject log = this.doseLogs.optJSONObject(i);
-            if (log != null && medId.equals(log.optString("med_id"))) {
+            if (log != null && doesDoseLogMatchMed(log, medId)) {
+                String st = normalizeDoseStatusLocal(log.optString("status", "pendente"));
+                if ("pendente".equals(st)) continue;
                 TextView row = new TextView(this);
-                String st = log.optString("status", "pendente");
-                boolean ok = "tomado".equals(st) || "confirmed".equals(st);
-                row.setText((ok ? "✓ " : "✕ ") + log.optString("data", "") + " às " + log.optString("horario", log.optString("hora", "")));
+                boolean ok = "tomado".equals(st);
+                row.setText((ok ? "✓ " : "✕ ") + extractDoseLogDate(log) + " às " + extractDoseLogTime(log));
                 row.setTextColor(ok ? this.cSuccess : this.cDanger);
                 row.setTextSize(sp(12.5f));
                 row.setPadding(0, dp(3), 0, dp(3));
@@ -6656,6 +6737,21 @@ public class MainActivity extends Activity {
                         }
                     });
                     dCard.addView(btnRetro);
+                } else if (isTaken) {
+                    TextView btnUndoCal = new TextView(this);
+                    btnUndoCal.setText("↩ Desfazer confirmação");
+                    btnUndoCal.setTextColor(this.cTextMuted);
+                    btnUndoCal.setTextSize(sp(12.0f));
+                    btnUndoCal.setTypeface(null, 1);
+                    btnUndoCal.setPadding(0, dp(6), 0, 0);
+                    btnUndoCal.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            dlg.dismiss();
+                            showUndoConfirmDialog(m, dateStr, hStr);
+                        }
+                    });
+                    dCard.addView(btnUndoCal);
                 }
                 root.addView(dCard);
             }
@@ -11232,36 +11328,68 @@ public class MainActivity extends Activity {
     private boolean mergeRemoteDoseLogs(JSONArray remoteLogs) {
         if (remoteLogs == null) return false;
         try {
+            Set<String> deletedIds = getDeletedRecordIds();
             JSONArray merged = new JSONArray();
             Set<String> seenKeys = new HashSet<>();
+            Set<String> localUnsyncedSlots = new HashSet<>();
+
+            for (int l = 0; l < this.doseLogs.length(); l++) {
+                JSONObject ll = this.doseLogs.optJSONObject(l);
+                if (ll == null) continue;
+                String mId = optCleanString(ll, "med_id", "");
+                String d = extractDoseLogDate(ll);
+                String h = extractDoseLogTime(ll);
+                String st = normalizeDoseStatusLocal(ll.optString("status", "pendente"));
+                if (ll.optBoolean("_local_unsynced", false) || this.hasUnsyncedLocalChanges || "pendente".equals(st)) {
+                    if (!mId.isEmpty() && !d.isEmpty() && !h.isEmpty()) {
+                        localUnsyncedSlots.add((mId + "|" + d + "|" + h).toLowerCase(Locale.ROOT));
+                        String detMed = toDeterministicServerUuid(mId, "med");
+                        if (!detMed.isEmpty()) {
+                            localUnsyncedSlots.add((detMed + "|" + d + "|" + h).toLowerCase(Locale.ROOT));
+                        }
+                    }
+                }
+            }
 
             for (int r = 0; r < remoteLogs.length(); r++) {
                 JSONObject rlRaw = remoteLogs.optJSONObject(r);
                 if (rlRaw == null) continue;
                 JSONObject rl = new JSONObject(rlRaw.toString());
-                String d = optCleanString(rl, "data", "");
-                if (d.isEmpty()) {
-                    String dd = optCleanString(rl, "dose_date", "");
-                    if (dd.length() >= 10) d = dd.substring(0, 10);
+                String rId = optCleanString(rl, "id", "");
+                if (!rId.isEmpty() && deletedIds.contains(rId.toLowerCase(Locale.ROOT))) {
+                    deleteRemoteRecord("historico_doses", rId, "dose");
+                    continue;
                 }
-                if (d.isEmpty()) {
-                    String ca = optCleanString(rl, "created_at", "");
-                    if (ca.length() >= 10) d = ca.substring(0, 10);
+                String d = extractDoseLogDate(rl);
+                if (!d.isEmpty()) {
+                    rl.put("data", d);
+                    rl.put("dose_date", d);
                 }
-                if (!d.isEmpty()) rl.put("data", d);
-                String h = optCleanString(rl, "horario", optCleanString(rl, "hora", ""));
-                if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
+                String h = extractDoseLogTime(rl);
                 if (!h.isEmpty()) {
                     rl.put("horario", h);
                     rl.put("hora", h);
                 }
-                String mId = optCleanString(rl, "med_id", "");
-                String key = mId + "|" + d + "|" + h;
-                if (!mId.isEmpty() && !d.isEmpty() && !h.isEmpty()) {
-                    seenKeys.add(key);
+                String st = normalizeDoseStatusLocal(rl.optString("status", "confirmed"));
+                if ("pendente".equals(st)) {
+                    continue;
                 }
-                String rId = optCleanString(rl, "id", "");
-                if (!rId.isEmpty()) seenKeys.add("id:" + rId.toLowerCase(Locale.ROOT));
+                String mId = optCleanString(rl, "med_id", "");
+                String slotKey = (mId + "|" + d + "|" + h).toLowerCase(Locale.ROOT);
+                String detSlotKey = (toDeterministicServerUuid(mId, "med") + "|" + d + "|" + h).toLowerCase(Locale.ROOT);
+                if (localUnsyncedSlots.contains(slotKey) || localUnsyncedSlots.contains(detSlotKey)) {
+                    continue;
+                }
+                if (!mId.isEmpty() && !d.isEmpty() && !h.isEmpty() && !"sos".equalsIgnoreCase(h)) {
+                    if (seenKeys.contains(slotKey) || seenKeys.contains(detSlotKey)) {
+                        continue;
+                    }
+                    seenKeys.add(slotKey);
+                    seenKeys.add(detSlotKey);
+                }
+                if (!rId.isEmpty()) {
+                    seenKeys.add("id:" + rId.toLowerCase(Locale.ROOT));
+                }
                 merged.put(rl);
             }
 
@@ -11269,16 +11397,14 @@ public class MainActivity extends Activity {
                 JSONObject ll = this.doseLogs.optJSONObject(l);
                 if (ll == null) continue;
                 String mId = optCleanString(ll, "med_id", "");
-                String d = optCleanString(ll, "data", "");
-                if (d.isEmpty() && ll.has("dose_date")) {
-                    String dd = optCleanString(ll, "dose_date", "");
-                    if (dd.length() >= 10) d = dd.substring(0, 10);
-                }
-                String h = optCleanString(ll, "horario", optCleanString(ll, "hora", ""));
-                if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
-                String key = mId + "|" + d + "|" + h;
+                String d = extractDoseLogDate(ll);
+                String h = extractDoseLogTime(ll);
+                String slotKey = (mId + "|" + d + "|" + h).toLowerCase(Locale.ROOT);
+                String detSlotKey = (toDeterministicServerUuid(mId, "med") + "|" + d + "|" + h).toLowerCase(Locale.ROOT);
                 String lId = toDeterministicServerUuid(optCleanString(ll, "id", ""), "dose");
-                if (!seenKeys.contains(key) && !seenKeys.contains("id:" + lId.toLowerCase(Locale.ROOT))) {
+                if (!seenKeys.contains(slotKey) && !seenKeys.contains(detSlotKey) && !seenKeys.contains("id:" + lId.toLowerCase(Locale.ROOT))) {
+                    seenKeys.add(slotKey);
+                    seenKeys.add(detSlotKey);
                     merged.put(ll);
                 }
             }
@@ -11733,6 +11859,10 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < this.meds.length(); i++) {
                     JSONObject m = this.meds.optJSONObject(i);
                     if (m != null) m.remove("_local_unsynced");
+                }
+                for (int i = 0; i < this.doseLogs.length(); i++) {
+                    JSONObject dl = this.doseLogs.optJSONObject(i);
+                    if (dl != null) dl.remove("_local_unsynced");
                 }
             }
             final String format = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(new Date());

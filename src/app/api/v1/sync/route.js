@@ -221,6 +221,38 @@ export async function GET(request) {
           .catch(() => ({ rows: [] })),
       ]);
 
+    const seenDoseSlots = new Set();
+    const cleanHistory = [];
+    for (const row of histRes.rows) {
+      const rawDate = row.dose_date
+        ? row.dose_date instanceof Date
+          ? row.dose_date.toISOString().slice(0, 10)
+          : String(row.dose_date).slice(0, 10)
+        : row.created_at
+        ? row.created_at instanceof Date
+          ? row.created_at.toISOString().slice(0, 10)
+          : String(row.created_at).slice(0, 10)
+        : '';
+      const rawHora = String(row.hora || row.horario || '').trim();
+      const normHora = rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora;
+      const slotKey =
+        normHora.toUpperCase() === 'SOS'
+          ? `id:${row.id}`
+          : `${row.med_id}|${rawDate}|${normHora}`;
+      if (seenDoseSlots.has(slotKey)) continue;
+      seenDoseSlots.add(slotKey);
+      const normSt = normalizeDoseStatus(row.status);
+      if (normSt === 'pending') continue;
+      cleanHistory.push({
+        ...row,
+        data: rawDate,
+        dose_date: rawDate,
+        hora: normHora,
+        horario: normHora,
+        status: normSt,
+      });
+    }
+
     return NextResponse.json(
       {
         ok: true,
@@ -231,8 +263,8 @@ export async function GET(request) {
         profile: profileRes.rows[0] || null,
         meds: medsRes.rows,
         medicamentos: medsRes.rows,
-        history: histRes.rows,
-        historico_doses: histRes.rows,
+        history: cleanHistory,
+        historico_doses: cleanHistory,
         events: eventsRes.rows,
         health_events: eventsRes.rows,
         notes: notesRes.rows,
@@ -464,14 +496,50 @@ export async function POST(request) {
         h.dose_date ||
         (h.created_at ? String(h.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10));
       const doseDate = parsePgDate(rawDoseDate) || new Date().toISOString().slice(0, 10);
-      const hora = h.hora || h.horario || '08:00';
-      const doseUuid = toDeterministicUuid(h.id || `${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`);
+      const rawHora = String(h.hora || h.horario || '08:00').trim();
+      const hora = parsePgTime(rawHora) || (rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora);
+      const normStatus = normalizeDoseStatus(h.status);
+
+      // Se a dose foi desfeita (status = pending / pendente), remove todos os registros correspondentes do banco
+      if (normStatus === 'pending') {
+        await client.query(
+          `DELETE FROM historico_doses
+           WHERE user_id = $1
+             AND med_id = $2
+             AND LEFT(COALESCE(hora, ''), 5) = $3
+             AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4`,
+          [userId, resolvedMedUuid, hora, doseDate]
+        );
+        if (h.id && isValidUuid(h.id)) {
+          await client.query(`DELETE FROM historico_doses WHERE user_id = $1 AND id = $2`, [userId, h.id.trim()]);
+        }
+        continue;
+      }
+
+      const doseUuid =
+        hora.toUpperCase() === 'SOS'
+          ? toDeterministicUuid(h.id || `${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`)
+          : toDeterministicUuid(`${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`);
+
+      if (hora.toUpperCase() !== 'SOS') {
+        await client.query(
+          `DELETE FROM historico_doses
+           WHERE user_id = $1
+             AND med_id = $2
+             AND LEFT(COALESCE(hora, ''), 5) = $3
+             AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4
+             AND id <> $5`,
+          [userId, resolvedMedUuid, hora, doseDate, doseUuid]
+        );
+      }
 
       await client.query(
         `INSERT INTO historico_doses (id, med_id, user_id, hora, dose_date, status, quantidade_usada, is_retroactive, correction_reason, motivo, confirmed_by_name)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (id) DO UPDATE SET
            status = EXCLUDED.status,
+           hora = EXCLUDED.hora,
+           dose_date = EXCLUDED.dose_date,
            correction_reason = COALESCE(EXCLUDED.correction_reason, historico_doses.correction_reason)`,
         [
           doseUuid,
@@ -479,7 +547,7 @@ export async function POST(request) {
           userId,
           hora,
           doseDate,
-          normalizeDoseStatus(h.status),
+          normStatus,
           parsePgNumeric(h.quantidade_usada ?? h.quantidadeUsada ?? 1) || 1,
           Boolean(h.is_retroactive ?? h.isRetroactive),
           h.reason || h.correction_reason || h.correctionReason || h.motivo || null,
