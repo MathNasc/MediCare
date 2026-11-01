@@ -36,6 +36,7 @@ const ALLOWED_TABLES = new Set([
   'notificacoes',
   'adhesion_stats',
   'dose_corrections',
+  'approval_requests',
   'roles',
   'role_permissions',
 ]);
@@ -151,6 +152,30 @@ async function handleRpcCall(client, fnName, args, userId) {
         [String(patientId), String(medId), String(hora), String(doseDate)]
       );
 
+      if (newStatus === 'pending' || newStatus === 'pendente') {
+        await client.query(
+          `DELETE FROM historico_doses
+           WHERE user_id::text = $1::text
+             AND med_id::text = $2::text
+             AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+             AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4`,
+          [String(patientId), String(medId), String(hora), String(doseDate)]
+        );
+        await client
+          .query(
+            `UPDATE approval_requests
+             SET status = 'approved', updated_at = NOW()
+             WHERE patient_id::text = $1::text
+               AND med_id::text = $2::text
+               AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+               AND dose_date = $4
+               AND status = 'pending'`,
+            [String(patientId), String(medId), String(hora), String(doseDate)]
+          )
+          .catch(() => {});
+        return { success: true, action: 'deleted' };
+      }
+
       if (existing.rowCount > 0) {
         const row = existing.rows[0];
         await client.query(
@@ -171,6 +196,18 @@ async function handleRpcCall(client, fnName, args, userId) {
            WHERE id = $4`,
           [newStatus, actor, reason, row.id]
         );
+        await client
+          .query(
+            `UPDATE approval_requests
+             SET status = 'approved', updated_at = NOW()
+             WHERE patient_id::text = $1::text
+               AND med_id::text = $2::text
+               AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+               AND dose_date = $4
+               AND status = 'pending'`,
+            [String(patientId), String(medId), String(hora), String(doseDate)]
+          )
+          .catch(() => {});
         return { success: true, id: row.id, action: 'updated' };
       }
 
@@ -193,7 +230,91 @@ async function handleRpcCall(client, fnName, args, userId) {
           reason || 'Ajuste do próprio usuário',
         ]
       );
+      await client
+        .query(
+          `UPDATE approval_requests
+           SET status = 'approved', updated_at = NOW()
+           WHERE patient_id::text = $1::text
+             AND med_id::text = $2::text
+             AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+             AND dose_date = $4
+             AND status = 'pending'`,
+          [String(patientId), String(medId), String(hora), String(doseDate)]
+        )
+        .catch(() => {});
       return { success: true, id: newId, action: 'created' };
+    }
+
+    case 'resolve_dose_approval': {
+      const reqId = args.p_request_id || args.id;
+      const decision = String(args.p_decision || args.status || 'approved').toLowerCase();
+      const actor = args.p_caregiver_id || userId || null;
+      const reqRes = await client.query(`SELECT * FROM approval_requests WHERE id::text = $1::text LIMIT 1`, [
+        String(reqId),
+      ]);
+      if (reqRes.rowCount === 0) {
+        return { success: false, error: 'Solicitação não encontrada.' };
+      }
+      const reqRow = reqRes.rows[0];
+      const finalStatus = decision === 'rejected' || decision === 'rejeitado' ? 'rejected' : 'approved';
+      await client.query(`UPDATE approval_requests SET status = $1, updated_at = NOW() WHERE id = $2`, [
+        finalStatus,
+        reqRow.id,
+      ]);
+
+      if (finalStatus === 'approved') {
+        const isUndo = reqRow.action_type === 'undo_dose' || reqRow.requested_status === 'pending';
+        if (isUndo) {
+          const delRes = await client.query(
+            `DELETE FROM historico_doses
+             WHERE user_id::text = $1::text
+               AND med_id::text = $2::text
+               AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+               AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4
+             RETURNING id`,
+            [String(reqRow.patient_id), String(reqRow.med_id), String(reqRow.hora), String(reqRow.dose_date)]
+          );
+          if (delRes.rowCount > 0) {
+            await client
+              .query(`UPDATE medicamentos SET quantidade = quantidade + 1, updated_at = NOW() WHERE id::text = $1::text`, [
+                String(reqRow.med_id),
+              ])
+              .catch(() => {});
+          }
+        } else {
+          const newDoseId = crypto.randomUUID();
+          await client.query(
+            `DELETE FROM historico_doses
+             WHERE user_id::text = $1::text
+               AND med_id::text = $2::text
+               AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+               AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4`,
+            [String(reqRow.patient_id), String(reqRow.med_id), String(reqRow.hora), String(reqRow.dose_date)]
+          );
+          await client.query(
+            `INSERT INTO historico_doses
+               (id, med_id, user_id, hora, dose_date, status, atraso_minutos, performed_by, is_retroactive, corrected_at, correction_reason, motivo)
+             VALUES ($1, $2, $3, $4, $5, 'confirmed', 0, $6, TRUE, NOW(), $7, $7)`,
+            [
+              newDoseId,
+              reqRow.med_id,
+              reqRow.patient_id,
+              reqRow.hora,
+              reqRow.dose_date,
+              actor,
+              reqRow.reason || 'Validado pelo cuidador',
+            ]
+          );
+          await client
+            .query(
+              `UPDATE medicamentos SET quantidade = GREATEST(0, quantidade - 1), updated_at = NOW() WHERE id::text = $1::text`,
+              [String(reqRow.med_id)]
+            )
+            .catch(() => {});
+        }
+      }
+
+      return { success: true, id: reqRow.id, status: finalStatus };
     }
 
     case 'list_audit_logs': {

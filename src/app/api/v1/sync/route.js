@@ -194,7 +194,7 @@ export async function GET(request) {
 
     const userId = await resolveTargetUserId(client, rawUserId, { email: rawEmail });
 
-    const [profileRes, medsRes, histRes, eventsRes, notesRes, algRes, condRes, contRes, profRes, cgRes, stockRes] =
+    const [profileRes, medsRes, histRes, eventsRes, notesRes, algRes, condRes, contRes, profRes, cgRes, stockRes, approvalRes, notifRes] =
       await Promise.all([
         client.query('SELECT * FROM profiles WHERE id = $1 LIMIT 1', [userId]),
         client.query('SELECT * FROM medicamentos WHERE user_id = $1 ORDER BY created_at ASC', [userId]),
@@ -218,6 +218,12 @@ export async function GET(request) {
           .catch(() => ({ rows: [] })),
         client
           .query('SELECT * FROM stock_movements WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200', [userId])
+          .catch(() => ({ rows: [] })),
+        client
+          .query("SELECT * FROM approval_requests WHERE patient_id = $1 ORDER BY created_at DESC LIMIT 100", [userId])
+          .catch(() => ({ rows: [] })),
+        client
+          .query('SELECT * FROM notificacoes WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [userId])
           .catch(() => ({ rows: [] })),
       ]);
 
@@ -279,6 +285,9 @@ export async function GET(request) {
         caregivers: cgRes.rows,
         caregiver_relationships: cgRes.rows,
         stock_movements: stockRes.rows,
+        approval_requests: approvalRes.rows,
+        pending_dose_requests: approvalRes.rows.filter(r => r.status === 'pending'),
+        notificacoes: notifRes.rows,
       },
       { status: 200, headers: corsHeaders }
     );
@@ -353,6 +362,11 @@ export async function POST(request) {
     ? body.healthcare_professionals
     : [];
   const stockMovements = Array.isArray(body.stock_movements) ? body.stock_movements : [];
+  const pendingDoseRequests = Array.isArray(body.pending_dose_requests)
+    ? body.pending_dose_requests
+    : Array.isArray(body.approval_requests)
+    ? body.approval_requests
+    : [];
 
   const client = await pool.connect();
   try {
@@ -481,7 +495,12 @@ export async function POST(request) {
       );
     }
 
-    for (const h of history) {
+    const isDependentPatientSync =
+      (cleanRole === 'paciente' || cleanRole === 'patient') &&
+      !body.caregiverId &&
+      body.source !== 'caregiver';
+
+    for (const h of isDependentPatientSync ? [] : history) {
       const rawMedId = h.med_id || h.medId || '';
       const resolvedMedUuid = medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
       if (!resolvedMedUuid) continue;
@@ -744,6 +763,185 @@ export async function POST(request) {
           sm.notes || sm.motivo || sm.description || sm.observacoes || null,
         ]
       );
+    }
+
+    // Processa solicitações de validação de dose (confirmação ou desfazimento) enviadas pelo paciente ao cuidador
+    if (pendingDoseRequests.length > 0) {
+      const cgLinksRes = await client
+        .query(
+          "SELECT id, caregiver_id FROM caregiver_relationships WHERE patient_id = $1 AND status = 'active'",
+          [userId]
+        )
+        .catch(() => ({ rows: [] }));
+      const patientName = user.nome || user.full_name || 'Paciente';
+
+      for (const reqItem of pendingDoseRequests) {
+        if (!reqItem || reqItem.status === 'resolved' || reqItem.status === 'approved' || reqItem.status === 'rejected') {
+          continue;
+        }
+        const rawMedId = reqItem.med_id || reqItem.medId || '';
+        const resolvedMedUuid =
+          medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : rawMedId);
+        const doseDate =
+          parsePgDate(reqItem.dose_date || reqItem.data || reqItem.date) || new Date().toISOString().slice(0, 10);
+        const rawHora = String(reqItem.hora || reqItem.horario || '08:00').trim();
+        const hora = rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora;
+        const reqStatus = normalizeDoseStatus(reqItem.requested_status || reqItem.target_status || 'confirmed');
+        const actionType =
+          reqItem.action_type || (reqStatus === 'pending' ? 'undo_dose' : 'confirm_dose');
+        const reason = String(reqItem.reason || reqItem.motivo || 'Não informado').trim() || 'Não informado';
+        const medNome = String(reqItem.med_nome || reqItem.med_name || 'Medicamento').trim();
+
+        const reqUuid = toDeterministicUuid(
+          reqItem.id || `req:${userId}:${resolvedMedUuid}:${doseDate}:${hora}:${actionType}`,
+          `req:${userId}`
+        );
+
+        // Verifica se já foi resolvida anteriormente no servidor
+        const existingReq = await client
+          .query('SELECT status, updated_at FROM approval_requests WHERE id = $1 LIMIT 1', [reqUuid])
+          .catch(() => ({ rows: [] }));
+        const alreadyExists = existingReq.rows.length > 0;
+        if (alreadyExists && existingReq.rows[0].status !== 'pending') {
+          // Se o cliente enviou um created_at mais recente (nova solicitação para o mesmo horário), reabre
+          const clientCreatedMs = reqItem.created_at_ms ? Number(reqItem.created_at_ms) : 0;
+          const serverUpdatedMs = existingReq.rows[0].updated_at
+            ? new Date(existingReq.rows[0].updated_at).getTime()
+            : 0;
+          if (!clientCreatedMs || clientCreatedMs <= serverUpdatedMs) {
+            continue;
+          }
+        }
+
+        const primaryCaregiverId = cgLinksRes.rows.find(r => r.caregiver_id)?.caregiver_id || null;
+        const metaObj = {
+          request_id: reqUuid,
+          patient_id: userId,
+          patient_name: patientName,
+          med_id: resolvedMedUuid,
+          med_nome: medNome,
+          dose_date: doseDate,
+          hora,
+          action_type: actionType,
+          requested_status: reqStatus,
+          reason,
+          motivo: reason,
+          quantidade_usada: Number(reqItem.quantidade_usada || 1) || 1,
+          status: 'pending',
+        };
+
+        await client
+          .query(
+            `INSERT INTO approval_requests (
+               id, patient_id, caregiver_id, med_id, med_nome, dose_date, hora,
+               action_type, requested_status, reason, status, metadata, updated_at
+             )
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',$11,NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               caregiver_id = COALESCE(EXCLUDED.caregiver_id, approval_requests.caregiver_id),
+               med_nome = EXCLUDED.med_nome,
+               action_type = EXCLUDED.action_type,
+               requested_status = EXCLUDED.requested_status,
+               reason = EXCLUDED.reason,
+               status = 'pending',
+               metadata = EXCLUDED.metadata,
+               updated_at = NOW()`,
+            [
+              reqUuid,
+              userId,
+              primaryCaregiverId,
+              String(resolvedMedUuid || ''),
+              medNome,
+              doseDate,
+              hora,
+              actionType,
+              reqStatus,
+              reason,
+              JSON.stringify(metaObj),
+            ]
+          )
+          .catch(() => {});
+
+        const isUndo = actionType === 'undo_dose' || reqStatus === 'pending';
+        const notifTitle = isUndo
+          ? `Solicitação para Desfazer Dose — ${medNome}`
+          : `Solicitação para Confirmar Dose — ${medNome}`;
+        const notifMsg = isUndo
+          ? `O paciente ${patientName} solicitou desfazer a dose de ${medNome} (${hora} em ${doseDate}). Motivo: "${reason}". Valide no painel do cuidador.`
+          : `O paciente ${patientName} solicitou confirmar a dose de ${medNome} (${hora} em ${doseDate}). Motivo: "${reason}". Valide no painel do cuidador.`;
+
+        // Notificação vinculada ao paciente (visível via /api/rest/v1/notificacoes?user_id=eq.<patientId>)
+        const patNotifId = toDeterministicUuid(`notif:pat:${reqUuid}`, `notif:${userId}`);
+        await client
+          .query(
+            `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
+             VALUES ($1,$2,'cuidador',$3,$4,false)
+             ON CONFLICT (id) DO UPDATE SET
+               titulo = EXCLUDED.titulo,
+               mensagem = EXCLUDED.mensagem,
+               lida = false`,
+            [patNotifId, userId, notifTitle, notifMsg]
+          )
+          .catch(() => {});
+
+        // Notificação e nota para cada cuidador ativo vinculado ao paciente
+        for (const cgRow of cgLinksRes.rows) {
+          if (!cgRow.caregiver_id) continue;
+          const cgNotifId = toDeterministicUuid(`notif:cg:${cgRow.caregiver_id}:${reqUuid}`, `notif:${cgRow.caregiver_id}`);
+          await client
+            .query(
+              `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
+               VALUES ($1,$2,'cuidador',$3,$4,false)
+               ON CONFLICT (id) DO UPDATE SET
+                 titulo = EXCLUDED.titulo,
+                 mensagem = EXCLUDED.mensagem,
+                 lida = false`,
+              [cgNotifId, cgRow.caregiver_id, notifTitle, notifMsg]
+            )
+            .catch(() => {});
+
+          const cgNoteId = toDeterministicUuid(`cgnote:${cgRow.caregiver_id}:${reqUuid}`, `cgnote:${userId}`);
+          await client
+            .query(
+              `INSERT INTO caregiver_notes (id, relationship_id, patient_id, caregiver_id, title, description, metadata)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)
+               ON CONFLICT (id) DO UPDATE SET
+                 title = EXCLUDED.title,
+                 description = EXCLUDED.description,
+                 metadata = EXCLUDED.metadata`,
+              [
+                cgNoteId,
+                cgRow.id,
+                userId,
+                cgRow.caregiver_id,
+                notifTitle,
+                notifMsg,
+                JSON.stringify(metaObj),
+              ]
+            )
+            .catch(() => {});
+        }
+
+        // Registra em audit_logs para histórico de auditoria do cuidador
+        if (!alreadyExists) {
+          const auditId = toDeterministicUuid(`audit:${reqUuid}`, `audit:${userId}`);
+          await client
+            .query(
+              `INSERT INTO audit_logs (id, patient_id, performed_by, action, new_value, reason)
+               VALUES ($1,$2,$3,$4,$5,$6)
+               ON CONFLICT (id) DO NOTHING`,
+              [
+                auditId,
+                userId,
+                userId,
+                isUndo ? 'dose_undo_requested' : 'dose_confirm_requested',
+                JSON.stringify(metaObj),
+                reason,
+              ]
+            )
+            .catch(() => {});
+        }
+      }
     }
 
     await client.query('COMMIT');

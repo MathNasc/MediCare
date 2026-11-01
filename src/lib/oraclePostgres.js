@@ -117,6 +117,31 @@ export async function ensureOraclePostgresSchema(client) {
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS public.notificacoes (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+        tipo text NOT NULL,
+        titulo text NOT NULL,
+        mensagem text NOT NULL,
+        lida boolean DEFAULT false,
+        created_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS public.approval_requests (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        patient_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+        caregiver_id uuid,
+        med_id text,
+        med_nome text,
+        dose_date text,
+        hora text,
+        action_type text NOT NULL,
+        requested_status text NOT NULL,
+        reason text NOT NULL,
+        status text DEFAULT 'pending',
+        metadata jsonb DEFAULT '{}'::jsonb,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
     `).catch(() => {});
     schemaInitialized = true;
     return;
@@ -421,6 +446,33 @@ export async function ensureOraclePostgresSchema(client) {
       is_generic BOOLEAN DEFAULT TRUE,
       is_similar BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS notificacoes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      titulo TEXT NOT NULL,
+      mensagem TEXT NOT NULL,
+      lida BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS approval_requests (
+      id TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL,
+      caregiver_id TEXT,
+      med_id TEXT,
+      med_nome TEXT,
+      dose_date TEXT,
+      hora TEXT,
+      action_type TEXT NOT NULL,
+      requested_status TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
   schemaInitialized = true;

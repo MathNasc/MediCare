@@ -91,6 +91,7 @@ public class MainActivity extends Activity {
     private JSONArray conditions;
     private JSONArray contacts;
     private JSONArray doseLogs;
+    private JSONArray pendingDoseRequests = new JSONArray();
     private JSONArray events;
     private JSONArray aiMessages = new JSONArray();
     private JSONArray meds;
@@ -1414,6 +1415,7 @@ public class MainActivity extends Activity {
         this.profile = createEmptyProfile();
         this.meds = new JSONArray();
         this.doseLogs = new JSONArray();
+        this.pendingDoseRequests = new JSONArray();
         this.events = new JSONArray();
         this.calNotes = new JSONObject();
         this.calNotesList = new JSONArray();
@@ -1516,6 +1518,7 @@ public class MainActivity extends Activity {
             snap.put("professionals", this.professionals != null ? new JSONArray(this.professionals.toString()) : new JSONArray());
             snap.put("caregivers", this.caregivers != null ? new JSONArray(this.caregivers.toString()) : new JSONArray());
             snap.put("ai_messages", this.aiMessages != null ? new JSONArray(this.aiMessages.toString()) : new JSONArray());
+            snap.put("pending_dose_requests", this.pendingDoseRequests != null ? new JSONArray(this.pendingDoseRequests.toString()) : new JSONArray());
             snap.put("onboarding_completed", this.prefs.getBoolean("onboarding_completed", false));
             this.prefs.edit().putString("user_snapshot_" + emailKey, snap.toString()).apply();
         } catch (Exception ignored) {}
@@ -1554,6 +1557,7 @@ public class MainActivity extends Activity {
             this.professionals = snap.optJSONArray("professionals") != null ? snap.optJSONArray("professionals") : new JSONArray();
             this.caregivers = snap.optJSONArray("caregivers") != null ? snap.optJSONArray("caregivers") : new JSONArray();
             this.aiMessages = snap.optJSONArray("ai_messages") != null ? snap.optJSONArray("ai_messages") : new JSONArray();
+            this.pendingDoseRequests = snap.optJSONArray("pending_dose_requests") != null ? snap.optJSONArray("pending_dose_requests") : new JSONArray();
             this.prefs.edit().putBoolean("onboarding_completed", snap.optBoolean("onboarding_completed", true)).apply();
             return true;
         } catch (Exception e) {
@@ -1663,6 +1667,7 @@ public class MainActivity extends Activity {
                 this.professionals = new JSONArray(this.prefs.getString("professionals", "[]"));
                 this.caregivers = new JSONArray(this.prefs.getString("caregivers", "[]"));
                 this.aiMessages = new JSONArray(this.prefs.getString("ai_messages", "[]"));
+                this.pendingDoseRequests = new JSONArray(this.prefs.getString("pending_dose_requests", "[]"));
 
                 if ("maria.silva@email.com".equalsIgnoreCase(this.profile.optString("email", ""))) {
                     this.isLoggedIn = false;
@@ -1733,6 +1738,7 @@ public class MainActivity extends Activity {
             .putString("professionals", this.professionals.toString())
             .putString("caregivers", this.caregivers.toString())
             .putString("ai_messages", this.aiMessages.toString())
+            .putString("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests.toString() : "[]")
             .apply();
         if (this.isLoggedIn) {
             saveUserSnapshot();
@@ -2323,7 +2329,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.6.1 • Produção");
+        versionBadge.setText("Versão 2.6.3 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -2820,8 +2826,277 @@ public class MainActivity extends Activity {
         return "continuous";
     }
 
+    private JSONObject getPendingCaregiverRequest(String medId, String dateStr, String horaStr) {
+        if (this.pendingDoseRequests == null || medId == null || medId.isEmpty()) return null;
+        String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : todayIso());
+        String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "08:00");
+        for (int i = this.pendingDoseRequests.length() - 1; i >= 0; i--) {
+            JSONObject req = this.pendingDoseRequests.optJSONObject(i);
+            if (req == null) continue;
+            String st = req.optString("status", "pending").trim().toLowerCase(Locale.ROOT);
+            if (!"pending".equals(st) && !"pendente".equals(st)) continue;
+            String rDate = req.optString("dose_date", req.optString("data", "")).trim();
+            if (rDate.length() >= 10) rDate = rDate.substring(0, 10);
+            String rHora = req.optString("hora", req.optString("horario", "")).trim();
+            if (rHora.length() >= 5 && rHora.charAt(2) == ':') rHora = rHora.substring(0, 5);
+            if (doesDoseLogMatchMed(req, medId) && normDate.equals(rDate) && normHora.equals(rHora)) {
+                return req;
+            }
+        }
+        return null;
+    }
+
+    private void submitCaregiverDoseRequest(JSONObject med, String dateStr, String horaStr, String targetStatus, String reasonText, int qtyUsed) {
+        try {
+            if (med == null) return;
+            String medId = med.optString("id", "").trim();
+            String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : todayIso());
+            String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "08:00");
+            String normTarget = normalizeDoseStatusLocal(targetStatus);
+            boolean isUndo = "pendente".equals(normTarget);
+            String actionType = isUndo ? "undo_dose" : "confirm_dose";
+            String reqServerStatus = isUndo ? "pending" : "confirmed";
+            String patId = resolveCurrentAccountUserId();
+            String reqId = UUID.nameUUIDFromBytes(("req:" + patId + ":" + medId + ":" + normDate + ":" + normHora + ":" + actionType).getBytes(StandardCharsets.UTF_8)).toString();
+
+            JSONArray cleanedReqs = new JSONArray();
+            if (this.pendingDoseRequests != null) {
+                for (int i = 0; i < this.pendingDoseRequests.length(); i++) {
+                    JSONObject existing = this.pendingDoseRequests.optJSONObject(i);
+                    if (existing == null) continue;
+                    String eDate = existing.optString("dose_date", existing.optString("data", "")).trim();
+                    if (eDate.length() >= 10) eDate = eDate.substring(0, 10);
+                    String eHora = existing.optString("hora", existing.optString("horario", "")).trim();
+                    if (eHora.length() >= 5 && eHora.charAt(2) == ':') eHora = eHora.substring(0, 5);
+                    if (doesDoseLogMatchMed(existing, medId) && normDate.equals(eDate) && normHora.equals(eHora)) {
+                        continue;
+                    }
+                    cleanedReqs.put(existing);
+                }
+            }
+
+            String nowIso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(new Date());
+            JSONObject reqObj = new JSONObject();
+            reqObj.put("id", reqId);
+            reqObj.put("patient_id", patId);
+            reqObj.put("patient_name", this.profile != null ? this.profile.optString("nome", "Paciente") : "Paciente");
+            reqObj.put("med_id", medId);
+            reqObj.put("med_nome", (med.optString("nome", "Medicamento") + " " + med.optString("dosagem", "")).trim());
+            reqObj.put("dose_date", normDate);
+            reqObj.put("data", normDate);
+            reqObj.put("hora", normHora);
+            reqObj.put("horario", normHora);
+            reqObj.put("action_type", actionType);
+            reqObj.put("requested_status", reqServerStatus);
+            reqObj.put("reason", reasonText);
+            reqObj.put("motivo", reasonText);
+            reqObj.put("quantidade_usada", Math.max(1, qtyUsed));
+            reqObj.put("status", "pending");
+            reqObj.put("created_at", nowIso);
+            reqObj.put("created_at_ms", System.currentTimeMillis());
+
+            cleanedReqs.put(reqObj);
+            this.pendingDoseRequests = cleanedReqs;
+
+            saveAll();
+            render();
+            Toast.makeText(
+                this,
+                isUndo
+                    ? "📩 Solicitação de desfazimento enviada ao cuidador para validação!"
+                    : "📩 Solicitação de confirmação enviada ao cuidador para validação!",
+                1
+            ).show();
+        } catch (Exception ignored) {}
+    }
+
+    private void showCaregiverDoseRequestDialog(final JSONObject med, final String dateStr, final String horaStr, final String targetStatus) {
+        if (med == null) return;
+        final String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : todayIso());
+        final String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "08:00");
+        final String normTarget = normalizeDoseStatusLocal(targetStatus);
+        final boolean isUndo = "pendente".equals(normTarget);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        root.setPadding(dp(20), dp(20), dp(20), dp(18));
+
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(0, 0, 0, dp(12));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(isUndo ? "🔔 Solicitar Desfazimento ao Cuidador" : "🔔 Solicitar Confirmação ao Cuidador");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(17.0f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hdr.addView(tvTitle);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(14.0f));
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 16, 0, 0));
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(32), dp(32)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        LinearLayout infoBanner = new LinearLayout(this);
+        infoBanner.setOrientation(1);
+        int bannerBg = Color.parseColor("#1AF59E0B");
+        int bannerStroke = Color.parseColor("#4DF59E0B");
+        infoBanner.setBackground(shape(bannerBg, 14, bannerStroke, 1));
+        infoBanner.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams ibLp = new LinearLayout.LayoutParams(-1, -2);
+        ibLp.bottomMargin = dp(12);
+        infoBanner.setLayoutParams(ibLp);
+
+        TextView tvBannerTxt = new TextView(this);
+        tvBannerTxt.setText(isUndo
+            ? "⚠️ No perfil Paciente, desfazer uma dose depende da validação do seu cuidador.\nInforme o motivo abaixo para notificar seu cuidador:"
+            : "⚠️ No perfil Paciente, a confirmação de dose depende da validação do seu cuidador.\nInforme o motivo abaixo para notificar seu cuidador:");
+        tvBannerTxt.setTextColor(Color.parseColor("#FBBF24"));
+        tvBannerTxt.setTextSize(sp(12.5f));
+        tvBannerTxt.setTypeface(null, 1);
+        tvBannerTxt.setLineSpacing(dp(2), 1.05f);
+        infoBanner.addView(tvBannerTxt);
+        root.addView(infoBanner);
+
+        LinearLayout medSummary = new LinearLayout(this);
+        medSummary.setOrientation(1);
+        medSummary.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        medSummary.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams msLp = new LinearLayout.LayoutParams(-1, -2);
+        msLp.bottomMargin = dp(12);
+        medSummary.setLayoutParams(msLp);
+
+        TextView tvMedSummary = new TextView(this);
+        tvMedSummary.setText("💊 " + med.optString("nome", "Medicamento") + " (" + med.optString("dosagem", "") + ") • ⏰ " + normHora + " (" + normDate + ")");
+        tvMedSummary.setTextColor(this.cTextMain);
+        tvMedSummary.setTextSize(sp(13.5f));
+        tvMedSummary.setTypeface(null, 1);
+        medSummary.addView(tvMedSummary);
+        root.addView(medSummary);
+
+        JSONObject existingPending = getPendingCaregiverRequest(med.optString("id"), normDate, normHora);
+        String defaultReason = existingPending != null ? existingPending.optString("reason", "") : "";
+
+        final EditText reasonInput = createInput(
+            isUndo ? "Motivo do desfazimento (obrigatório)" : "Motivo da confirmação (obrigatório)",
+            defaultReason
+        );
+        root.addView(reasonInput);
+
+        TextView tvSuggestionsLbl = new TextView(this);
+        tvSuggestionsLbl.setText("Sugestões rápidas de motivo (toque para preencher):");
+        tvSuggestionsLbl.setTextColor(this.cTextMuted);
+        tvSuggestionsLbl.setTextSize(sp(11.5f));
+        tvSuggestionsLbl.setPadding(0, 0, 0, dp(6));
+        root.addView(tvSuggestionsLbl);
+
+        HorizontalScrollView chipScroll = new HorizontalScrollView(this);
+        LinearLayout chipRow = new LinearLayout(this);
+        chipRow.setOrientation(0);
+        chipRow.setPadding(0, 0, 0, dp(8));
+        String[] suggestions = isUndo
+            ? new String[]{"Marquei por engano", "Ainda não tomei", "Confundi o medicamento", "Horário incorreto"}
+            : new String[]{"Tomei no horário correto", "Tomei com atraso", "Tomei adiantado", "Confirmando dose anterior"};
+        for (int i = 0; i < suggestions.length; i++) {
+            final String sug = suggestions[i];
+            TextView chip = new TextView(this);
+            chip.setText(sug);
+            chip.setTextColor(this.cPrimary);
+            chip.setTextSize(sp(12.0f));
+            chip.setTypeface(null, 1);
+            chip.setBackground(shape(this.cPrimaryLight, 12, this.cPrimary, 1));
+            chip.setPadding(dp(10), dp(6), dp(10), dp(6));
+            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-2, -2);
+            cLp.rightMargin = dp(6);
+            chip.setLayoutParams(cLp);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    reasonInput.setText(sug);
+                    reasonInput.setSelection(sug.length());
+                }
+            });
+            chipRow.addView(chip);
+        }
+        chipScroll.addView(chipRow);
+        root.addView(chipScroll);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(0);
+        btnRow.setGravity(16);
+        LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(-1, -2);
+        brLp.topMargin = dp(10);
+        btnRow.setLayoutParams(brLp);
+
+        TextView btnCancel = new TextView(this);
+        btnCancel.setText("Cancelar");
+        btnCancel.setTextColor(this.cTextMain);
+        btnCancel.setTextSize(sp(14.0f));
+        btnCancel.setTypeface(null, 1);
+        btnCancel.setGravity(17);
+        btnCancel.setBackground(shape(this.cBgMain, 13, this.cBorder, 1));
+        btnCancel.setPadding(dp(14), dp(13), dp(14), dp(13));
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        cLp.rightMargin = dp(10);
+        btnCancel.setLayoutParams(cLp);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        btnRow.addView(btnCancel);
+
+        TextView btnSend = new TextView(this);
+        btnSend.setText("📩 Enviar ao Cuidador");
+        btnSend.setTextColor(Color.WHITE);
+        btnSend.setTextSize(sp(14.0f));
+        btnSend.setTypeface(null, 1);
+        btnSend.setGravity(17);
+        btnSend.setBackground(shape(isUndo ? this.cWarning : this.cPrimary, 13, 0, 0));
+        btnSend.setPadding(dp(14), dp(13), dp(14), dp(13));
+        btnSend.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.3f));
+        btnSend.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String typedReason = reasonInput.getText().toString().trim();
+                if (typedReason.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Por favor, informe o motivo para enviar ao cuidador.", 0).show();
+                    return;
+                }
+                dialog.dismiss();
+                submitCaregiverDoseRequest(med, normDate, normHora, normTarget, typedReason, 1);
+            }
+        });
+        btnRow.addView(btnSend);
+
+        root.addView(btnRow);
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
     private void registerDose(JSONObject med, String dateStr, String horaStr, String targetStatus) {
         try {
+            if (isPatientProfileRole()) {
+                showCaregiverDoseRequestDialog(med, dateStr, horaStr, targetStatus);
+                return;
+            }
             String medId = med.optString("id");
             String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : todayIso());
             String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "08:00");
@@ -2960,12 +3235,20 @@ public class MainActivity extends Activity {
 
     private void handleDoseConfirmWithWarning(final JSONObject med, final String dateStr, final String horaStr, final boolean isSnooze) {
         try {
+            if (isSnooze) {
+                Toast.makeText(this, "⏰ Lembrete de " + med.optString("nome") + " em 15 minutos", 0).show();
+                return;
+            }
+            if (isPatientProfileRole()) {
+                showCaregiverDoseRequestDialog(med, dateStr, horaStr, "tomado");
+                return;
+            }
             String[] parts = horaStr.split(":");
             int schedMin = Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
             Calendar cal = Calendar.getInstance();
             int nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
             int diffMin = schedMin - nowMin;
-            if (Math.abs(diffMin) > 60 && !isSnooze) {
+            if (Math.abs(diffMin) > 60) {
                 int hrs = Math.abs(diffMin) / 60;
                 int mins = Math.abs(diffMin) % 60;
                 String timeStr = (hrs > 0 ? hrs + "h " : "") + mins + "min";
@@ -2979,17 +3262,17 @@ public class MainActivity extends Activity {
                 });
                 return;
             }
-            if (isSnooze) {
-                Toast.makeText(this, "⏰ Lembrete de " + med.optString("nome") + " em 15 minutos", 0).show();
-            } else {
-                registerDose(med, dateStr, horaStr, "tomado");
-            }
+            registerDose(med, dateStr, horaStr, "tomado");
         } catch (Exception e) {
             registerDose(med, dateStr, horaStr, "tomado");
         }
     }
 
     private void showUndoConfirmDialog(final JSONObject med, final String dateStr, final String horaStr) {
+        if (isPatientProfileRole()) {
+            showCaregiverDoseRequestDialog(med, dateStr, horaStr, "pendente");
+            return;
+        }
         String msg = "A dose de " + med.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque.";
         showStyledConfirmDialog("↩ Desfazer confirmação?", msg, "Desfazer", "Cancelar", this.cWarning, new Runnable() {
             @Override
@@ -3216,15 +3499,30 @@ public class MainActivity extends Activity {
             heroTop.addView(hTime);
             heroCard.addView(heroTop);
 
+            JSONObject heroPendingReq = getPendingCaregiverRequest(heroMed.optString("id"), today, heroHora);
+            if (heroPendingReq != null) {
+                TextView tvReqBanner = new TextView(this);
+                tvReqBanner.setText("⏳ Aguardando validação do cuidador • Motivo: \"" + heroPendingReq.optString("reason", "") + "\"");
+                tvReqBanner.setTextColor(Color.parseColor("#FBBF24"));
+                tvReqBanner.setTextSize(sp(12.0f));
+                tvReqBanner.setTypeface(null, 1);
+                tvReqBanner.setBackground(shape(Color.parseColor("#1AF59E0B"), 10, Color.parseColor("#4DF59E0B"), 1));
+                tvReqBanner.setPadding(dp(12), dp(8), dp(12), dp(8));
+                LinearLayout.LayoutParams rbLp = new LinearLayout.LayoutParams(-1, -2);
+                rbLp.topMargin = dp(12);
+                tvReqBanner.setLayoutParams(rbLp);
+                heroCard.addView(tvReqBanner);
+            }
+
             if (!isDone) {
                 TextView btnConfirm = new TextView(this);
-                btnConfirm.setText("✓  Já tomei");
+                btnConfirm.setText(heroPendingReq != null ? "🔔  Atualizar solicitação ao cuidador" : "✓  Já tomei");
                 btnConfirm.setTextColor(-1);
                 btnConfirm.setTextSize(sp(16.0f));
                 btnConfirm.setTypeface(null, 1);
                 btnConfirm.setGravity(17);
                 btnConfirm.setPadding(dp(16), dp(14), dp(16), dp(14));
-                btnConfirm.setBackground(shape(Color.parseColor("#16A34A"), 14, 0, 0));
+                btnConfirm.setBackground(shape(heroPendingReq != null ? this.cWarning : Color.parseColor("#16A34A"), 14, 0, 0));
                 LinearLayout.LayoutParams bcLp = new LinearLayout.LayoutParams(-1, -2);
                 bcLp.topMargin = dp(14);
                 bcLp.bottomMargin = dp(8);
@@ -3255,7 +3553,7 @@ public class MainActivity extends Activity {
                 heroCard.addView(btnSnooze);
             } else {
                 TextView btnHeroUndo = new TextView(this);
-                btnHeroUndo.setText("↩  Desfazer confirmação");
+                btnHeroUndo.setText(heroPendingReq != null ? "🔔  Atualizar pedido de desfazimento" : "↩  Desfazer confirmação");
                 btnHeroUndo.setTextColor(this.cTextMuted);
                 btnHeroUndo.setTextSize(sp(13.0f));
                 btnHeroUndo.setTypeface(null, 1);
@@ -3504,15 +3802,25 @@ public class MainActivity extends Activity {
                 mSubTv.setTextColor(this.cTextMuted);
                 mSubTv.setTextSize(sp(12.0f));
                 dInfo.addView(mSubTv);
+                JSONObject tlPendingReq = getPendingCaregiverRequest(dMed.optString("id"), today, dHora);
+                if (tlPendingReq != null) {
+                    TextView tvTlReq = new TextView(this);
+                    tvTlReq.setText("⏳ Aguardando cuidador (" + tlPendingReq.optString("reason", "") + ")");
+                    tvTlReq.setTextColor(Color.parseColor("#FBBF24"));
+                    tvTlReq.setTextSize(sp(11.0f));
+                    tvTlReq.setTypeface(null, 1);
+                    tvTlReq.setPadding(0, dp(3), 0, 0);
+                    dInfo.addView(tvTlReq);
+                }
                 dTop.addView(dInfo);
 
                 if (!isConfirmed) {
                     TextView actBtn = new TextView(this);
-                    actBtn.setText("Tomar");
+                    actBtn.setText(tlPendingReq != null ? "⏳ Pendente" : "Tomar");
                     actBtn.setTextColor(-1);
                     actBtn.setTextSize(sp(12.0f));
                     actBtn.setTypeface(null, 1);
-                    actBtn.setBackground(shape(isLateDose ? this.cDanger : Color.parseColor("#16A34A"), 10, 0, 0));
+                    actBtn.setBackground(shape(tlPendingReq != null ? this.cWarning : (isLateDose ? this.cDanger : Color.parseColor("#16A34A")), 10, 0, 0));
                     actBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
                     actBtn.setOnClickListener(new View.OnClickListener() {
                         @Override
@@ -3523,11 +3831,11 @@ public class MainActivity extends Activity {
                     dTop.addView(actBtn);
                 } else {
                     TextView undoBtn = new TextView(this);
-                    undoBtn.setText("↩ Desfazer");
-                    undoBtn.setTextColor(this.cTextMuted);
+                    undoBtn.setText(tlPendingReq != null ? "⏳ Pendente" : "↩ Desfazer");
+                    undoBtn.setTextColor(tlPendingReq != null ? Color.parseColor("#FBBF24") : this.cTextMuted);
                     undoBtn.setTextSize(sp(11.0f));
                     undoBtn.setTypeface(null, 1);
-                    undoBtn.setBackground(shape(this.cSurface, 8, this.cBorder, 1));
+                    undoBtn.setBackground(shape(this.cSurface, 8, tlPendingReq != null ? Color.parseColor("#4DF59E0B") : this.cBorder, 1));
                     undoBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
                     undoBtn.setOnClickListener(new View.OnClickListener() {
                         @Override
@@ -4019,7 +4327,8 @@ public class MainActivity extends Activity {
         box.addView(qtyInput);
 
         sv.addView(box);
-        showStyledFormModal("🆘 Registrar Uso SOS — " + med.optString("nome"), sv, "Confirmar Uso SOS", "Cancelar", this.cPrimary, new Runnable() {
+        String sosConfirmText = isPatientProfileRole() ? "📩 Solicitar ao Cuidador" : "Confirmar Uso SOS";
+        showStyledFormModal("🆘 Registrar Uso SOS — " + med.optString("nome"), sv, sosConfirmText, "Cancelar", this.cPrimary, new Runnable() {
             @Override
             public void run() {
                 try {
@@ -4028,6 +4337,11 @@ public class MainActivity extends Activity {
                     String mot = reasonInput.getText().toString().trim();
                     int qUsed = Integer.parseInt(qtyInput.getText().toString().trim().isEmpty() ? "1" : qtyInput.getText().toString().trim());
                     String today = todayIso();
+                    if (isPatientProfileRole()) {
+                        String sosReason = mot.isEmpty() ? "Uso SOS solicitado pelo paciente" : ("Uso SOS: " + mot);
+                        submitCaregiverDoseRequest(med, today, h, "tomado", sosReason, qUsed);
+                        return;
+                    }
                     JSONObject log = new JSONObject();
                     log.put("id", "sos-" + System.currentTimeMillis());
                     log.put("med_id", med.optString("id"));
@@ -6721,9 +7035,20 @@ public class MainActivity extends Activity {
                 tvM.setTypeface(null, 1);
                 dCard.addView(tvM);
 
+                JSONObject calPendingReq = getPendingCaregiverRequest(mId, dateStr, hStr);
+                if (calPendingReq != null) {
+                    TextView tvCalPending = new TextView(this);
+                    tvCalPending.setText("⏳ Aguardando cuidador • Motivo: " + calPendingReq.optString("reason", ""));
+                    tvCalPending.setTextColor(Color.parseColor("#FBBF24"));
+                    tvCalPending.setTextSize(sp(11.5f));
+                    tvCalPending.setTypeface(null, 1);
+                    tvCalPending.setPadding(0, dp(4), 0, 0);
+                    dCard.addView(tvCalPending);
+                }
+
                 if (!isTaken && (isToday || isPast)) {
                     TextView btnRetro = new TextView(this);
-                    btnRetro.setText(isPast ? "🕐 Confirmar retroativamente" : "✓ Confirmar dose");
+                    btnRetro.setText(calPendingReq != null ? "🔔 Atualizar solicitação ao cuidador" : (isPast ? "🕐 Confirmar retroativamente" : "✓ Confirmar dose"));
                     btnRetro.setTextColor(this.cWarning);
                     btnRetro.setTextSize(sp(12.0f));
                     btnRetro.setTypeface(null, 1);
@@ -6731,15 +7056,19 @@ public class MainActivity extends Activity {
                     btnRetro.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View v) {
-                            registerDose(m, dateStr, hStr, "tomado");
                             dlg.dismiss();
-                            showDayPanelDialog(dateStr);
+                            if (isPatientProfileRole()) {
+                                showCaregiverDoseRequestDialog(m, dateStr, hStr, "tomado");
+                            } else {
+                                registerDose(m, dateStr, hStr, "tomado");
+                                showDayPanelDialog(dateStr);
+                            }
                         }
                     });
                     dCard.addView(btnRetro);
                 } else if (isTaken) {
                     TextView btnUndoCal = new TextView(this);
-                    btnUndoCal.setText("↩ Desfazer confirmação");
+                    btnUndoCal.setText(calPendingReq != null ? "🔔 Atualizar pedido de desfazimento" : "↩ Desfazer confirmação");
                     btnUndoCal.setTextColor(this.cTextMuted);
                     btnUndoCal.setTextSize(sp(12.0f));
                     btnUndoCal.setTypeface(null, 1);
@@ -11712,7 +12041,59 @@ public class MainActivity extends Activity {
             if (mergeGenericEntityArray(resp.optJSONArray("professionals"), "professionals", "prof", "healthcare_professionals")) changed = true;
             if (mergeGenericEntityArray(resp.optJSONArray("caregivers"), "caregivers", "cg", "caregiver_relationships")) changed = true;
 
+            if (reconcilePendingDoseRequests(resp.optJSONArray("approval_requests"))) {
+                changed = true;
+            }
+
             return changed;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean reconcilePendingDoseRequests(JSONArray remoteApprovals) {
+        try {
+            if (this.pendingDoseRequests == null) {
+                this.pendingDoseRequests = new JSONArray();
+            }
+            Set<String> resolvedIds = new HashSet<>();
+            if (remoteApprovals != null) {
+                for (int i = 0; i < remoteApprovals.length(); i++) {
+                    JSONObject ra = remoteApprovals.optJSONObject(i);
+                    if (ra == null) continue;
+                    String rId = optCleanString(ra, "id", "").toLowerCase(Locale.ROOT);
+                    String rSt = optCleanString(ra, "status", "pending").toLowerCase(Locale.ROOT);
+                    if (!rId.isEmpty() && (!"pending".equals(rSt) && !"pendente".equals(rSt))) {
+                        resolvedIds.add(rId);
+                    }
+                }
+            }
+            JSONArray nextReqs = new JSONArray();
+            for (int i = 0; i < this.pendingDoseRequests.length(); i++) {
+                JSONObject req = this.pendingDoseRequests.optJSONObject(i);
+                if (req == null) continue;
+                String reqId = optCleanString(req, "id", "").toLowerCase(Locale.ROOT);
+                if (!reqId.isEmpty() && resolvedIds.contains(reqId)) {
+                    continue;
+                }
+                String mId = optCleanString(req, "med_id", "");
+                String d = optCleanString(req, "dose_date", optCleanString(req, "data", ""));
+                if (d.length() >= 10) d = d.substring(0, 10);
+                String h = optCleanString(req, "hora", optCleanString(req, "horario", ""));
+                if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
+                String reqTarget = normalizeDoseStatusLocal(req.optString("requested_status", "confirmed"));
+                String curDoseSt = getDoseStatus(mId, d, h);
+                if (reqTarget.equals(curDoseSt)) {
+                    // O cuidador já validou a alteração (a dose agora está no status solicitado)
+                    continue;
+                }
+                nextReqs.put(req);
+            }
+            boolean diff = !nextReqs.toString().equals(this.pendingDoseRequests.toString());
+            if (diff) {
+                this.pendingDoseRequests = nextReqs;
+            }
+            return diff;
         } catch (Exception e) {
             return false;
         }
@@ -11828,6 +12209,8 @@ public class MainActivity extends Activity {
             jSONObject.put("professionals", this.professionals);
             jSONObject.put("caregiver_relationships", this.caregivers);
             jSONObject.put("caregivers", this.caregivers);
+            jSONObject.put("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
+            jSONObject.put("approval_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
             byte[] bytes = jSONObject.toString().getBytes(StandardCharsets.UTF_8);
             OutputStream outputStream = httpURLConnection.getOutputStream();
             outputStream.write(bytes);
