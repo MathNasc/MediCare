@@ -1,40 +1,46 @@
-# 💊 MediCare — Monorepo de Saúde
+# 💊 MediCare — Ecossistema de Saúde e Cuidado Compartilhado
 
-O **MediCare** é uma solução completa de saúde focada no controle de adesão medicamentosa e cuidado compartilhado.
+O **MediCare** é uma plataforma integrada de saúde voltada ao controle de adesão medicamentosa e ao acompanhamento compartilhado entre pacientes e cuidadores.
 
-A aplicação principal e ativa em desenvolvimento é o **MediCare Paciente Android**, integrada a um backend robusto em **Next.js API Routes** e banco de dados **PostgreSQL na Oracle Cloud**. A estrutura do monorepo está preparada para a implementação do **MediCare Cuidador Web**.
+O ecossistema em produção é composto por duas aplicações oficiais que compartilham o mesmo backend **Next.js (App Router)** e banco de dados **PostgreSQL 16 na Oracle Cloud** (100% self-hosted):
+1. **MediCare Paciente Android** (`apps/paciente-android` & `src-apk/` → `MediCare-Paciente.apk`): Aplicativo nativo Android para pacientes (independentes ou acompanhados).
+2. **MediCare Cuidador Web** (`src/app/cuidador/page.jsx`): Aplicação web responsiva oficial para cuidadores e familiares autorizados.
 
 ---
 
-## 🏛️ Estrutura do Monorepo
+## 🏛️ Estrutura do Repositório
 
 ```text
 MediCare/
 ├── apps/
-│   ├── paciente-android/       # Aplicativo Android nativo (Kotlin / Jetpack Compose) [ATIVO]
-│   └── cuidador-web/           # Futura aplicação PWA Cuidador (Etapas 2, 3 e 4)
+│   └── paciente-android/       # Aplicativo Android nativo (Kotlin / Jetpack Compose) [ATIVO]
 ├── src-apk/                    # Código Java, Manifesto e Recursos de empacotamento Android
 ├── src/
 │   ├── app/
-│   │   ├── api/                # Endpoints REST compartilhados (/v1, /auth, /apk, /ai)
-│   │   ├── layout.jsx          # Layout do portal de status e distribuição
-│   │   └── page.jsx            # Portal de distribuição e download do APK
-│   ├── lib/                    # Serviços de domínio, banco de dados e utilitários
-│   ├── data/                   # Catálogo de medicamentos
-│   └── __tests__/              # Testes automatizados de regras de negócio (Jest)
+│   │   ├── api/                # Endpoints REST/RPC compartilhados (/auth/v1, /rest/v1, /v1/sync, /apk, /ai)
+│   │   ├── cuidador/
+│   │   │   └── page.jsx        # Aplicação oficial MediCare Cuidador Web (Next.js) [ATIVA]
+│   │   ├── layout.jsx          # Layout raiz do portal e aplicação web
+│   │   └── page.jsx            # Portal institucional e download do APK (/ e /?portal=1)
+│   ├── lib/                    # Autenticação (HttpOnly/Bearer + CSRF), PostgreSQL e serviços de domínio
+│   ├── data/                   # Catálogo farmacêutico de medicamentos
+│   └── __tests__/              # Testes automatizados de segurança, autorização e domínio (Jest)
 ├── database/
-│   └── migrations/             # Esquemas SQL e migrações do PostgreSQL
-├── oracle-migration/           # Scripts de infraestrutura, Docker e deploy na Oracle Cloud
-├── docs/                       # Documentação técnica e planos de arquitetura
+│   └── migrations/             # Esquemas SQL versionados (01, 02 e 03_incremental_compatibility.sql)
+├── oracle-migration/           # Scripts de infraestrutura, Docker, Nginx e deploy na Oracle Cloud
+├── docs/                       # Documentação técnica consolidada
 │   ├── ARCHITECTURE.md         # Arquitetura e separação de responsabilidades
-│   ├── DEVELOPMENT.md          # Guia de desenvolvimento e comandos
-│   └── MEDICARE_CUIDADOR_PLAN.md # Visão e roadmap do MediCare Cuidador
+│   ├── API_CONTRACT.md         # Contratos REST, RPC, Autenticação Cookie/Bearer e CSRF
+│   ├── DATA_MODEL.md           # Dicionário de dados PostgreSQL e estados de administração
+│   ├── BACKEND_AUDIT.md        # Auditoria de endpoints, segurança e migrações
+│   └── DEPLOYMENT_AND_TESTS.md # Procedimentos de migração, build, testes e deploy
 ├── scripts/
-│   └── rebuild_and_sign_apk.sh # Script automatizado de compilação e assinatura do APK
-├── public/                     # Ícones e imagens base do aplicativo
-├── MediCare-Paciente.apk       # Instalador APK de debug final, validado e assinado na raiz
-├── AGENTS.md                   # Regras de desenvolvimento para agentes de IA
-└── README.md                   # Visão geral do repositório
+│   ├── run_migrations.js       # Verificação e execução controlada de migrações versionadas
+│   └── rebuild_and_sign_apk.sh # Pipeline automatizado de compilação e assinatura do APK
+├── public/                     # Manifesto, ícones e assets públicos
+├── MediCare-Paciente.apk       # Instalador APK final, validado e assinado na raiz
+├── AGENTS.md                   # Diretrizes de arquitetura e manutenção do repositório
+└── README.md                   # Visão geral do projeto
 ```
 
 ---
@@ -51,7 +57,21 @@ O arquivo `MediCare-Paciente.apk` atualizado e validado é gerado diretamente na
 
 ---
 
-## 🚀 Executando o Backend Localmente
+## 🗄️ Banco de Dados e Migrações Versionadas
+
+A verificação de conexão, a checagem de versão do esquema (`schema_migrations`) e a execução de migrações são estritamente separadas do fluxo de requisições HTTP:
+
+```bash
+# Verificar estado do esquema (somente leitura)
+node scripts/run_migrations.js --check
+
+# Aplicar migrações pendentes (somente com autorização explícita)
+node scripts/run_migrations.js --apply
+```
+
+---
+
+## 🚀 Executando Localmente
 
 ### 1. Instalação de Dependências
 
@@ -65,8 +85,9 @@ Configure o `.env.local` na raiz com base no `.env.example`:
 
 ```env
 DATABASE_URL=postgresql://medicare_app:sua_senha@127.0.0.1:5436/medicare_db
+ORACLE_JWT_SECRET=segredo-hmac-sha256-producao
 GEMINI_API_KEY=sua-chave-api-gemini
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=https://medicare-cuidador.duckdns.org
 ```
 
 ### 3. Iniciar Servidor de Desenvolvimento
@@ -75,7 +96,9 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 npm run dev
 ```
 
-Acesse [http://localhost:3000](http://localhost:3000) para conferir o status da API e realizar o download do APK.
+- **Portal MediCare:** `http://localhost:3000/?portal=1`
+- **MediCare Cuidador Web:** `http://localhost:3000/cuidador`
+- **Download do APK Android:** `http://localhost:3000/api/apk`
 
 ---
 
@@ -87,23 +110,9 @@ npm test
 
 ---
 
-## 📌 Plano de Desenvolvimento (Roadmap)
+## 📌 Estado Consolidado do Projeto
 
-- **Etapa 0 (Concluída):** Preparação do monorepo, auditoria, reorganização e documentação técnica.
-- **Etapa 1 (Concluída):** Auditoria técnica aprofundada e especificação dos contratos (`docs/API_CONTRACT.md`, `docs/DATA_MODEL.md`).
-- **Etapa 2 (Concluída):** Fundação técnica do MediCare Cuidador Web (React, TypeScript, PWA, layout adaptativo).
-- **Etapa 3 (Concluída):** Implementação completa das funcionalidades do MVP (Pacientes, Prescrições, Central de Doses, Agenda, Indicadores, Auditoria).
-- **Etapa 4 (Concluída):** Testes de segurança, validação de integridade, documentação de deploy e rollback (`docs/DEPLOYMENT_AND_TESTS.md`).
-
----
-
-## ⚠️ Diretrizes Permanentes de Desenvolvimento
-
-1. O **MediCare Paciente Android** é a única aplicação ativa em desenvolvimento até nova autorização.
-2. Todo o desenvolvimento atual deve ocorrer no aplicativo Android.
-3. Não implementar funcionalidades no frontend web legado (removido).
-4. Código web legado não deve ser recriado sem autorização.
-5. MediCare Cuidador é um projeto futuro, a ser implementado estritamente conforme as etapas do plano.
-6. Backend e banco de dados só devem ser alterados quando necessário ao Android ou expressamente especificado no plano.
-7. O APK `MediCare-Paciente.apk` deve ser mantido atualizado na raiz após cada alteração relevante.
-8. Antes de qualquer alteração, consultar e respeitar essas diretrizes.
+- **Arquitetura Unificada do Cuidador:** `src/app/cuidador/page.jsx` é a única aplicação web oficial do MediCare Cuidador (a antiga estrutura paralela em Vite foi removida).
+- **Segurança de Sessão:** Sessão web baseada em cookies `HttpOnly`, `Secure` e `SameSite=Lax` com proteção CSRF (`X-CSRF-Token` + validação de `Origin`), mantendo compatibilidade com `Authorization: Bearer` para o app Android.
+- **Autorização Estrita de Pacientes:** Validação obrigatória de vínculo ativo (`caregiver_relationships.status = 'active'`) e nível de permissão em todas as rotas REST e RPCs, com bloqueio de IDOR.
+- **Rastreabilidade Clínica de Doses:** Separação entre horário previsto, horário real de administração (`administered_at`) e momento do registro (`created_at`), preservando autor, papel e histórico de auditoria.

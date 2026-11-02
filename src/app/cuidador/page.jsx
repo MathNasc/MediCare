@@ -1,31 +1,23 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Home,
   Users,
   Calendar,
   BarChart3,
-  ShieldCheck,
-  PlusCircle,
   Clock,
   AlertTriangle,
   CheckCircle2,
-  Bell,
-  ArrowRight,
   Search,
   UserPlus,
-  ChevronRight,
-  Activity,
   Plus,
   MapPin,
   User,
-  Download,
   TrendingUp,
   LogOut,
   Mail,
   KeyRound,
-  Shield,
   Loader2,
   ArrowLeft,
   Pill,
@@ -37,13 +29,53 @@ import {
   Eye,
   EyeOff,
   AlertCircle,
-  HelpCircle,
 } from 'lucide-react';
 
+function readCookieValue(name) {
+  if (typeof document === 'undefined') return '';
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+const EMPTY_PATIENT_FORM = {
+  nome: '',
+  relationship_label: '',
+  blood_type: '',
+  dob: '',
+  phone: '',
+};
+
+const EMPTY_MED_FORM = {
+  nome: '',
+  principio_ativo: '',
+  dosagem: '',
+  unidade: '',
+  quantidade: '',
+  horarios: '',
+  treatment_type: 'continuous',
+};
+
+const EMPTY_APPOINTMENT_FORM = {
+  type: 'consulta',
+  title: '',
+  date: '',
+  time: '',
+  doctor: '',
+  location: '',
+};
+
+const EMPTY_STOCK_FORM = {
+  medication_id: '',
+  quantity_added: '',
+  purchase_price: '',
+  notes: '',
+};
+
 export default function CuidadorWebPage() {
-  const [token, setToken] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
+  const csrfTokenRef = useRef('');
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -71,6 +103,7 @@ export default function CuidadorWebPage() {
   const [doseHistory, setDoseHistory] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [approvalRequests, setApprovalRequests] = useState([]);
 
   // Modals
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -80,114 +113,194 @@ export default function CuidadorWebPage() {
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
 
-  // Form states
+  // Form states (sem valores clínicos pré-definidos)
   const [inviteTokenInput, setInviteTokenInput] = useState('');
-  const [newPatientForm, setNewPatientForm] = useState({
-    nome: '',
-    relationship_label: 'Pai',
-    blood_type: 'O+',
-    dob: '1960-05-15',
-    phone: '',
-  });
-  const [newMedForm, setNewMedForm] = useState({
-    nome: '',
-    dosagem: '50mg',
-    unidade: 'comprimido',
-    quantidade: 30,
-    horarios: '08:00, 20:00',
-    treatment_type: 'continuous',
-  });
+  const [newPatientForm, setNewPatientForm] = useState(EMPTY_PATIENT_FORM);
+  const [confirmPatientSave, setConfirmPatientSave] = useState(false);
+
+  const [newMedForm, setNewMedForm] = useState(EMPTY_MED_FORM);
+  const [confirmMedSave, setConfirmMedSave] = useState(false);
+
   const [selectedDoseTarget, setSelectedDoseTarget] = useState(null);
+  const [doseAdministeredTime, setDoseAdministeredTime] = useState('');
   const [doseActionReason, setDoseActionReason] = useState('');
-  const [newAppointmentForm, setNewAppointmentForm] = useState({
-    type: 'consulta',
-    title: '',
-    date: new Date().toISOString().slice(0, 10),
-    time: '14:00',
-    doctor: '',
-    location: '',
-  });
-  const [stockForm, setStockForm] = useState({
-    medication_id: '',
-    quantity_added: 30,
-    purchase_price: '',
-    notes: 'Reposição de farmácia',
-  });
+  const [confirmDoseSave, setConfirmDoseSave] = useState(false);
+
+  const [newAppointmentForm, setNewAppointmentForm] = useState(EMPTY_APPOINTMENT_FORM);
+  const [stockForm, setStockForm] = useState(EMPTY_STOCK_FORM);
+  const [confirmStockSave, setConfirmStockSave] = useState(false);
 
   // Filter states
   const [searchPatient, setSearchPatient] = useState('');
   const [doseStatusFilter, setDoseStatusFilter] = useState('all');
 
-  const showToast = (msg, type = 'success') => {
+  const showToast = useCallback((msg, type = 'success') => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 4000);
-  };
+  }, []);
 
-  const persistSession = (accessToken, refreshToken, userObj) => {
-    if (accessToken) {
-      localStorage.setItem('medicare_cuidador_jwt', accessToken);
-      document.cookie = 'medicare_cuidador_logged_in=1; path=/; max-age=31536000; SameSite=Lax';
-    }
-    if (refreshToken) {
-      localStorage.setItem('medicare_cuidador_refresh_token', refreshToken);
-    }
-    if (userObj) {
-      localStorage.setItem('medicare_cuidador_user', JSON.stringify(userObj));
-    }
-  };
+  const syncCsrfToken = useCallback((explicitToken) => {
+    const fromCookie = readCookieValue('medicare_csrf_token');
+    const resolved = explicitToken || fromCookie || csrfTokenRef.current || '';
+    csrfTokenRef.current = resolved;
+    return resolved;
+  }, []);
 
-  // Verifica token salvo ao inicializar e renova automaticamente se necessário
+  const clearClientSession = useCallback(() => {
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    csrfTokenRef.current = '';
+    setPatients([]);
+    setMedications([]);
+    setDoseHistory([]);
+    setAppointments([]);
+    setAuditLogs([]);
+    setApprovalRequests([]);
+    setSelectedPatientId(null);
+    try {
+      localStorage.removeItem('medicare_cuidador_jwt');
+      localStorage.removeItem('medicare_cuidador_refresh_token');
+      localStorage.removeItem('medicare_cuidador_user');
+      document.cookie = 'medicare_cuidador_logged_in=; path=/; max-age=0; SameSite=Lax';
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  // Helper centralizado de requisição autenticada via cookies HttpOnly + proteção CSRF
+  const apiFetch = useCallback(
+    async (url, options = {}, isRetry = false) => {
+      const method = (options.method || 'GET').toUpperCase();
+      const headers = new Headers(options.headers || {});
+      if (options.body && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+      }
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const csrf = syncCsrfToken();
+        if (csrf) {
+          headers.set('X-CSRF-Token', csrf);
+        }
+      }
+
+      const res = await fetch(url, {
+        ...options,
+        method,
+        headers,
+        credentials: 'same-origin',
+      });
+
+      if (res.status === 401 && !isRetry && !url.includes('/api/auth/v1/token')) {
+        const refreshRes = await fetch('/api/auth/v1/token?grant_type=refresh_token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(syncCsrfToken() ? { 'X-CSRF-Token': syncCsrfToken() } : {}),
+          },
+          body: JSON.stringify({}),
+          credentials: 'same-origin',
+        });
+
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json().catch(() => ({}));
+          syncCsrfToken(refreshData.csrf_token);
+          if (refreshData.user) {
+            setCurrentUser(refreshData.user);
+          }
+          setIsAuthenticated(true);
+          return apiFetch(url, options, true);
+        } else {
+          clearClientSession();
+        }
+      }
+
+      return res;
+    },
+    [syncCsrfToken, clearClientSession]
+  );
+
+  // Inicialização: limpa tokens legados do localStorage e valida sessão via cookie HttpOnly
   useEffect(() => {
-    const savedToken = localStorage.getItem('medicare_cuidador_jwt');
-    const savedRefresh = localStorage.getItem('medicare_cuidador_refresh_token');
-    const savedUserRaw = localStorage.getItem('medicare_cuidador_user');
+    let active = true;
 
-    if (savedUserRaw) {
+    async function verifySession() {
+      const legacyJwt = localStorage.getItem('medicare_cuidador_jwt');
+      const legacyRefresh = localStorage.getItem('medicare_cuidador_refresh_token');
+      // Remove tokens sensíveis do localStorage para eliminar exposição a XSS
+      localStorage.removeItem('medicare_cuidador_jwt');
+      localStorage.removeItem('medicare_cuidador_refresh_token');
+      localStorage.removeItem('medicare_cuidador_user');
+
+      syncCsrfToken();
+
       try {
-        setCurrentUser(JSON.parse(savedUserRaw));
+        const res = await fetch('/api/auth/v1/user', {
+          method: 'GET',
+          headers: legacyJwt ? { Authorization: `Bearer ${legacyJwt}` } : {},
+          credentials: 'same-origin',
+        });
+
+        if (res.ok) {
+          const userData = await res.json().catch(() => null);
+          if (active && userData?.id) {
+            syncCsrfToken(userData.csrf_token);
+            // Se veio de um token legado em localStorage, converte imediatamente para sessão HttpOnly via refresh
+            if (legacyRefresh && !readCookieValue('medicare_csrf_token')) {
+              const migRes = await fetch('/api/auth/v1/token?grant_type=refresh_token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: legacyRefresh }),
+                credentials: 'same-origin',
+              });
+              if (migRes.ok) {
+                const migData = await migRes.json().catch(() => ({}));
+                syncCsrfToken(migData.csrf_token);
+              }
+            }
+            setCurrentUser(userData);
+            setIsAuthenticated(true);
+            setAuthChecking(false);
+            return;
+          }
+        }
+
+        // Tenta renovar via cookie HttpOnly de refresh_token (ou legacyRefresh se em transição)
+        const refreshRes = await fetch('/api/auth/v1/token?grant_type=refresh_token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(legacyRefresh ? { refresh_token: legacyRefresh } : {}),
+          credentials: 'same-origin',
+        });
+
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json().catch(() => ({}));
+          if (active && refreshData?.user) {
+            syncCsrfToken(refreshData.csrf_token);
+            setCurrentUser(refreshData.user);
+            setIsAuthenticated(true);
+            setAuthChecking(false);
+            return;
+          }
+        }
+
+        if (active) {
+          clearClientSession();
+        }
       } catch {
-        // ignore invalid json
+        if (active) {
+          clearClientSession();
+        }
+      } finally {
+        if (active) {
+          setAuthChecking(false);
+        }
       }
     }
 
-    if (savedToken) {
-      setToken(savedToken);
-      document.cookie = 'medicare_cuidador_logged_in=1; path=/; max-age=31536000; SameSite=Lax';
-      setAuthChecking(false);
-
-      fetch('/api/auth/v1/user', {
-        headers: { Authorization: `Bearer ${savedToken}` },
-      })
-        .then(async (res) => {
-          if (res.ok) {
-            const u = await res.json();
-            if (u) {
-              setCurrentUser(u);
-              localStorage.setItem('medicare_cuidador_user', JSON.stringify(u));
-            }
-            return;
-          }
-          if (res.status === 401 && savedRefresh) {
-            const refreshRes = await fetch('/api/auth/v1/token?grant_type=refresh_token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refresh_token: savedRefresh }),
-            });
-            if (refreshRes.ok) {
-              const refreshData = await refreshRes.json();
-              if (refreshData.access_token) {
-                setToken(refreshData.access_token);
-                if (refreshData.user) setCurrentUser(refreshData.user);
-                persistSession(refreshData.access_token, refreshData.refresh_token, refreshData.user);
-              }
-            }
-          }
-        })
-        .catch(() => {});
-    } else {
-      setAuthChecking(false);
-    }
-  }, []);
+    verifySession();
+    return () => {
+      active = false;
+    };
+  }, [syncCsrfToken, clearClientSession]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -199,6 +312,7 @@ export default function CuidadorWebPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: loginEmail.trim().toLowerCase(), password: loginPassword }),
+        credentials: 'same-origin',
       });
 
       const data = await res.json().catch(() => ({}));
@@ -207,9 +321,10 @@ export default function CuidadorWebPage() {
         throw new Error(data.error || 'Não foi possível entrar. Verifique seu e-mail e senha.');
       }
 
-      setToken(data.access_token);
+      syncCsrfToken(data.csrf_token);
       setCurrentUser(data.user);
-      persistSession(data.access_token, data.refresh_token, data.user);
+      setIsAuthenticated(true);
+      setLoginPassword('');
       showToast('Bem-vindo ao MediCare Cuidador!');
     } catch (err) {
       setAuthError(err.message || 'E-mail ou senha incorretos. Tente novamente.');
@@ -249,6 +364,7 @@ export default function CuidadorWebPage() {
             role: 'cuidador',
           },
         }),
+        credentials: 'same-origin',
       });
 
       const data = await res.json().catch(() => ({}));
@@ -261,9 +377,11 @@ export default function CuidadorWebPage() {
         email: signupEmail.trim().toLowerCase(),
         user_metadata: { nome: signupNome.trim(), role: 'cuidador' },
       };
-      setToken(data.access_token);
+      syncCsrfToken(data.csrf_token);
       setCurrentUser(resolvedUser);
-      persistSession(data.access_token, data.refresh_token, resolvedUser);
+      setIsAuthenticated(true);
+      setSignupPassword('');
+      setSignupConfirmPassword('');
       showToast('Conta de Cuidador criada com sucesso!');
     } catch (err) {
       setAuthError(err.message || 'Erro ao criar conta de cuidador.');
@@ -289,97 +407,96 @@ export default function CuidadorWebPage() {
     }
   };
 
-  const handleLogout = () => {
-    fetch('/api/auth/v1/logout', { method: 'POST' }).catch(() => {});
-    setToken(null);
-    setCurrentUser(null);
-    localStorage.removeItem('medicare_cuidador_jwt');
-    localStorage.removeItem('medicare_cuidador_refresh_token');
-    localStorage.removeItem('medicare_cuidador_user');
-    document.cookie = 'medicare_cuidador_logged_in=; path=/; max-age=0; SameSite=Lax';
+  const handleLogout = async () => {
+    try {
+      await apiFetch('/api/auth/v1/logout', { method: 'POST', body: JSON.stringify({}) });
+    } catch {
+      // ignore network error on logout
+    }
+    clearClientSession();
     showToast('Sessão encerrada com segurança.');
   };
 
-  // Carrega dados do cuidador e pacientes
+  // Carrega dados do cuidador e pacientes autorizados (somente vínculos ativos!)
   const loadData = useCallback(async () => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setLoading(true);
     try {
       const [relRes, profRes] = await Promise.all([
-        fetch('/api/rest/v1/caregiver_relationships?status=neq.revoked&select=*', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        }),
-        fetch('/api/rest/v1/profiles?limit=50', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        }),
+        apiFetch('/api/rest/v1/caregiver_relationships?status=eq.active&select=*'),
+        apiFetch('/api/rest/v1/profiles?limit=50'),
       ]);
 
-      const rels = await relRes.json().catch(() => []);
-      const profs = await profRes.json().catch(() => []);
+      const rels = relRes.ok ? await relRes.json().catch(() => []) : [];
+      const profs = profRes.ok ? await profRes.json().catch(() => []) : [];
 
-      let patientList = [];
-      if (Array.isArray(rels) && rels.length > 0) {
-        patientList = rels.map((r) => {
-          const prof = Array.isArray(profs) ? profs.find((p) => p.id === r.patient_id) : null;
-          return {
-            relationship_id: r.id,
-            patient_id: r.patient_id,
-            nome: prof?.nome || 'Paciente Vinculado',
-            blood_type: prof?.blood_type || 'O+',
-            relationship_label: r.relationship_label || 'Paciente',
-            permission_level: r.permission_level || 'caregiver',
-            is_managed: prof?.is_managed || false,
-          };
-        });
-      } else if (Array.isArray(profs) && profs.length > 0) {
-        patientList = profs
-          .filter((p) => p.role === 'paciente' || p.role === 'independente')
-          .slice(0, 4)
-          .map((p) => ({
-            relationship_id: `rel-${p.id.slice(0, 8)}`,
-            patient_id: p.id,
-            nome: p.nome,
-            blood_type: p.blood_type || 'O+',
-            relationship_label: 'Acompanhado',
-            permission_level: 'admin',
-            is_managed: false,
-          }));
-      }
+      // Somente pacientes com vínculo ativo autorizado em caregiver_relationships são exibidos.
+      // Nenhum perfil sem relacionamento explícito é listado como acompanhado.
+      const activeRels = Array.isArray(rels)
+        ? rels.filter((r) => r && r.status === 'active' && r.patient_id)
+        : [];
+
+      const patientList = activeRels.map((r) => {
+        const prof = Array.isArray(profs) ? profs.find((p) => p.id === r.patient_id) : null;
+        return {
+          relationship_id: r.id,
+          patient_id: r.patient_id,
+          nome: prof?.nome || 'Paciente Vinculado',
+          blood_type: prof?.blood_type || null,
+          dob: prof?.dob || null,
+          relationship_label: r.relationship_label || 'Familiar / Acompanhado',
+          permission_level: r.permission_level || 'read_write',
+          is_managed: Boolean(prof?.is_managed),
+        };
+      });
 
       setPatients(patientList);
-      if (patientList.length > 0 && !selectedPatientId) {
-        setSelectedPatientId(patientList[0].patient_id);
+
+      const validTargetId =
+        selectedPatientId && patientList.some((p) => p.patient_id === selectedPatientId)
+          ? selectedPatientId
+          : patientList[0]?.patient_id || null;
+
+      if (validTargetId !== selectedPatientId) {
+        setSelectedPatientId(validTargetId);
       }
 
-      const targetId = selectedPatientId || (patientList[0]?.patient_id);
-      if (targetId) {
-        const [medsRes, histRes, eventsRes, logsRes] = await Promise.all([
-          fetch(`/api/rest/v1/medicamentos?user_id=eq.${targetId}&ativo=eq.true&order=created_at.asc`),
-          fetch(`/api/rest/v1/historico_doses?user_id=eq.${targetId}&order=created_at.desc&limit=50`),
-          fetch(`/api/rest/v1/health_events?user_id=eq.${targetId}&order=date.asc`),
-          fetch('/api/rest/v1/rpc/list_audit_logs', {
+      if (validTargetId) {
+        const [medsRes, histRes, eventsRes, logsRes, approvalsRes] = await Promise.all([
+          apiFetch(`/api/rest/v1/medicamentos?user_id=eq.${validTargetId}&ativo=eq.true&order=created_at.asc`),
+          apiFetch(`/api/rest/v1/historico_doses?user_id=eq.${validTargetId}&order=created_at.desc&limit=100`),
+          apiFetch(`/api/rest/v1/health_events?user_id=eq.${validTargetId}&order=date.asc`),
+          apiFetch('/api/rest/v1/rpc/list_audit_logs', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ p_patient_id: targetId, p_limit: 20 }),
+            body: JSON.stringify({ p_patient_id: validTargetId, p_limit: 30 }),
           }),
+          apiFetch(`/api/rest/v1/approval_requests?patient_id=eq.${validTargetId}&status=eq.pending&order=created_at.desc`),
         ]);
 
-        const meds = await medsRes.json().catch(() => []);
-        const hist = await histRes.json().catch(() => []);
-        const events = await eventsRes.json().catch(() => []);
-        const logs = await logsRes.json().catch(() => []);
+        const meds = medsRes.ok ? await medsRes.json().catch(() => []) : [];
+        const hist = histRes.ok ? await histRes.json().catch(() => []) : [];
+        const events = eventsRes.ok ? await eventsRes.json().catch(() => []) : [];
+        const logs = logsRes.ok ? await logsRes.json().catch(() => []) : [];
+        const approvals = approvalsRes.ok ? await approvalsRes.json().catch(() => []) : [];
 
         setMedications(Array.isArray(meds) ? meds : []);
         setDoseHistory(Array.isArray(hist) ? hist : []);
         setAppointments(Array.isArray(events) ? events : []);
         setAuditLogs(Array.isArray(logs) ? logs : []);
+        setApprovalRequests(Array.isArray(approvals) ? approvals : []);
+      } else {
+        setMedications([]);
+        setDoseHistory([]);
+        setAppointments([]);
+        setAuditLogs([]);
+        setApprovalRequests([]);
       }
     } catch (err) {
       console.warn('Erro ao carregar dados:', err);
     } finally {
       setLoading(false);
     }
-  }, [token, selectedPatientId]);
+  }, [isAuthenticated, selectedPatientId, apiFetch]);
 
   useEffect(() => {
     loadData();
@@ -391,15 +508,11 @@ export default function CuidadorWebPage() {
     if (!inviteTokenInput.trim()) return;
     setActionLoading(true);
     try {
-      const res = await fetch('/api/rest/v1/rpc/accept_caregiver_invite', {
+      const res = await apiFetch('/api/rest/v1/rpc/accept_caregiver_invite', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({ p_token: inviteTokenInput.trim() }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data.success === false) {
         throw new Error(data.error || 'Convite inválido ou expirado');
       }
@@ -414,38 +527,49 @@ export default function CuidadorWebPage() {
     }
   };
 
-  // Cadastrar Paciente Gerenciado
+  // Cadastrar Paciente Gerenciado (sem valores clínicos pré-definidos + validação + confirmação)
   const handleCreateManagedPatient = async (e) => {
     e.preventDefault();
+    if (!newPatientForm.nome.trim() || newPatientForm.nome.trim().length < 2) {
+      showToast('Informe o nome completo do paciente.', 'error');
+      return;
+    }
+    if (!newPatientForm.relationship_label.trim()) {
+      showToast('Informe o vínculo ou parentesco com o paciente.', 'error');
+      return;
+    }
+    if (newPatientForm.dob) {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      if (newPatientForm.dob > todayIso) {
+        showToast('A data de nascimento não pode ser no futuro.', 'error');
+        return;
+      }
+    }
+    if (!confirmPatientSave) {
+      showToast('Confirme que revisou os dados clínicos do paciente antes de salvar.', 'error');
+      return;
+    }
+
     setActionLoading(true);
     try {
-      const res = await fetch('/api/rest/v1/rpc/create_managed_patient', {
+      const res = await apiFetch('/api/rest/v1/rpc/create_managed_patient', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
-          p_nome: newPatientForm.nome,
-          p_relationship_label: newPatientForm.relationship_label,
-          p_blood_type: newPatientForm.blood_type,
-          p_dob: newPatientForm.dob,
-          p_phone: newPatientForm.phone,
+          p_nome: newPatientForm.nome.trim(),
+          p_relationship_label: newPatientForm.relationship_label.trim(),
+          p_blood_type: newPatientForm.blood_type || null,
+          p_dob: newPatientForm.dob || null,
+          p_phone: newPatientForm.phone.trim() || null,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data.success === false) {
         throw new Error(data.error || 'Erro ao cadastrar paciente dependente');
       }
       showToast('Paciente cadastrado com sucesso!');
       setShowNewPatientModal(false);
-      setNewPatientForm({
-        nome: '',
-        relationship_label: 'Pai',
-        blood_type: 'O+',
-        dob: '1960-05-15',
-        phone: '',
-      });
+      setNewPatientForm(EMPTY_PATIENT_FORM);
+      setConfirmPatientSave(false);
       loadData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -456,17 +580,18 @@ export default function CuidadorWebPage() {
 
   // Revogar Cuidador
   const handleRevokeRelationship = async (relId) => {
-    if (!confirm('Tem certeza de que deseja revogar o vínculo deste paciente?')) return;
     setActionLoading(true);
     try {
-      const res = await fetch('/api/rest/v1/rpc/revoke_caregiver', {
+      const res = await apiFetch('/api/rest/v1/rpc/revoke_caregiver', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ p_relationship_id: relId }),
       });
-      const ok = await res.json();
-      if (ok) {
+      const ok = await res.json().catch(() => false);
+      if (res.ok && ok) {
         showToast('Vínculo revogado com sucesso.');
+        if (patients.find((p) => p.relationship_id === relId)?.patient_id === selectedPatientId) {
+          setSelectedPatientId(null);
+        }
         loadData();
       } else {
         throw new Error('Não foi possível revogar o vínculo.');
@@ -478,39 +603,71 @@ export default function CuidadorWebPage() {
     }
   };
 
-  // Cadastrar Medicamento
+  // Cadastrar Medicamento (sem valores pré-definidos + validação + confirmação)
   const handleAddMedication = async (e) => {
     e.preventDefault();
     if (!selectedPatientId) return;
+
+    const nomeTrim = newMedForm.nome.trim();
+    const dosagemTrim = newMedForm.dosagem.trim();
+    const unidadeTrim = newMedForm.unidade.trim();
+    const qtdNum = Number(newMedForm.quantidade);
+    const horariosArr = newMedForm.horarios
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (!nomeTrim) {
+      showToast('Informe o nome do medicamento.', 'error');
+      return;
+    }
+    if (!dosagemTrim) {
+      showToast('Informe a dosagem prescrita (ex: 50mg, 10ml).', 'error');
+      return;
+    }
+    if (!unidadeTrim) {
+      showToast('Selecione a unidade farmacêutica.', 'error');
+      return;
+    }
+    if (!Number.isFinite(qtdNum) || qtdNum < 0 || newMedForm.quantidade === '') {
+      showToast('Informe uma quantidade de estoque inicial válida.', 'error');
+      return;
+    }
+    if (horariosArr.length === 0 || !horariosArr.every((h) => /^([01]\d|2[0-3]):[0-5]\d$/.test(h))) {
+      showToast('Informe horários válidos no formato HH:MM (ex: 08:00, 20:00).', 'error');
+      return;
+    }
+    if (!confirmMedSave) {
+      showToast('Confirme que revisou a prescrição antes de salvar o medicamento.', 'error');
+      return;
+    }
+
     setActionLoading(true);
     try {
-      const horariosArr = newMedForm.horarios.split(',').map((s) => s.trim()).filter(Boolean);
-      const res = await fetch('/api/rest/v1/medicamentos', {
+      const res = await apiFetch('/api/rest/v1/medicamentos', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: selectedPatientId,
-          nome: newMedForm.nome,
-          dosagem: newMedForm.dosagem,
-          unidade: newMedForm.unidade,
-          quantidade: Number(newMedForm.quantidade),
-          horarios: horariosArr.length ? horariosArr : ['08:00'],
+          nome: nomeTrim,
+          principio_ativo: newMedForm.principio_ativo.trim() || null,
+          active_ingredient: newMedForm.principio_ativo.trim() || null,
+          dosagem: dosagemTrim,
+          unidade: unidadeTrim,
+          quantidade: Math.round(qtdNum),
+          horarios: horariosArr,
           treatment_type: newMedForm.treatment_type,
           ativo: true,
           status: 'ativo',
         }),
       });
-      if (!res.ok) throw new Error('Falha ao salvar medicamento');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Falha ao salvar medicamento');
+      }
       showToast('Medicamento cadastrado com sucesso!');
       setShowNewMedModal(false);
-      setNewMedForm({
-        nome: '',
-        dosagem: '50mg',
-        unidade: 'comprimido',
-        quantidade: 30,
-        horarios: '08:00, 20:00',
-        treatment_type: 'continuous',
-      });
+      setNewMedForm(EMPTY_MED_FORM);
+      setConfirmMedSave(false);
       loadData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -519,35 +676,83 @@ export default function CuidadorWebPage() {
     }
   };
 
-  // Confirmar Dose como Cuidador ou Marcar como Não Tomada
+  // Registrar Administração de Dose como Cuidador ou Marcar como Não Administrada
   const handleConfirmDose = async (status) => {
     if (!selectedDoseTarget || !selectedPatientId) return;
+
+    const reasonTrim = doseActionReason.trim();
+    if (status === 'missed' && !reasonTrim) {
+      showToast('Informe o motivo clínico pelo qual a dose não foi administrada.', 'error');
+      return;
+    }
+    if (status === 'confirmed' && !doseAdministeredTime) {
+      showToast('Informe o horário real em que a dose foi administrada.', 'error');
+      return;
+    }
+    if (!confirmDoseSave) {
+      showToast('Confirme os dados do registro antes de salvar.', 'error');
+      return;
+    }
+
     setActionLoading(true);
     try {
       const todayIso = new Date().toISOString().slice(0, 10);
-      const res = await fetch('/api/rest/v1/rpc/confirm_dose_retroactive', {
+      const res = await apiFetch('/api/rest/v1/rpc/confirm_dose_retroactive', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           p_patient_id: selectedPatientId,
           p_med_id: selectedDoseTarget.med_id,
           p_hora: selectedDoseTarget.hora,
           p_dose_date: todayIso,
+          p_administered_time: status === 'confirmed' ? doseAdministeredTime : null,
           p_new_status: status,
-          p_reason: doseActionReason.trim() || (status === 'confirmed' ? 'Administrado pelo cuidador' : 'Paciente recusou a dose'),
+          p_reason:
+            reasonTrim ||
+            (status === 'confirmed' ? 'Administrada pelo cuidador' : 'Dose não administrada'),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data.success === false) {
         throw new Error(data.error || 'Erro ao registrar dose');
       }
-      showToast(status === 'confirmed' ? 'Dose confirmada pelo cuidador!' : 'Dose registrada como não administrada.');
+      showToast(
+        status === 'confirmed'
+          ? 'Administração registrada pelo cuidador!'
+          : 'Dose registrada como não administrada.'
+      );
       setShowDoseModal(false);
       setSelectedDoseTarget(null);
+      setDoseAdministeredTime('');
       setDoseActionReason('');
+      setConfirmDoseSave(false);
+      loadData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Aprovar ou Rejeitar solicitação de dose enviada pelo paciente dependente
+  const handleResolveApprovalRequest = async (reqId, decision) => {
+    setActionLoading(true);
+    try {
+      const res = await apiFetch('/api/rest/v1/rpc/resolve_dose_approval', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_request_id: reqId,
+          p_decision: decision,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || 'Erro ao validar solicitação');
+      }
+      showToast(
+        decision === 'approved'
+          ? 'Solicitação do paciente aprovada!'
+          : 'Solicitação do paciente recusada.'
+      );
       loadData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -560,32 +765,31 @@ export default function CuidadorWebPage() {
   const handleAddAppointment = async (e) => {
     e.preventDefault();
     if (!selectedPatientId) return;
+    if (!newAppointmentForm.title.trim() || !newAppointmentForm.date || !newAppointmentForm.time) {
+      showToast('Preencha o título, a data e o horário do compromisso.', 'error');
+      return;
+    }
     setActionLoading(true);
     try {
-      const res = await fetch('/api/rest/v1/health_events', {
+      const res = await apiFetch('/api/rest/v1/health_events', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: selectedPatientId,
           type: newAppointmentForm.type,
-          title: newAppointmentForm.title,
+          title: newAppointmentForm.title.trim(),
           date: newAppointmentForm.date,
           time: newAppointmentForm.time,
-          doctor: newAppointmentForm.doctor,
-          location: newAppointmentForm.location,
+          doctor: newAppointmentForm.doctor.trim() || null,
+          location: newAppointmentForm.location.trim() || null,
         }),
       });
-      if (!res.ok) throw new Error('Erro ao salvar compromisso');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Erro ao salvar compromisso');
+      }
       showToast('Compromisso agendado com sucesso!');
       setShowAppointmentModal(false);
-      setNewAppointmentForm({
-        type: 'consulta',
-        title: '',
-        date: new Date().toISOString().slice(0, 10),
-        time: '14:00',
-        doctor: '',
-        location: '',
-      });
+      setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
       loadData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -597,29 +801,45 @@ export default function CuidadorWebPage() {
   // Registrar Reposição de Estoque
   const handleAddStock = async (e) => {
     e.preventDefault();
-    if (!stockForm.medication_id) return;
+    if (!stockForm.medication_id) {
+      showToast('Selecione o medicamento.', 'error');
+      return;
+    }
+    const addedQty = Number(stockForm.quantity_added);
+    if (!Number.isFinite(addedQty) || addedQty <= 0) {
+      showToast('Informe uma quantidade adicionada maior que zero.', 'error');
+      return;
+    }
+    if (!confirmStockSave) {
+      showToast('Confirme os dados da reposição de estoque antes de salvar.', 'error');
+      return;
+    }
+
     setActionLoading(true);
     try {
       const med = medications.find((m) => m.id === stockForm.medication_id);
       const beforeQty = med ? Number(med.quantidade || 0) : 0;
-      const afterQty = beforeQty + Number(stockForm.quantity_added);
+      const afterQty = beforeQty + Math.round(addedQty);
 
-      const res = await fetch('/api/rest/v1/rpc/record_stock_movement', {
+      const res = await apiFetch('/api/rest/v1/rpc/record_stock_movement', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           p_medication_id: stockForm.medication_id,
           p_movement_type: 'purchase',
           p_quantity_before: beforeQty,
           p_quantity_after: afterQty,
           p_purchase_price: stockForm.purchase_price ? Number(stockForm.purchase_price) : null,
-          p_notes: stockForm.notes,
+          p_notes: stockForm.notes.trim() || null,
         }),
       });
-      const data = await res.json();
-      if (!res.ok || data.success === false) throw new Error(data.error || 'Erro ao registrar estoque');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || 'Erro ao registrar estoque');
+      }
       showToast('Estoque atualizado com sucesso!');
       setShowStockModal(false);
+      setStockForm(EMPTY_STOCK_FORM);
+      setConfirmStockSave(false);
       loadData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -628,26 +848,84 @@ export default function CuidadorWebPage() {
     }
   };
 
-  // Doses do dia
+  // Doses do dia com distinção semântica precisa entre os 5 estados
   const todayDoses = [];
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const nowObj = new Date();
+  const todayIso = nowObj.toISOString().slice(0, 10);
+  const currentMinutesOfDay = nowObj.getHours() * 60 + nowObj.getMinutes();
+
   medications.forEach((med) => {
-    const horarios = Array.isArray(med.horarios) ? med.horarios : ['08:00'];
-    horarios.forEach((hora) => {
-      const match = doseHistory.find(
-        (h) => h.med_id === med.id && h.hora === hora && (h.dose_date === todayIso || String(h.created_at).startsWith(todayIso))
-      );
+    const horarios = Array.isArray(med.horarios) && med.horarios.length > 0 ? med.horarios : [];
+    horarios.forEach((horaRaw) => {
+      const hora = String(horaRaw || '').trim().slice(0, 5);
+      if (!hora) return;
+      const [hh, mm] = hora.split(':').map((n) => Number(n) || 0);
+      const scheduledMinutes = hh * 60 + mm;
+
+      const match = doseHistory.find((h) => {
+        const hHora = String(h.hora || h.horario || '').trim().slice(0, 5);
+        const hDate = h.dose_date
+          ? String(h.dose_date).slice(0, 10)
+          : String(h.created_at || '').slice(0, 10);
+        return h.med_id === med.id && hHora === hora && hDate === todayIso;
+      });
+
+      const rawStatus = match ? match.status : 'pending';
+      const delayMinutes = Number(match?.atraso_minutos || 0);
+      const isCaregiverActor =
+        match?.confirmed_by_role === 'cuidador' ||
+        (match?.performed_by && match?.performed_by === currentUser?.id);
+      const isUnconfirmedPast =
+        rawStatus === 'pending' && currentMinutesOfDay > scheduledMinutes + 30;
+      const isLateDose =
+        rawStatus === 'late' || (rawStatus === 'confirmed' && delayMinutes > 15);
+
+      let displayCategory = 'pending'; // 'patient_confirmed' | 'caregiver_confirmed' | 'late' | 'missed' | 'unconfirmed' | 'pending'
+      let statusLabel = 'Prevista';
+
+      if (rawStatus === 'missed') {
+        displayCategory = 'missed';
+        statusLabel = 'Não Administrada';
+      } else if (rawStatus === 'confirmed' || rawStatus === 'late') {
+        if (isCaregiverActor) {
+          displayCategory = isLateDose ? 'late' : 'caregiver_confirmed';
+          statusLabel = match?.is_retroactive
+            ? 'Registrada (Cuidador • Retroativa)'
+            : isLateDose
+            ? `Registrada (Cuidador • +${delayMinutes} min)`
+            : 'Registrada (Cuidador)';
+        } else {
+          displayCategory = isLateDose ? 'late' : 'patient_confirmed';
+          statusLabel = isLateDose
+            ? `Tomada c/ Atraso (+${delayMinutes} min)`
+            : 'Tomada (Paciente)';
+        }
+      } else if (isUnconfirmedPast) {
+        displayCategory = 'unconfirmed';
+        statusLabel = 'Sem Confirmação';
+      }
+
       todayDoses.push({
         id: `${med.id}-${hora}`,
         med_id: med.id,
         med_name: med.nome,
         dosagem: med.dosagem,
-        unidade: med.unidade || 'comprimido',
+        unidade: med.unidade || 'unidade',
         hora,
-        status: match ? match.status : 'pending',
-        performed_by: match?.performed_by,
-        is_retroactive: match?.is_retroactive,
-        history_id: match?.id,
+        status: rawStatus === 'late' ? 'confirmed' : rawStatus,
+        raw_status: rawStatus,
+        display_category: displayCategory,
+        status_label: statusLabel,
+        performed_by: match?.performed_by || null,
+        confirmed_by_name: match?.confirmed_by_name || null,
+        confirmed_by_role: match?.confirmed_by_role || null,
+        origin: match?.origin || null,
+        is_retroactive: Boolean(match?.is_retroactive),
+        atraso_minutos: delayMinutes,
+        administered_at: match?.administered_at || null,
+        recorded_at: match?.created_at || null,
+        correction_reason: match?.correction_reason || match?.motivo || null,
+        history_id: match?.id || null,
       });
     });
   });
@@ -657,10 +935,13 @@ export default function CuidadorWebPage() {
   const totalDosesToday = todayDoses.length;
   const confirmedDosesToday = todayDoses.filter((d) => d.status === 'confirmed').length;
   const missedDosesToday = todayDoses.filter((d) => d.status === 'missed').length;
+  const unconfirmedDosesToday = todayDoses.filter((d) => d.display_category === 'unconfirmed').length;
   const pendingDosesToday = todayDoses.filter((d) => d.status === 'pending').length;
-  const adherenceRate = totalDosesToday > 0 ? Math.round((confirmedDosesToday / totalDosesToday) * 100) : 100;
+  const adherenceRate =
+    totalDosesToday > 0 ? Math.round((confirmedDosesToday / totalDosesToday) * 100) : 100;
 
-  const selectedPatient = patients.find((p) => p.patient_id === selectedPatientId) || patients[0];
+  const selectedPatient =
+    patients.find((p) => p.patient_id === selectedPatientId) || patients[0] || null;
 
   const navItems = [
     { id: 'dashboard', label: 'Central de Doses', icon: Home },
@@ -672,21 +953,20 @@ export default function CuidadorWebPage() {
   ];
 
   // ─────────────────────────────────────────────────────────────
-  // REFORMULAÇÃO DA TELA DE LOGIN DO CUIDADOR (SEÇÃO 4)
+  // TELA DE LOGIN / CADASTRO DO CUIDADOR
   // ─────────────────────────────────────────────────────────────
   if (authChecking) {
     return (
       <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-center items-center p-4 antialiased">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <Loader2 size={32} className="w-8 h-8 animate-spin text-blue-500" />
       </div>
     );
   }
 
-  if (!token) {
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 antialiased selection:bg-blue-600 selection:text-white">
         <div className="w-full max-w-[420px] bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-8 shadow-2xl shadow-black/40">
-          
           {/* Logo / Header */}
           <div className="text-center mb-6">
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 font-black text-xl mb-3 shadow-md shadow-blue-600/20">
@@ -706,7 +986,10 @@ export default function CuidadorWebPage() {
           <div className="flex bg-[#0b1120] p-1 rounded-xl mb-5 border border-slate-800">
             <button
               type="button"
-              onClick={() => { setAuthMode('login'); setAuthError(null); }}
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError(null);
+              }}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                 authMode === 'login'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
@@ -717,7 +1000,10 @@ export default function CuidadorWebPage() {
             </button>
             <button
               type="button"
-              onClick={() => { setAuthMode('signup'); setAuthError(null); }}
+              onClick={() => {
+                setAuthMode('signup');
+                setAuthError(null);
+              }}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                 authMode === 'signup'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
@@ -734,7 +1020,7 @@ export default function CuidadorWebPage() {
               role="alert"
               className="mb-5 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs sm:text-sm flex items-start gap-2.5 leading-snug"
             >
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <AlertCircle size={16} className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               <span>{authError}</span>
             </div>
           )}
@@ -750,7 +1036,7 @@ export default function CuidadorWebPage() {
                   E-mail
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Mail size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="login-email"
                     type="email"
@@ -781,7 +1067,7 @@ export default function CuidadorWebPage() {
                   </button>
                 </div>
                 <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <KeyRound size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="login-password"
                     type={showPassword ? 'text' : 'password'}
@@ -798,12 +1084,11 @@ export default function CuidadorWebPage() {
                     aria-label={showPassword ? 'Ocultar senha' : 'Exibir senha'}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition-colors"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showPassword ? <EyeOff size={16} className="w-4 h-4" /> : <Eye size={16} className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
 
-              {/* Botão Principal "Entrar" */}
               <button
                 type="submit"
                 disabled={actionLoading}
@@ -811,7 +1096,7 @@ export default function CuidadorWebPage() {
               >
                 {actionLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <Loader2 size={16} className="w-4 h-4 animate-spin text-white" />
                     <span>Entrando...</span>
                   </>
                 ) : (
@@ -823,7 +1108,10 @@ export default function CuidadorWebPage() {
                 <span className="text-xs text-slate-400">Não tem uma conta? </span>
                 <button
                   type="button"
-                  onClick={() => { setAuthMode('signup'); setAuthError(null); }}
+                  onClick={() => {
+                    setAuthMode('signup');
+                    setAuthError(null);
+                  }}
                   className="text-xs text-blue-400 hover:text-blue-300 font-semibold underline underline-offset-2 transition-colors"
                 >
                   Criar conta de cuidador
@@ -841,7 +1129,7 @@ export default function CuidadorWebPage() {
                   Nome Completo
                 </label>
                 <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <User size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="signup-nome"
                     type="text"
@@ -863,7 +1151,7 @@ export default function CuidadorWebPage() {
                   E-mail
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Mail size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="signup-email"
                     type="email"
@@ -885,7 +1173,7 @@ export default function CuidadorWebPage() {
                   Senha (mínimo 6 caracteres)
                 </label>
                 <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <KeyRound size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="signup-password"
                     type={showSignupPassword ? 'text' : 'password'}
@@ -903,7 +1191,7 @@ export default function CuidadorWebPage() {
                     aria-label={showSignupPassword ? 'Ocultar senha' : 'Exibir senha'}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition-colors"
                   >
-                    {showSignupPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showSignupPassword ? <EyeOff size={16} className="w-4 h-4" /> : <Eye size={16} className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -916,7 +1204,7 @@ export default function CuidadorWebPage() {
                   Confirmar Senha
                 </label>
                 <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <KeyRound size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="signup-confirm-password"
                     type={showSignupPassword ? 'text' : 'password'}
@@ -931,7 +1219,6 @@ export default function CuidadorWebPage() {
                 </div>
               </div>
 
-              {/* Botão "Criar Conta de Cuidador" */}
               <button
                 type="submit"
                 disabled={actionLoading}
@@ -939,7 +1226,7 @@ export default function CuidadorWebPage() {
               >
                 {actionLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <Loader2 size={16} className="w-4 h-4 animate-spin text-white" />
                     <span>Criando conta...</span>
                   </>
                 ) : (
@@ -951,7 +1238,10 @@ export default function CuidadorWebPage() {
                 <span className="text-xs text-slate-400">Já possui uma conta? </span>
                 <button
                   type="button"
-                  onClick={() => { setAuthMode('login'); setAuthError(null); }}
+                  onClick={() => {
+                    setAuthMode('login');
+                    setAuthError(null);
+                  }}
                   className="text-xs text-blue-400 hover:text-blue-300 font-semibold underline underline-offset-2 transition-colors"
                 >
                   Entrar aqui
@@ -966,13 +1256,13 @@ export default function CuidadorWebPage() {
               href="/?portal=1"
               className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors py-1 px-2 rounded-lg"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
+              <ArrowLeft size={14} className="w-3.5 h-3.5" />
               <span>Voltar ao portal</span>
             </a>
           </div>
         </div>
 
-        {/* Modal de Recuperação de Senha Preservando Rota Existente */}
+        {/* Modal de Recuperação de Senha */}
         {showRecoverModal && (
           <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-sm w-full shadow-2xl">
@@ -1047,7 +1337,11 @@ export default function CuidadorWebPage() {
               : 'bg-emerald-950/95 border-emerald-700 text-emerald-200'
           }`}
         >
-          {notification.type === 'error' ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <CheckCircle2 className="w-4 h-4 shrink-0" />}
+          {notification.type === 'error' ? (
+            <AlertTriangle size={16} className="w-4 h-4 shrink-0" />
+          ) : (
+            <CheckCircle2 size={16} className="w-4 h-4 shrink-0" />
+          )}
           <span>{notification.msg}</span>
         </div>
       )}
@@ -1070,17 +1364,23 @@ export default function CuidadorWebPage() {
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
               Paciente em Acompanhamento
             </label>
-            <select
-              value={selectedPatientId || ''}
-              onChange={(e) => setSelectedPatientId(e.target.value)}
-              className="w-full bg-[#1e293b] border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
-            >
-              {patients.map((p) => (
-                <option key={p.patient_id} value={p.patient_id}>
-                  {p.nome} ({p.relationship_label})
-                </option>
-              ))}
-            </select>
+            {patients.length === 0 ? (
+              <div className="text-xs text-slate-400 bg-[#1e293b]/60 border border-slate-700/70 rounded-xl px-3 py-2">
+                Nenhum paciente vinculado
+              </div>
+            ) : (
+              <select
+                value={selectedPatientId || ''}
+                onChange={(e) => setSelectedPatientId(e.target.value)}
+                className="w-full bg-[#1e293b] border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+              >
+                {patients.map((p) => (
+                  <option key={p.patient_id} value={p.patient_id}>
+                    {p.nome} ({p.relationship_label})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <nav className="space-y-1">
@@ -1097,7 +1397,7 @@ export default function CuidadorWebPage() {
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon size={16} className="w-4 h-4" />
                   <span>{item.label}</span>
                 </button>
               );
@@ -1114,7 +1414,7 @@ export default function CuidadorWebPage() {
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut size={16} className="w-4 h-4" />
             <span>Encerrar Sessão</span>
           </button>
         </div>
@@ -1126,12 +1426,12 @@ export default function CuidadorWebPage() {
         <header className="h-16 border-b border-[#1f2937] px-4 sm:px-6 flex items-center justify-between bg-[#0b1120]/80 backdrop-blur-md sticky top-0 z-40">
           <div className="flex items-center gap-3 truncate">
             <h2 className="text-sm font-bold text-slate-200 truncate">
-              {currentTab === 'dashboard' && `Central de Doses • ${selectedPatient?.nome || 'Paciente'}`}
+              {currentTab === 'dashboard' && `Central de Doses • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
               {currentTab === 'patients' && 'Gestão de Pacientes e Vínculos'}
-              {currentTab === 'meds' && `Medicamentos & Estoque • ${selectedPatient?.nome || 'Paciente'}`}
-              {currentTab === 'agenda' && `Agenda Médica • ${selectedPatient?.nome || 'Paciente'}`}
+              {currentTab === 'meds' && `Medicamentos & Estoque • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
+              {currentTab === 'agenda' && `Agenda Médica • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
               {currentTab === 'reports' && 'Indicadores de Adesão'}
-              {currentTab === 'audit' && `Trilha de Auditoria • ${selectedPatient?.nome || 'Paciente'}`}
+              {currentTab === 'audit' && `Trilha de Auditoria • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
             </h2>
           </div>
 
@@ -1142,51 +1442,154 @@ export default function CuidadorWebPage() {
               disabled={loading}
               className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
             >
-              <Loader2 className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              <Loader2 size={16} className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={handleLogout}
               title="Encerrar sessão"
               className="md:hidden p-2 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut size={16} className="w-4 h-4" />
             </button>
           </div>
         </header>
 
         {/* Tab Body */}
         <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-5xl w-full mx-auto">
+          {/* Estado vazio quando não há paciente com vínculo ativo */}
+          {patients.length === 0 && currentTab !== 'patients' && (
+            <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 sm:p-8 text-center space-y-4 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-blue-600/15 border border-blue-500/30 text-blue-400 flex items-center justify-center mx-auto">
+                <Users size={22} className="w-5 h-5" />
+              </div>
+              <div className="space-y-1 max-w-md mx-auto">
+                <h2 className="text-lg font-bold text-white">Nenhum paciente vinculado no momento</h2>
+                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+                  Por segurança clínica, o MediCare exibe apenas pacientes com vínculo ativo autorizado. Aceite um código de convite gerado pelo paciente ou cadastre um familiar dependente.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
+                >
+                  <KeyRound size={14} className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Aceitar Convite</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setNewPatientForm(EMPTY_PATIENT_FORM);
+                    setConfirmPatientSave(false);
+                    setShowNewPatientModal(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                >
+                  <UserPlus size={14} className="w-3.5 h-3.5" />
+                  <span>Cadastrar Paciente Dependente</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: CENTRAL DE DOSES */}
-          {currentTab === 'dashboard' && (
+          {currentTab === 'dashboard' && selectedPatient && (
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-[#131d31] p-5 sm:p-6 rounded-2xl border border-slate-800">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                    {selectedPatient ? selectedPatient.nome : 'Nenhum paciente selecionado'}
+                    {selectedPatient.nome}
                   </h1>
                   <p className="text-xs text-slate-400 mt-1">
-                    Vínculo: <span className="text-slate-300 font-semibold">{selectedPatient?.relationship_label || 'Acompanhado'}</span> •
-                    Tipo Sanguíneo: <span className="text-slate-300 font-semibold">{selectedPatient?.blood_type || 'O+'}</span>
+                    Vínculo:{' '}
+                    <span className="text-slate-300 font-semibold">
+                      {selectedPatient.relationship_label}
+                    </span>{' '}
+                    • Tipo Sanguíneo:{' '}
+                    <span className="text-slate-300 font-semibold">
+                      {selectedPatient.blood_type || 'Não informado'}
+                    </span>
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setShowNewMedModal(true)}
+                    onClick={() => {
+                      setNewMedForm(EMPTY_MED_FORM);
+                      setConfirmMedSave(false);
+                      setShowNewMedModal(true);
+                    }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus size={14} className="w-3.5 h-3.5" />
                     <span>Novo Medicamento</span>
                   </button>
                   <button
-                    onClick={() => setShowAppointmentModal(true)}
+                    onClick={() => {
+                      setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
+                      setShowAppointmentModal(true);
+                    }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
                   >
-                    <Calendar className="w-3.5 h-3.5" />
+                    <Calendar size={14} className="w-3.5 h-3.5" />
                     <span>Novo Compromisso</span>
                   </button>
                 </div>
               </div>
+
+              {/* Solicitações Pendentes de Validação do Paciente */}
+              {approvalRequests.length > 0 && (
+                <div className="bg-amber-950/30 border border-amber-500/40 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
+                    <AlertTriangle size={16} className="w-4 h-4 shrink-0" />
+                    <span>Solicitações de Dose Aguardando Validação ({approvalRequests.length})</span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {approvalRequests.map((reqItem) => {
+                      const isUndo = reqItem.action_type === 'undo_dose' || reqItem.requested_status === 'pending';
+                      return (
+                        <div
+                          key={reqItem.id}
+                          className="bg-[#131d31] border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-white">
+                                {reqItem.med_nome || 'Medicamento'} ({reqItem.hora})
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-semibold">
+                                {isUndo ? 'Desfazer Dose' : 'Confirmar Dose'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-300">
+                              Motivo informado pelo paciente: <strong>&ldquo;{reqItem.reason || 'Não informado'}&rdquo;</strong>
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              disabled={actionLoading}
+                              onClick={() => handleResolveApprovalRequest(reqItem.id, 'approved')}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1"
+                            >
+                              <Check size={14} className="w-3.5 h-3.5" />
+                              <span>Aprovar</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={actionLoading}
+                              onClick={() => handleResolveApprovalRequest(reqItem.id, 'rejected')}
+                              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1"
+                            >
+                              <X size={14} className="w-3.5 h-3.5" />
+                              <span>Recusar</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* KPIs de Administração */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
@@ -1199,19 +1602,21 @@ export default function CuidadorWebPage() {
                 <div className="bg-[#131d31] p-4 rounded-xl border border-slate-800">
                   <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Confirmadas</div>
                   <div className="text-2xl font-black text-emerald-400">{confirmedDosesToday}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Pelo paciente ou cuidador</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Paciente ou cuidador</div>
                 </div>
 
                 <div className="bg-[#131d31] p-4 rounded-xl border border-slate-800">
-                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Pendentes</div>
-                  <div className="text-2xl font-black text-amber-400">{pendingDosesToday}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Aguardando confirmação</div>
+                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Sem Confirmação</div>
+                  <div className="text-2xl font-black text-amber-400">{unconfirmedDosesToday}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {pendingDosesToday} pendente(s) no total
+                  </div>
                 </div>
 
                 <div className="bg-[#131d31] p-4 rounded-xl border border-slate-800">
-                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Não Tomadas</div>
+                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Não Administradas</div>
                   <div className="text-2xl font-black text-rose-400">{missedDosesToday}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Com justificativa arquivada</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Com justificativa clínica</div>
                 </div>
               </div>
 
@@ -1220,19 +1625,28 @@ export default function CuidadorWebPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
                   <div>
                     <h2 className="text-base font-bold text-white">Linha do Tempo de Doses</h2>
-                    <p className="text-xs text-slate-400">Horários previstos e registro fático de ingestão</p>
+                    <p className="text-xs text-slate-400">
+                      Distinção entre horário previsto, horário real da administração e momento do registro
+                    </p>
                   </div>
 
-                  <div className="flex items-center gap-1 bg-[#0b1120] p-1 rounded-xl border border-slate-800 text-xs">
-                    {['all', 'pending', 'confirmed', 'missed'].map((st) => (
+                  <div className="flex items-center gap-1 bg-[#0b1120] p-1 rounded-xl border border-slate-800 text-xs flex-wrap">
+                    {[
+                      { id: 'all', label: 'Todas' },
+                      { id: 'pending', label: 'Pendentes' },
+                      { id: 'confirmed', label: 'Confirmadas' },
+                      { id: 'missed', label: 'Não Administradas' },
+                    ].map((st) => (
                       <button
-                        key={st}
-                        onClick={() => setDoseStatusFilter(st)}
+                        key={st.id}
+                        onClick={() => setDoseStatusFilter(st.id)}
                         className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                          doseStatusFilter === st ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                          doseStatusFilter === st.id
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        {st === 'all' ? 'Todas' : st === 'pending' ? 'Pendentes' : st === 'confirmed' ? 'Confirmadas' : 'Não Tomadas'}
+                        {st.label}
                       </button>
                     ))}
                   </div>
@@ -1246,67 +1660,108 @@ export default function CuidadorWebPage() {
                   <div className="space-y-3">
                     {todayDoses
                       .filter((d) => doseStatusFilter === 'all' || d.status === doseStatusFilter)
-                      .map((dose) => (
-                        <div
-                          key={dose.id}
-                          className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 transition-colors gap-3"
-                        >
-                          <div className="flex items-center gap-3.5">
-                            <div
-                              className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-xs sm:text-sm border shrink-0 ${
-                                dose.status === 'confirmed'
-                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                  : dose.status === 'missed'
-                                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                              }`}
-                            >
-                              {dose.hora}
-                            </div>
+                      .map((dose) => {
+                        const administeredTimeStr = dose.administered_at
+                          ? new Date(dose.administered_at).toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : null;
+                        const recordedTimeStr = dose.recorded_at
+                          ? new Date(dose.recorded_at).toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : null;
 
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-bold text-white text-sm">{dose.med_name}</span>
-                                <span className="text-xs text-slate-400">({dose.dosagem})</span>
-                                <span
-                                  className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
-                                    dose.status === 'confirmed'
-                                      ? 'bg-emerald-500/20 text-emerald-300'
-                                      : dose.status === 'missed'
-                                      ? 'bg-rose-500/20 text-rose-300'
-                                      : 'bg-amber-500/20 text-amber-300'
-                                  }`}
-                                >
-                                  {dose.status === 'confirmed'
-                                    ? dose.is_retroactive
-                                      ? 'Confirmada (Cuidador)'
-                                      : 'Tomada (Paciente)'
+                        return (
+                          <div
+                            key={dose.id}
+                            className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 transition-colors gap-3"
+                          >
+                            <div className="flex items-center gap-3.5">
+                              <div
+                                className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center font-bold text-xs sm:text-sm border shrink-0 ${
+                                  dose.status === 'confirmed'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                                     : dose.status === 'missed'
-                                    ? 'Não Tomada'
-                                    : 'Pendente'}
-                                </span>
+                                    ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                    : dose.display_category === 'unconfirmed'
+                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                    : 'bg-slate-800/70 text-slate-300 border-slate-700'
+                                }`}
+                              >
+                                <span>{dose.hora}</span>
                               </div>
 
-                              <div className="text-xs text-slate-400 mt-0.5">
-                                Paciente: <strong className="text-slate-300">{selectedPatient?.nome}</strong>
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold text-white text-sm">{dose.med_name}</span>
+                                  <span className="text-xs text-slate-400">({dose.dosagem})</span>
+                                  <span
+                                    className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
+                                      dose.display_category === 'patient_confirmed'
+                                        ? 'bg-emerald-500/20 text-emerald-300'
+                                        : dose.display_category === 'caregiver_confirmed'
+                                        ? 'bg-blue-500/20 text-blue-300'
+                                        : dose.display_category === 'late'
+                                        ? 'bg-amber-500/20 text-amber-300'
+                                        : dose.display_category === 'missed'
+                                        ? 'bg-rose-500/20 text-rose-300'
+                                        : dose.display_category === 'unconfirmed'
+                                        ? 'bg-amber-500/20 text-amber-300'
+                                        : 'bg-slate-800 text-slate-300'
+                                    }`}
+                                  >
+                                    {dose.status_label}
+                                  </span>
+                                </div>
+
+                                <div className="text-xs text-slate-400 mt-1 space-x-2">
+                                  <span>
+                                    Previsto: <strong className="text-slate-300">{dose.hora}</strong>
+                                  </span>
+                                  {administeredTimeStr && (
+                                    <span>
+                                      • Administrado às <strong className="text-slate-300">{administeredTimeStr}</strong>
+                                    </span>
+                                  )}
+                                  {recordedTimeStr && (
+                                    <span>
+                                      • Registrado às <strong className="text-slate-300">{recordedTimeStr}</strong>
+                                    </span>
+                                  )}
+                                  {dose.confirmed_by_name && (
+                                    <span>
+                                      • Autor: <strong className="text-slate-300">{dose.confirmed_by_name}</strong>
+                                    </span>
+                                  )}
+                                </div>
+                                {dose.correction_reason && (
+                                  <div className="text-[11px] text-slate-400 mt-0.5">
+                                    Observação: <span className="text-slate-300">{dose.correction_reason}</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
-                          </div>
 
-                          <div className="flex items-center gap-2 self-end sm:self-center">
-                            <button
-                              onClick={() => {
-                                setSelectedDoseTarget(dose);
-                                setDoseActionReason('');
-                                setShowDoseModal(true);
-                              }}
-                              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-md transition-colors"
-                            >
-                              Registrar Ação
-                            </button>
+                            <div className="flex items-center gap-2 self-end sm:self-center">
+                              <button
+                                onClick={() => {
+                                  setSelectedDoseTarget(dose);
+                                  setDoseAdministeredTime(dose.hora);
+                                  setDoseActionReason('');
+                                  setConfirmDoseSave(false);
+                                  setShowDoseModal(true);
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-md transition-colors"
+                              >
+                                Registrar Ação
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 )}
               </div>
@@ -1320,7 +1775,7 @@ export default function CuidadorWebPage() {
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Pacientes Acompanhados</h1>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Gerencie vínculos, convites ou cadastre familiares dependentes.
+                    Gerencie vínculos ativos autorizados, convites ou cadastre familiares dependentes.
                   </p>
                 </div>
 
@@ -1329,103 +1784,124 @@ export default function CuidadorWebPage() {
                     onClick={() => setShowInviteModal(true)}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
                   >
-                    <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                    <KeyRound size={14} className="w-3.5 h-3.5 text-amber-400" />
                     <span>Aceitar Convite</span>
                   </button>
                   <button
-                    onClick={() => setShowNewPatientModal(true)}
+                    onClick={() => {
+                      setNewPatientForm(EMPTY_PATIENT_FORM);
+                      setConfirmPatientSave(false);
+                      setShowNewPatientModal(true);
+                    }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
                   >
-                    <UserPlus className="w-3.5 h-3.5" />
+                    <UserPlus size={14} className="w-3.5 h-3.5" />
                     <span>Novo Paciente</span>
                   </button>
                 </div>
               </div>
 
               <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <Search size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchPatient}
                   onChange={(e) => setSearchPatient(e.target.value)}
-                  placeholder="Pesquisar paciente..."
+                  placeholder="Pesquisar paciente vinculado..."
                   className="w-full bg-[#131d31] border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {patients
-                  .filter((p) => p.nome.toLowerCase().includes(searchPatient.toLowerCase()))
-                  .map((p) => (
-                    <div
-                      key={p.patient_id}
-                      onClick={() => setSelectedPatientId(p.patient_id)}
-                      className={`bg-[#131d31] p-5 rounded-2xl border transition-all cursor-pointer ${
-                        selectedPatientId === p.patient_id
-                          ? 'border-blue-500 ring-1 ring-blue-500/50'
-                          : 'border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 text-sm">
-                            {p.nome.slice(0, 1)}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-bold text-white text-sm">{p.nome}</h3>
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold">
-                                {p.relationship_label}
-                              </span>
+              {patients.length === 0 ? (
+                <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-8 text-center text-slate-400 text-xs sm:text-sm">
+                  Nenhum paciente com vínculo ativo encontrado para esta conta de cuidador.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {patients
+                    .filter((p) => p.nome.toLowerCase().includes(searchPatient.toLowerCase()))
+                    .map((p) => (
+                      <div
+                        key={p.patient_id}
+                        onClick={() => setSelectedPatientId(p.patient_id)}
+                        className={`bg-[#131d31] p-5 rounded-2xl border transition-all cursor-pointer ${
+                          selectedPatientId === p.patient_id
+                            ? 'border-blue-500 ring-1 ring-blue-500/50'
+                            : 'border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 text-sm">
+                              {p.nome.slice(0, 1)}
                             </div>
-                            <div className="text-[11px] text-slate-400 mt-0.5">
-                              Tipo Sanguíneo: <strong className="text-slate-300">{p.blood_type}</strong>
-                              {p.is_managed && <span className="text-amber-400 ml-2 font-semibold">• Dependente</span>}
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-white text-sm">{p.nome}</h3>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold">
+                                  {p.relationship_label}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-0.5">
+                                Tipo Sanguíneo:{' '}
+                                <strong className="text-slate-300">{p.blood_type || 'Não informado'}</strong>
+                                {p.is_managed && (
+                                  <span className="text-amber-400 ml-2 font-semibold">• Dependente</span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRevokeRelationship(p.relationship_id);
-                          }}
-                          title="Revogar acompanhamento"
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRevokeRelationship(p.relationship_id);
+                            }}
+                            title="Revogar acompanhamento"
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          >
+                            <Trash2 size={16} className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-              </div>
+                    ))}
+                </div>
+              )}
             </div>
           )}
 
           {/* TAB 3: MEDICAMENTOS & ESTOQUE */}
-          {currentTab === 'meds' && (
+          {currentTab === 'meds' && selectedPatient && (
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Prescrições e Estoque</h1>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Tratamentos de {selectedPatient?.nome || 'Paciente'}.
+                    Tratamentos de {selectedPatient.nome}.
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setShowStockModal(true)}
+                    onClick={() => {
+                      setStockForm(EMPTY_STOCK_FORM);
+                      setConfirmStockSave(false);
+                      setShowStockModal(true);
+                    }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
                   >
-                    <Package className="w-3.5 h-3.5 text-emerald-400" />
+                    <Package size={14} className="w-3.5 h-3.5 text-emerald-400" />
                     <span>Reposição de Estoque</span>
                   </button>
                   <button
-                    onClick={() => setShowNewMedModal(true)}
+                    onClick={() => {
+                      setNewMedForm(EMPTY_MED_FORM);
+                      setConfirmMedSave(false);
+                      setShowNewMedModal(true);
+                    }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus size={14} className="w-3.5 h-3.5" />
                     <span>Novo Medicamento</span>
                   </button>
                 </div>
@@ -1438,7 +1914,7 @@ export default function CuidadorWebPage() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {medications.map((med) => {
-                    const horarios = Array.isArray(med.horarios) ? med.horarios : ['08:00'];
+                    const horarios = Array.isArray(med.horarios) ? med.horarios : [];
                     const dosesPerDay = Math.max(1, horarios.length);
                     const daysRemaining = Math.floor(Number(med.quantidade || 0) / dosesPerDay);
                     const isLowStock = Number(med.quantidade || 0) <= 5;
@@ -1448,25 +1924,31 @@ export default function CuidadorWebPage() {
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                              <Pill className="w-5 h-5" />
+                              <Pill size={20} className="w-5 h-5" />
                             </div>
                             <div>
                               <h3 className="font-bold text-white text-base">{med.nome}</h3>
                               <p className="text-xs text-slate-400">
-                                {med.dosagem} • {med.unidade || 'comprimido'}
+                                {med.dosagem} • {med.unidade || 'unidade'}
                               </p>
                             </div>
                           </div>
 
                           <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-semibold uppercase">
-                            {med.treatment_type === 'continuous' ? 'Contínuo' : med.treatment_type === 'sos' ? 'SOS' : 'Temporário'}
+                            {med.treatment_type === 'continuous'
+                              ? 'Contínuo'
+                              : med.treatment_type === 'sos'
+                              ? 'SOS'
+                              : 'Temporário'}
                           </span>
                         </div>
 
                         <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
                           <div>
                             <span className="text-slate-400">Horários: </span>
-                            <span className="font-semibold text-white">{horarios.join(', ')}</span>
+                            <span className="font-semibold text-white">
+                              {horarios.length > 0 ? horarios.join(', ') : 'Não preenchido'}
+                            </span>
                           </div>
 
                           <div className="flex items-center gap-1.5">
@@ -1491,21 +1973,24 @@ export default function CuidadorWebPage() {
           )}
 
           {/* TAB 4: AGENDA */}
-          {currentTab === 'agenda' && (
+          {currentTab === 'agenda' && selectedPatient && (
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Agenda Médica</h1>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Consultas e exames de {selectedPatient?.nome || 'Paciente'}.
+                    Consultas e exames de {selectedPatient.nome}.
                   </p>
                 </div>
 
                 <button
-                  onClick={() => setShowAppointmentModal(true)}
+                  onClick={() => {
+                    setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
+                    setShowAppointmentModal(true);
+                  }}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus size={14} className="w-3.5 h-3.5" />
                   <span>Novo Compromisso</span>
                 </button>
               </div>
@@ -1523,7 +2008,7 @@ export default function CuidadorWebPage() {
                     >
                       <div className="flex items-start gap-3.5">
                         <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center font-bold text-indigo-400 shrink-0">
-                          <Calendar className="w-5 h-5" />
+                          <Calendar size={20} className="w-5 h-5" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -1534,18 +2019,18 @@ export default function CuidadorWebPage() {
                           </div>
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mt-1.5">
                             <span className="flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-slate-500" />
+                              <Clock size={14} className="w-3.5 h-3.5 text-slate-500" />
                               {apt.date} {apt.time ? `às ${apt.time}` : ''}
                             </span>
                             {apt.doctor && (
                               <span className="flex items-center gap-1">
-                                <User className="w-3.5 h-3.5 text-slate-500" />
+                                <User size={14} className="w-3.5 h-3.5 text-slate-500" />
                                 {apt.doctor}
                               </span>
                             )}
                             {apt.location && (
                               <span className="flex items-center gap-1">
-                                <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                                <MapPin size={14} className="w-3.5 h-3.5 text-slate-500" />
                                 {apt.location}
                               </span>
                             )}
@@ -1560,7 +2045,7 @@ export default function CuidadorWebPage() {
           )}
 
           {/* TAB 5: INDICADORES */}
-          {currentTab === 'reports' && (
+          {currentTab === 'reports' && selectedPatient && (
             <div className="space-y-6">
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Indicadores de Adesão</h1>
@@ -1573,7 +2058,7 @@ export default function CuidadorWebPage() {
                 <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
                     <span>Taxa Geral de Adesão</span>
-                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                    <TrendingUp size={16} className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div className="text-3xl font-black text-white">{adherenceRate}%</div>
                   <p className="text-[11px] text-slate-500 mt-1">
@@ -1584,7 +2069,7 @@ export default function CuidadorWebPage() {
                 <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
                     <span>Doses Confirmadas</span>
-                    <CheckCircle2 className="w-4 h-4 text-blue-400" />
+                    <CheckCircle2 size={16} className="w-4 h-4 text-blue-400" />
                   </div>
                   <div className="text-3xl font-black text-white">{confirmedDosesToday}</div>
                   <p className="text-[11px] text-slate-500 mt-1">
@@ -1594,8 +2079,8 @@ export default function CuidadorWebPage() {
 
                 <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>Recusas Registradas</span>
-                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    <span>Não Administradas</span>
+                    <AlertTriangle size={16} className="w-4 h-4 text-amber-400" />
                   </div>
                   <div className="text-3xl font-black text-amber-400">{missedDosesToday}</div>
                   <p className="text-[11px] text-slate-500 mt-1">
@@ -1607,12 +2092,12 @@ export default function CuidadorWebPage() {
           )}
 
           {/* TAB 6: AUDITORIA */}
-          {currentTab === 'audit' && (
+          {currentTab === 'audit' && selectedPatient && (
             <div className="space-y-6">
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Trilha de Auditoria</h1>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Registros imutáveis com autor, timestamp e justificativa clínica.
+                  Registros imutáveis com autor, origem, timestamp e justificativa clínica.
                 </p>
               </div>
 
@@ -1631,7 +2116,7 @@ export default function CuidadorWebPage() {
                         </span>
                       </div>
                       <div className="text-slate-300">
-                        Motivo: <strong className="text-white">{log.reason || 'Ajuste de rotina'}</strong>
+                        Motivo: <strong className="text-white">{log.reason || 'Ajuste registrado'}</strong>
                       </div>
                     </div>
                   ))}
@@ -1650,7 +2135,7 @@ export default function CuidadorWebPage() {
           <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
             <h3 className="text-base font-bold text-white mb-1">Aceitar Código de Convite</h3>
             <p className="text-xs text-slate-400 mb-4">
-              Informe o código de 24 caracteres gerado pelo paciente em seu aplicativo Android MediCare.
+              Informe o código de convite gerado pelo paciente em seu aplicativo Android MediCare.
             </p>
             <form onSubmit={handleAcceptInvite} className="space-y-4">
               <input
@@ -1690,44 +2175,80 @@ export default function CuidadorWebPage() {
           <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
             <h3 className="text-base font-bold text-white mb-1">Cadastrar Paciente Dependente</h3>
             <p className="text-xs text-slate-400 mb-4">
-              Para familiares que não utilizam smartphone ou e-mail pessoal.
+              Preencha os dados reais do paciente. Nenhum valor clínico é preenchido automaticamente.
             </p>
             <form onSubmit={handleCreateManagedPatient} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Nome Completo</label>
+                <label className="block text-[11px] text-slate-400 mb-1">Nome Completo *</label>
                 <input
                   type="text"
                   required
                   value={newPatientForm.nome}
                   onChange={(e) => setNewPatientForm({ ...newPatientForm, nome: e.target.value })}
-                  placeholder="Nome do paciente"
+                  placeholder="Nome completo do paciente"
                   className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Parentesco</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">Parentesco / Vínculo *</label>
                   <input
                     type="text"
+                    required
                     value={newPatientForm.relationship_label}
                     onChange={(e) => setNewPatientForm({ ...newPatientForm, relationship_label: e.target.value })}
-                    placeholder="Mãe / Pai / Filho"
+                    placeholder="Ex: Mãe, Pai, Filho"
                     className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Tipo Sanguíneo</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">Tipo Sanguíneo (opcional)</label>
                   <select
                     value={newPatientForm.blood_type}
                     onChange={(e) => setNewPatientForm({ ...newPatientForm, blood_type: e.target.value })}
                     className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                   >
+                    <option value="">Não informado</option>
                     {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bt) => (
-                      <option key={bt} value={bt}>{bt}</option>
+                      <option key={bt} value={bt}>
+                        {bt}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Data de Nascimento (opcional)</label>
+                  <input
+                    type="date"
+                    value={newPatientForm.dob}
+                    onChange={(e) => setNewPatientForm({ ...newPatientForm, dob: e.target.value })}
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Telefone (opcional)</label>
+                  <input
+                    type="tel"
+                    value={newPatientForm.phone}
+                    onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })}
+                    placeholder="(00) 00000-0000"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-start gap-2.5 pt-2 text-xs text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={confirmPatientSave}
+                  onChange={(e) => setConfirmPatientSave(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
+                />
+                <span>Confirmo que conferi os dados clínicos e autorizo o cadastro deste paciente dependente.</span>
+              </label>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -1738,8 +2259,8 @@ export default function CuidadorWebPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+                  disabled={actionLoading || !confirmPatientSave}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Cadastrando...' : 'Cadastrar Paciente'}
                 </button>
@@ -1757,54 +2278,95 @@ export default function CuidadorWebPage() {
           <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
             <h3 className="text-base font-bold text-white mb-1">Cadastrar Medicamento</h3>
             <p className="text-xs text-slate-400 mb-4">
-              Prescrição para <strong>{selectedPatient?.nome}</strong>.
+              Prescrição para <strong>{selectedPatient?.nome}</strong>. Preencha exatamente conforme a receita médica.
             </p>
             <form onSubmit={handleAddMedication} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Nome Comercial</label>
+                <label className="block text-[11px] text-slate-400 mb-1">Nome do Medicamento *</label>
                 <input
                   type="text"
                   required
                   value={newMedForm.nome}
                   onChange={(e) => setNewMedForm({ ...newMedForm, nome: e.target.value })}
-                  placeholder="Ex: Losartana Potássica"
+                  placeholder="Informe o nome do medicamento"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Princípio Ativo (opcional)</label>
+                <input
+                  type="text"
+                  value={newMedForm.principio_ativo}
+                  onChange={(e) => setNewMedForm({ ...newMedForm, principio_ativo: e.target.value })}
+                  placeholder="Informe se desejar registrar"
                   className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Dosagem</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">Dosagem Prescrita *</label>
                   <input
                     type="text"
                     required
                     value={newMedForm.dosagem}
                     onChange={(e) => setNewMedForm({ ...newMedForm, dosagem: e.target.value })}
-                    placeholder="Ex: 50mg"
+                    placeholder="Ex: 50mg, 20 gotas"
                     className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Estoque Inicial</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">Unidade *</label>
+                  <select
+                    required
+                    value={newMedForm.unidade}
+                    onChange={(e) => setNewMedForm({ ...newMedForm, unidade: e.target.value })}
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  >
+                    <option value="">Selecione...</option>
+                    <option value="comprimido">Comprimido</option>
+                    <option value="capsula">Cápsula</option>
+                    <option value="gotas">Gotas</option>
+                    <option value="ml">mL</option>
+                    <option value="ampola">Ampola / Dose</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Estoque Inicial *</label>
                   <input
                     type="number"
+                    min="0"
                     required
                     value={newMedForm.quantidade}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, quantidade: Number(e.target.value) })}
+                    onChange={(e) => setNewMedForm({ ...newMedForm, quantidade: e.target.value })}
+                    placeholder="Quantidade atual"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Horários (HH:MM) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newMedForm.horarios}
+                    onChange={(e) => setNewMedForm({ ...newMedForm, horarios: e.target.value })}
+                    placeholder="Ex: 08:00, 20:00"
                     className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Horários (separados por vírgula)</label>
+
+              <label className="flex items-start gap-2.5 pt-2 text-xs text-slate-300 cursor-pointer select-none">
                 <input
-                  type="text"
-                  required
-                  value={newMedForm.horarios}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, horarios: e.target.value })}
-                  placeholder="08:00, 20:00"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  type="checkbox"
+                  checked={confirmMedSave}
+                  onChange={(e) => setConfirmMedSave(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
                 />
-              </div>
+                <span>Confirmo que revisei o nome, a dosagem, os horários e o estoque inicial deste medicamento.</span>
+              </label>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -1815,8 +2377,8 @@ export default function CuidadorWebPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+                  disabled={actionLoading || !confirmMedSave}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Salvando...' : 'Salvar Medicamento'}
                 </button>
@@ -1832,45 +2394,71 @@ export default function CuidadorWebPage() {
       {showDoseModal && selectedDoseTarget && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-1">Registro de Dose</h3>
+            <h3 className="text-base font-bold text-white mb-1">Registro Clínico de Administração</h3>
             <p className="text-xs text-slate-400 mb-4">
-              <strong>{selectedDoseTarget.med_name}</strong> às <strong>{selectedDoseTarget.hora}</strong> para {selectedPatient?.nome}.
+              <strong>{selectedDoseTarget.med_name}</strong> ({selectedDoseTarget.dosagem}) previsto para{' '}
+              <strong>{selectedDoseTarget.hora}</strong> • Paciente: <strong>{selectedPatient?.nome}</strong>.
             </p>
 
-            <div className="space-y-3 mb-5">
+            <div className="space-y-3 mb-4">
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">
-                  Justificativa / Observação Clínica (opcional para confirmação, obrigatória para recusa)
+                  Horário Real da Administração (para doses tomadas)
+                </label>
+                <input
+                  type="time"
+                  value={doseAdministeredTime}
+                  onChange={(e) => setDoseAdministeredTime(e.target.value)}
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white focus:outline-none focus:border-blue-500"
+                />
+                <span className="block text-[10px] text-slate-500 mt-1">
+                  O sistema separa o horário previsto ({selectedDoseTarget.hora}), o horário real informado acima e o timestamp exato deste registro.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">
+                  Justificativa / Observação Clínica (obrigatória para dose não administrada)
                 </label>
                 <input
                   type="text"
                   value={doseActionReason}
                   onChange={(e) => setDoseActionReason(e.target.value)}
-                  placeholder="Ex: Administrado na visita / Paciente queixou-se de náusea"
+                  placeholder="Ex: Administrado após o café / Paciente recusou por náusea"
                   className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 />
               </div>
+
+              <label className="flex items-start gap-2.5 pt-1 text-xs text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={confirmDoseSave}
+                  onChange={(e) => setConfirmDoseSave(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
+                />
+                <span>Confirmo a veracidade deste registro de administração sob minha responsabilidade de cuidador.</span>
+              </label>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2">
               <button
                 type="button"
-                disabled={actionLoading}
+                disabled={actionLoading || !confirmDoseSave}
                 onClick={() => handleConfirmDose('confirmed')}
-                className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
               >
-                <Check className="w-4 h-4" />
-                <span>Confirmar como Tomada</span>
+                <Check size={16} className="w-4 h-4" />
+                <span>Registrar Administração</span>
               </button>
 
               <button
                 type="button"
-                disabled={actionLoading}
+                disabled={actionLoading || !confirmDoseSave}
                 onClick={() => handleConfirmDose('missed')}
-                className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
               >
-                <X className="w-4 h-4" />
-                <span>Marcar Não Tomada</span>
+                <X size={16} className="w-4 h-4" />
+                <span>Marcar Não Administrada</span>
               </button>
             </div>
 
@@ -1894,7 +2482,7 @@ export default function CuidadorWebPage() {
             <h3 className="text-base font-bold text-white mb-2">Agendar Consulta ou Exame</h3>
             <form onSubmit={handleAddAppointment} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Título do Evento</label>
+                <label className="block text-[11px] text-slate-400 mb-1">Título do Evento *</label>
                 <input
                   type="text"
                   required
@@ -1906,7 +2494,7 @@ export default function CuidadorWebPage() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Data</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">Data *</label>
                   <input
                     type="date"
                     required
@@ -1916,7 +2504,7 @@ export default function CuidadorWebPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Horário</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">Horário *</label>
                   <input
                     type="time"
                     required
@@ -1927,12 +2515,22 @@ export default function CuidadorWebPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Médico ou Especialista</label>
+                <label className="block text-[11px] text-slate-400 mb-1">Médico ou Especialista (opcional)</label>
                 <input
                   type="text"
                   value={newAppointmentForm.doctor}
                   onChange={(e) => setNewAppointmentForm({ ...newAppointmentForm, doctor: e.target.value })}
-                  placeholder="Ex: Dr. Feres Chaddad Neto"
+                  placeholder="Nome do profissional"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Local / Clínica (opcional)</label>
+                <input
+                  type="text"
+                  value={newAppointmentForm.location}
+                  onChange={(e) => setNewAppointmentForm({ ...newAppointmentForm, location: e.target.value })}
+                  placeholder="Endereço ou consultório"
                   className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                 />
               </div>
@@ -1966,7 +2564,7 @@ export default function CuidadorWebPage() {
             <h3 className="text-base font-bold text-white mb-2">Registrar Reposição de Estoque</h3>
             <form onSubmit={handleAddStock} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Medicamento</label>
+                <label className="block text-[11px] text-slate-400 mb-1">Medicamento *</label>
                 <select
                   required
                   value={stockForm.medication_id}
@@ -1982,15 +2580,38 @@ export default function CuidadorWebPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Quantidade Adicionada</label>
+                <label className="block text-[11px] text-slate-400 mb-1">Quantidade Adicionada *</label>
                 <input
                   type="number"
+                  min="1"
                   required
                   value={stockForm.quantity_added}
-                  onChange={(e) => setStockForm({ ...stockForm, quantity_added: Number(e.target.value) })}
+                  onChange={(e) => setStockForm({ ...stockForm, quantity_added: e.target.value })}
+                  placeholder="Informe quantas unidades foram adquiridas"
                   className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
                 />
               </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Observação (opcional)</label>
+                <input
+                  type="text"
+                  value={stockForm.notes}
+                  onChange={(e) => setStockForm({ ...stockForm, notes: e.target.value })}
+                  placeholder="Ex: Compra em farmácia"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                />
+              </div>
+
+              <label className="flex items-start gap-2.5 pt-1 text-xs text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={confirmStockSave}
+                  onChange={(e) => setConfirmStockSave(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
+                />
+                <span>Confirmo a quantidade adicionada ao estoque deste medicamento.</span>
+              </label>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -2001,8 +2622,8 @@ export default function CuidadorWebPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+                  disabled={actionLoading || !confirmStockSave}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Registrando...' : 'Confirmar Reposição'}
                 </button>
@@ -2025,7 +2646,7 @@ export default function CuidadorWebPage() {
                 isActive ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon className="w-5 h-5 mb-0.5" />
+              <Icon size={20} className="w-5 h-5 mb-0.5" />
               <span className="text-[10px] leading-none">{item.label.split(' ')[0]}</span>
             </button>
           );

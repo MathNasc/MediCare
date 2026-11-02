@@ -14,9 +14,16 @@ html, body {
   margin: 0;
   padding: 0;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Touch targets and smooth scrolling */
-button, a, input, select {
+button, a, input, select, textarea {
   font-family: inherit;
+}
+
+/* Defensive SVG sizing to prevent oversized icons if a cached stylesheet is delayed */
+svg {
+  max-width: 100%;
+  flex-shrink: 0;
 }

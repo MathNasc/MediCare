@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone',
+  ...(process.env.NEXT_STANDALONE === 'true' ? { output: 'standalone' } : {}),
   reactStrictMode: true,
   env: {
     NEXT_PUBLIC_APP_URL:
@@ -69,11 +69,18 @@ const nextConfig = {
         ],
       },
       {
+        source: '/_next/static/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
         source: '/((?!_next/static|sw\\.js).*)',
         headers: [
+          { key: 'Cache-Control',          value: 'no-cache, no-store, must-revalidate' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-XSS-Protection',       value: '1; mode=block' },
-          { key: 'Referrer-Policy',         value: 'strict-origin-when-cross-origin' },
+          { key: 'Referrer-Policy',        value: 'strict-origin-when-cross-origin' },
         ],
       },
     ];

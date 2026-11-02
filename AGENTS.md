@@ -1,44 +1,38 @@
 ---
 name: medicare-diretriz-permanente
-description: "Diretriz permanente de desenvolvimento do MediCare: MediCare Paciente Android é a única aplicação ativa em desenvolvimento; código web legado foi removido."
+description: "Diretriz permanente de desenvolvimento do MediCare: MediCare Paciente Android e MediCare Cuidador Web oficial integrados ao backend Next.js e PostgreSQL Oracle."
 ---
 
 # MEDICARE — DIRETRIZ PERMANENTE DE DESENVOLVIMENTO
 
-As seguintes regras são **obrigatórias e permanentes** para todas as alterações neste projeto, inclusive quando não forem mencionadas explicitamente na solicitação do usuário.
+As seguintes regras são **obrigatórias e permanentes** para todas as alterações neste projeto:
 
-## 1. Aplicação principal: MediCare Paciente Android
-- O **MediCare Paciente Android** (`/apps/paciente-android` em Kotlin e Jetpack Compose, e empacotamento nativo Android em `/src-apk` / `MediCare-Paciente.apk`) é a **única aplicação ativa em desenvolvimento**.
-- Todo o desenvolvimento deve ocorrer exclusivamente no aplicativo Android.
-- Toda alteração, correção, melhoria, implementação de funcionalidade ou mudança de UI/UX deve ser realizada exclusivamente no aplicativo Android.
+## 1. Aplicações Oficiais Ativas
+- **MediCare Paciente Android** (`/apps/paciente-android` em Kotlin/Jetpack Compose e empacotamento nativo em `/src-apk` / `MediCare-Paciente.apk`): única aplicação para uso direto pelo paciente (independente ou dependente).
+- **MediCare Cuidador Web** (`/src/app/cuidador/page.jsx`): única aplicação web oficial para cuidadores e familiares autorizados, servida diretamente pelo Next.js App Router.
+- **Portal MediCare** (`/src/app/page.jsx`): página pública institucional com acesso ao MediCare Cuidador e download direto do instalador Android (`/api/apk`).
 
-## 2. Todo o desenvolvimento deve ocorrer no aplicativo Android
-- O app Android possui arquitetura nativa com suporte completo offline, notificações exatas via `AlarmManager`, sincronização com o banco e telas de auto-cuidado, estoque, doses e perfis.
+## 2. Proibição de Frontends Paralelos ou Duplicados
+- Não crie aplicações paralelas (como projetos Vite separados em `/apps/cuidador-web`) nem recrie telas web legadas de paciente.
+- Toda evolução do MediCare Cuidador deve ocorrer exclusivamente em `/src/app/cuidador/page.jsx` e seus módulos compartilhados em `/src/lib`.
+- Toda evolução do fluxo do paciente deve ocorrer exclusivamente no aplicativo Android (`/apps/paciente-android` e `/src-apk`).
 
-## 3. Não implementar funcionalidades no frontend web
-- Não crie novas interfaces React para usuários ou fluxos de paciente na web.
-- A camada web atua unicamente como servidor de API (`/src/app/api`) e distribuição do instalador APK (`/api/apk`).
+## 3. Segurança de Autenticação, Autorização e Dados Clínicos
+- **Sessão Web:** Utiliza cookies `HttpOnly`, `Secure` e `SameSite=Lax` com proteção CSRF (`X-CSRF-Token`), sem armazenar JWT ou refresh tokens em `localStorage`.
+- **Compatibilidade Mobile:** O backend preserva suporte completo a `Authorization: Bearer <token>` para o MediCare Paciente Android.
+- **Autorização de Pacientes:** Toda consulta ou modificação de dados de pacientes no backend deve validar vínculo ativo (`caregiver_relationships.status = 'active'`) e permissão compatível. Nunca listar perfis sem vínculo explícito.
+- **Formulários Clínicos:** Nunca utilizar valores clínicos predefinidos (como tipo sanguíneo `'O+'`, datas de nascimento fictícias ou dosagens padrão) em formulários de pacientes e medicamentos.
 
-## 4. Código web legado foi removido e não deve ser recriado sem autorização
-- As telas, componentes, hooks, contextos e estilos da antiga versão web/PWA foram totalmente auditados e removidos do repositório para evitar duplicidade e manter o projeto focado e limpo.
-- Não recrie telas nem componentes React web sem autorização expressa.
+## 4. Banco de Dados e Migrações
+- O banco PostgreSQL na Oracle Cloud (`medicare_db`) utiliza migrações explícitas, versionadas e não destrutivas em `/database/migrations`.
+- Nenhuma alteração de esquema (`ALTER TABLE` / `CREATE TABLE`) deve ser executada silenciosamente durante requisições HTTP normais. Utilize `scripts/run_migrations.js`.
 
-## 5. MediCare Cuidador é um projeto futuro, a ser criado do zero apenas quando autorizado
-- Futuramente, somente quando houver **autorização explícita do usuário**, será desenvolvido o **MediCare Cuidador**, uma aplicação web responsiva criada do zero e com arquitetura própria.
-- Até essa autorização explícita, não inicie o desenvolvimento nem prepare telas para o cuidador web.
-
-## 6. Backend e banco de dados só devem ser alterados quando necessário ao Android
-- O backend compartilhado (`/src/app/api`), bibliotecas (`/src/lib`) e o banco de dados PostgreSQL na Oracle Cloud (`/oracle-migration`) só devem ser alterados quando estritamente necessário para o funcionamento do app Android, preservando a compatibilidade de dados e a segurança.
-
-## 7. O APK MediCare-Paciente.apk deve ser mantido atualizado na raiz após cada alteração relevante
-- Após qualquer alteração que afete o aplicativo Android, execute o pipeline de build:
+## 5. Atualização do APK Android
+- Após qualquer alteração que afete o aplicativo Android (`/apps/paciente-android` ou `/src-apk`), execute obrigatoriamente:
   ```bash
   bash scripts/rebuild_and_sign_apk.sh
   ```
-- O arquivo `MediCare-Paciente.apk` na raiz deve ser validado, assinado e mantido pronto para download e testes.
-
-## 8. Antes de qualquer alteração, consultar e respeitar essas diretrizes
-- Todo agente e desenvolvedor que interagir com o repositório deve consultar e respeitar rigorosamente essas diretrizes permanentes.
+- Mantenha o arquivo `MediCare-Paciente.apk` validado e assinado na raiz do repositório.
 
 ---
 name: cleanup-test-files

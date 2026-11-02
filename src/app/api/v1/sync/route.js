@@ -413,7 +413,7 @@ export async function POST(request) {
         user.social_name || user.apelido || null,
         user.email || null,
         cleanRole,
-        user.blood_type || user.tipo_sanguineo || 'O+',
+        user.blood_type || user.tipo_sanguineo || null,
         parsePgDate(user.dob || user.data_nascimento),
         user.sex || user.sexo || null,
         user.cpf || null,
@@ -553,12 +553,21 @@ export async function POST(request) {
       }
 
       await client.query(
-        `INSERT INTO historico_doses (id, med_id, user_id, hora, dose_date, status, quantidade_usada, is_retroactive, correction_reason, motivo, confirmed_by_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `INSERT INTO historico_doses (
+           id, med_id, user_id, hora, dose_date, status, quantidade_usada,
+           is_retroactive, correction_reason, motivo, confirmed_by_name,
+           confirmed_by_role, origin, atraso_minutos, administered_at
+         )
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (id) DO UPDATE SET
            status = EXCLUDED.status,
            hora = EXCLUDED.hora,
            dose_date = EXCLUDED.dose_date,
+           is_retroactive = EXCLUDED.is_retroactive,
+           confirmed_by_role = COALESCE(EXCLUDED.confirmed_by_role, historico_doses.confirmed_by_role),
+           origin = COALESCE(EXCLUDED.origin, historico_doses.origin),
+           atraso_minutos = COALESCE(EXCLUDED.atraso_minutos, historico_doses.atraso_minutos),
+           administered_at = COALESCE(EXCLUDED.administered_at, historico_doses.administered_at),
            correction_reason = COALESCE(EXCLUDED.correction_reason, historico_doses.correction_reason)`,
         [
           doseUuid,
@@ -572,6 +581,10 @@ export async function POST(request) {
           h.reason || h.correction_reason || h.correctionReason || h.motivo || null,
           h.motivo || h.reason || null,
           h.confirmed_by || h.confirmedByName || user.nome || 'Paciente',
+          h.confirmed_by_role || (cleanRole === 'cuidador' ? 'cuidador' : 'paciente'),
+          h.origin || 'android_sync',
+          parsePgNumeric(h.atraso_minutos ?? h.delay_minutes) ?? 0,
+          h.administered_at || null,
         ]
       );
     }

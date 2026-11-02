@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { Shield, ArrowRight, Download, CheckCircle, Calendar, HeartHandshake } from 'lucide-react';
 import CuidadorAutoRedirect from './CuidadorAutoRedirect';
@@ -9,7 +10,15 @@ export default async function HomePage({ searchParams }) {
   const forcePortal = resolvedParams?.portal === '1';
 
   if (!forcePortal) {
-    redirect('/cuidador');
+    const cookieStore = await cookies();
+    const hasSession =
+      Boolean(cookieStore.get('medicare_access_token')?.value) ||
+      Boolean(cookieStore.get('medicare_refresh_token')?.value) ||
+      cookieStore.get('medicare_cuidador_logged_in')?.value === '1';
+
+    if (hasSession) {
+      redirect('/cuidador');
+    }
   }
 
   return (
@@ -20,7 +29,7 @@ export default async function HomePage({ searchParams }) {
         {/* BLOCO A — APRESENTAÇÃO */}
         <section className="text-center space-y-4 max-w-2xl mx-auto pt-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold tracking-wide">
-            <HeartHandshake className="w-3.5 h-3.5 text-blue-400" />
+            <HeartHandshake size={14} className="w-3.5 h-3.5 text-blue-400 shrink-0" />
             <span>Cuidado e Saúde Compartilhada</span>
           </div>
 
@@ -40,7 +49,7 @@ export default async function HomePage({ searchParams }) {
           <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-7 flex flex-col justify-between shadow-xl shadow-black/20 hover:border-blue-500/40 transition-all group">
             <div className="space-y-3">
               <div className="w-11 h-11 rounded-xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center text-blue-400 mb-2">
-                <Shield className="w-5 h-5" />
+                <Shield size={20} className="w-5 h-5 shrink-0" />
               </div>
               
               <h2 className="text-xl font-bold text-white tracking-tight group-hover:text-blue-400 transition-colors">
@@ -59,7 +68,7 @@ export default async function HomePage({ searchParams }) {
                 className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-sm py-3 px-5 rounded-xl transition-colors shadow-lg shadow-blue-600/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
               >
                 <span>Acessar MediCare Cuidador</span>
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight size={16} className="w-4 h-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
               </a>
             </div>
           </div>
@@ -68,7 +77,7 @@ export default async function HomePage({ searchParams }) {
           <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-7 flex flex-col justify-between shadow-xl shadow-black/20 hover:border-emerald-500/40 transition-all group">
             <div className="space-y-3">
               <div className="w-11 h-11 rounded-xl bg-emerald-600/15 border border-emerald-500/25 flex items-center justify-center text-emerald-400 mb-2">
-                <Download className="w-5 h-5" />
+                <Download size={20} className="w-5 h-5 shrink-0" />
               </div>
 
               <h2 className="text-xl font-bold text-white tracking-tight group-hover:text-emerald-400 transition-colors">
@@ -87,7 +96,7 @@ export default async function HomePage({ searchParams }) {
                 className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold text-sm py-3 px-5 rounded-xl transition-colors shadow-lg shadow-emerald-600/20 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
               >
                 <span>Baixar aplicativo Android</span>
-                <Download className="w-4 h-4" />
+                <Download size={16} className="w-4 h-4 shrink-0" />
               </a>
             </div>
           </div>
@@ -99,7 +108,7 @@ export default async function HomePage({ searchParams }) {
             {/* Benefício 1 */}
             <div className="flex items-start gap-3.5">
               <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
-                <CheckCircle className="w-4 h-4" />
+                <CheckCircle size={16} className="w-4 h-4 shrink-0" />
               </div>
               <div className="space-y-1">
                 <h3 className="text-sm font-bold text-white">Organização</h3>
@@ -112,7 +121,7 @@ export default async function HomePage({ searchParams }) {
             {/* Benefício 2 */}
             <div className="flex items-start gap-3.5">
               <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-                <HeartHandshake className="w-4 h-4" />
+                <HeartHandshake size={16} className="w-4 h-4 shrink-0" />
               </div>
               <div className="space-y-1">
                 <h3 className="text-sm font-bold text-white">Acompanhamento</h3>
@@ -125,7 +134,7 @@ export default async function HomePage({ searchParams }) {
             {/* Benefício 3 */}
             <div className="flex items-start gap-3.5">
               <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 mt-0.5">
-                <Calendar className="w-4 h-4" />
+                <Calendar size={16} className="w-4 h-4 shrink-0" />
               </div>
               <div className="space-y-1">
                 <h3 className="text-sm font-bold text-white">Continuidade</h3>
@@ -139,7 +148,7 @@ export default async function HomePage({ searchParams }) {
 
       </div>
 
-      {/* Rodapé discreto */}
+      {/* BLOCO D — RODAPÉ DISCRETO */}
       <footer className="text-center pt-8 text-xs text-slate-500">
         MediCare • Gestão de Saúde e Cuidado Compartilhado
       </footer>

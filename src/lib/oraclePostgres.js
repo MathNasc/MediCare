@@ -1,7 +1,124 @@
 import { Pool } from 'pg';
 
 let poolInstance = null;
-let schemaInitialized = false;
+let schemaVerified = false;
+
+export const REQUIRED_CORE_TABLES = [
+  'app_users',
+  'auth_sessions',
+  'roles',
+  'profiles',
+  'medicamentos',
+  'historico_doses',
+  'caregiver_relationships',
+  'health_events',
+  'stock_movements',
+  'audit_logs',
+];
+
+export const OPTIONAL_COMPATIBILITY_TABLES = [
+  'calendar_notes',
+  'notes',
+  'custom_medications',
+  'notificacoes',
+  'approval_requests',
+  'schema_migrations',
+];
+
+export const VERSIONED_MIGRATIONS = [
+  {
+    version: '03_incremental_compatibility',
+    description: 'Colunas de rastreabilidade de doses, pacientes gerenciados e aprovações',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS public.schema_migrations (
+        version text PRIMARY KEY,
+        description text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS weight_updated_at timestamptz`,
+      `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_managed boolean DEFAULT false`,
+      `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS managed_by uuid REFERENCES public.app_users(id) ON DELETE SET NULL`,
+      `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS active_ingredient text`,
+      `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS principio_ativo text`,
+      `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS manufacturer text`,
+      `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS fabricante text`,
+      `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS aviso_estoque int DEFAULT 5`,
+      `ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS dose_date date`,
+      `ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS administered_at timestamptz`,
+      `ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS origin text DEFAULT 'patient_app'`,
+      `ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS confirmed_by_name text`,
+      `ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS confirmed_by_role text`,
+      `CREATE INDEX IF NOT EXISTS idx_historico_doses_user_date ON public.historico_doses (user_id, dose_date)`,
+      `ALTER TABLE public.emergency_contacts ADD COLUMN IF NOT EXISTS relation text`,
+      `ALTER TABLE public.emergency_contacts ADD COLUMN IF NOT EXISTS relationship text`,
+      `ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS location text`,
+      `ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS clinic text`,
+      `ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS email text`,
+      `ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS notes text`,
+      `ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS med_name text`,
+      `ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_delta numeric`,
+      `ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_changed numeric`,
+      `CREATE TABLE IF NOT EXISTS public.calendar_notes (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+        date date NOT NULL,
+        content text NOT NULL,
+        mood text,
+        created_at timestamptz DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS public.notes (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+        title text NOT NULL,
+        description text,
+        date date NOT NULL,
+        time time,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS public.custom_medications (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+        commercial_name text NOT NULL,
+        active_ingredient text,
+        dosage text,
+        pharmaceutical_form text,
+        presentation text,
+        unit text DEFAULT 'comprimido',
+        manufacturer text,
+        medicine_type text DEFAULT 'outro',
+        is_custom boolean DEFAULT true,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS public.notificacoes (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+        tipo text NOT NULL,
+        titulo text NOT NULL,
+        mensagem text NOT NULL,
+        lida boolean DEFAULT false,
+        created_at timestamptz DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS public.approval_requests (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        patient_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+        caregiver_id uuid,
+        med_id text,
+        med_nome text,
+        dose_date text,
+        hora text,
+        action_type text NOT NULL,
+        requested_status text NOT NULL,
+        reason text NOT NULL,
+        status text DEFAULT 'pending',
+        metadata jsonb DEFAULT '{}'::jsonb,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      )`,
+    ],
+  },
+];
 
 export function getOraclePgConfig() {
   const connectionString = process.env.DATABASE_URL?.trim();
@@ -56,426 +173,142 @@ export function getPgPool() {
   return poolInstance;
 }
 
-/**
- * Inicializa de forma segura e não-destrutiva (CREATE TABLE IF NOT EXISTS)
- * todas as tabelas, índices e funções necessárias no PostgreSQL do servidor Oracle.
- */
-export async function ensureOraclePostgresSchema(client) {
-  if (schemaInitialized) return;
+export function resetSchemaVerificationCache() {
+  schemaVerified = false;
+}
 
-  // Se o schema já foi criado pelo script standalone (app_users existe), aplica apenas colunas/tabelas de compatibilidade
-  const check = await client.query("SELECT to_regclass('public.app_users') AS exists");
-  if (check.rows[0]?.exists) {
-    await client.query(`
-      ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS weight_updated_at timestamptz;
-      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS active_ingredient text;
-      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS principio_ativo text;
-      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS manufacturer text;
-      ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS fabricante text;
-      ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS dose_date date;
-      ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS confirmed_by_name text;
-      ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS confirmed_by_role text;
-      ALTER TABLE public.emergency_contacts ADD COLUMN IF NOT EXISTS relation text;
-      ALTER TABLE public.emergency_contacts ADD COLUMN IF NOT EXISTS relationship text;
-      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS location text;
-      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS clinic text;
-      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS email text;
-      ALTER TABLE public.healthcare_professionals ADD COLUMN IF NOT EXISTS notes text;
-      ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS med_name text;
-      ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_delta numeric;
-      ALTER TABLE public.stock_movements ADD COLUMN IF NOT EXISTS quantity_changed numeric;
-      CREATE TABLE IF NOT EXISTS public.calendar_notes (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
-        date date NOT NULL,
-        content text NOT NULL,
-        mood text,
-        created_at timestamptz DEFAULT now()
-      );
-      CREATE TABLE IF NOT EXISTS public.notes (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
-        title text NOT NULL,
-        description text,
-        date date NOT NULL,
-        time time,
-        created_at timestamptz DEFAULT now(),
-        updated_at timestamptz DEFAULT now()
-      );
-      CREATE TABLE IF NOT EXISTS public.custom_medications (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
-        commercial_name text NOT NULL,
-        active_ingredient text,
-        dosage text,
-        pharmaceutical_form text,
-        presentation text,
-        unit text DEFAULT 'comprimido',
-        manufacturer text,
-        medicine_type text DEFAULT 'outro',
-        is_custom boolean DEFAULT true,
-        created_at timestamptz DEFAULT now(),
-        updated_at timestamptz DEFAULT now()
-      );
-      CREATE TABLE IF NOT EXISTS public.notificacoes (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-        tipo text NOT NULL,
-        titulo text NOT NULL,
-        mensagem text NOT NULL,
-        lida boolean DEFAULT false,
-        created_at timestamptz DEFAULT now()
-      );
-      CREATE TABLE IF NOT EXISTS public.approval_requests (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        patient_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-        caregiver_id uuid,
-        med_id text,
-        med_nome text,
-        dose_date text,
-        hora text,
-        action_type text NOT NULL,
-        requested_status text NOT NULL,
-        reason text NOT NULL,
-        status text DEFAULT 'pending',
-        metadata jsonb DEFAULT '{}'::jsonb,
-        created_at timestamptz DEFAULT now(),
-        updated_at timestamptz DEFAULT now()
-      );
-    `).catch(() => {});
-    schemaInitialized = true;
-    return;
+/**
+ * 1. VERIFICAÇÃO DE CONEXÃO (Somente leitura, zero DDL)
+ */
+export async function verifyDatabaseConnection(client) {
+  const start = Date.now();
+  const res = await client.query('SELECT version(), current_database() AS db, NOW() AS server_time');
+  const row = res.rows[0] || {};
+  return {
+    connected: true,
+    latencyMs: Date.now() - start,
+    database: row.db || null,
+    serverTime: row.server_time || null,
+    version: row.version || null,
+  };
+}
+
+/**
+ * 2. VERIFICAÇÃO DE VERSÃO E ESTRUTURA DO ESQUEMA (Somente leitura, zero DDL)
+ */
+export async function verifySchemaVersion(client) {
+  const tablesRes = await client.query(
+    `SELECT table_name
+     FROM information_schema.tables
+     WHERE table_schema = 'public'`
+  );
+  const existingTables = new Set((tablesRes.rows || []).map((r) => r.table_name));
+  const missingCoreTables = REQUIRED_CORE_TABLES.filter((t) => !existingTables.has(t));
+  const missingOptionalTables = OPTIONAL_COMPATIBILITY_TABLES.filter((t) => !existingTables.has(t));
+
+  let appliedMigrations = [];
+  if (existingTables.has('schema_migrations')) {
+    const migRes = await client.query(
+      `SELECT version, description, applied_at
+       FROM public.schema_migrations
+       ORDER BY applied_at ASC, version ASC`
+    );
+    appliedMigrations = migRes.rows || [];
   }
 
-  await client.query(`
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+  const latestVersion =
+    appliedMigrations.length > 0
+      ? appliedMigrations[appliedMigrations.length - 1].version
+      : missingCoreTables.length === 0
+      ? '02_schema_oracle_standalone (unrecorded)'
+      : 'uninitialized';
 
-    CREATE OR REPLACE FUNCTION app_current_user_id()
-    RETURNS uuid LANGUAGE sql STABLE AS $$
-      SELECT NULLIF(current_setting('app.current_user_id', true), '')::uuid;
-    $$;
+  return {
+    initialized: missingCoreTables.length === 0,
+    schemaVersion: latestVersion,
+    missingCoreTables,
+    missingOptionalTables,
+    appliedMigrations,
+  };
+}
 
-    CREATE TABLE IF NOT EXISTS app_users (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      raw_user_meta_data JSONB DEFAULT '{}'::jsonb,
-      email_confirmed_at TIMESTAMPTZ DEFAULT NOW(),
-      last_sign_in_at TIMESTAMPTZ,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
+/**
+ * 3. EXECUÇÃO EXPLÍCITA E VERSIONADA DE MIGRAÇÕES (Transacional, não-destrutiva e sem falhas silenciosas)
+ * Nunca executada durante requisições normais sem autorização explícita.
+ */
+export async function runDatabaseMigrations(client, options = {}) {
+  const isAuthorized =
+    options.authorized === true || process.env.ALLOW_EXPLICIT_MIGRATIONS === 'true';
+
+  if (!isAuthorized) {
+    throw new Error(
+      'Execução de migrações bloqueada: requer autorização explícita (authorized: true ou ALLOW_EXPLICIT_MIGRATIONS=true).'
     );
+  }
 
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      refresh_token_hash TEXT NOT NULL UNIQUE,
-      user_agent TEXT,
-      ip_address TEXT,
-      expires_at TIMESTAMPTZ NOT NULL,
-      revoked_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
+  const statusBefore = await verifySchemaVersion(client);
+  if (!statusBefore.initialized) {
+    throw new Error(
+      `O esquema base (02_schema_oracle_standalone.sql) precisa ser aplicado antes das migrações incrementais. Tabelas ausentes: ${statusBefore.missingCoreTables.join(', ')}`
     );
+  }
 
-    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      token_hash TEXT NOT NULL UNIQUE,
-      expires_at TIMESTAMPTZ NOT NULL,
-      used_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
+  const executedVersions = [];
+
+  for (const migration of VERSIONED_MIGRATIONS) {
+    await client.query('BEGIN');
+    try {
+      for (const stmt of migration.statements) {
+        await client.query(stmt);
+      }
+
+      await client.query(
+        `INSERT INTO public.schema_migrations (version, description)
+         VALUES ($1, $2)
+         ON CONFLICT (version) DO NOTHING`,
+        [migration.version, migration.description]
+      );
+
+      await client.query('COMMIT');
+      executedVersions.push(migration.version);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      schemaVerified = false;
+      throw new Error(`Falha ao aplicar migração ${migration.version}: ${err.message}`);
+    }
+  }
+
+  schemaVerified = true;
+  return {
+    ok: true,
+    executedVersions,
+  };
+}
+
+/**
+ * 4. OPERAÇÃO NORMAL DA APLICAÇÃO
+ * Verifica apenas a existência das tabelas fundamentais sem executar DDL em requisições normais
+ * e nunca marca o esquema como verificado caso a consulta falhe.
+ */
+export async function ensureOraclePostgresSchema(client) {
+  if (schemaVerified) return true;
+
+  const check = await client.query(
+    `SELECT
+       to_regclass('public.app_users') AS app_users,
+       to_regclass('public.profiles') AS profiles`
+  );
+
+  const row = check.rows?.[0];
+  if (!row?.app_users || !row?.profiles) {
+    schemaVerified = false;
+    throw new Error(
+      'Esquema do banco PostgreSQL não inicializado (tabelas public.app_users / public.profiles ausentes). Execute as migrações explícitas.'
     );
+  }
 
-    CREATE TABLE IF NOT EXISTS roles (
-      code TEXT PRIMARY KEY,
-      label TEXT NOT NULL,
-      description TEXT,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    INSERT INTO roles (code, label, description, is_active) VALUES
-      ('paciente', 'Paciente', 'Registra seus próprios medicamentos (janela de 24h).', true),
-      ('cuidador', 'Cuidador', 'Acompanha e administra tratamentos de pacientes vinculados.', true),
-      ('independente', 'Independente', 'Controle total sobre os próprios dados.', true)
-    ON CONFLICT (code) DO NOTHING;
-
-    CREATE TABLE IF NOT EXISTS profiles (
-      id TEXT PRIMARY KEY,
-      nome TEXT NOT NULL,
-      social_name TEXT,
-      email TEXT,
-      foto_url TEXT,
-      role TEXT DEFAULT 'independente',
-      blood_type TEXT DEFAULT 'O+',
-      dob TEXT,
-      sex TEXT,
-      cpf TEXT,
-      phone TEXT,
-      address TEXT,
-      weight TEXT,
-      height TEXT,
-      weight_updated_at TIMESTAMPTZ,
-      role_change_pin TEXT DEFAULT '123456',
-      role_change_pin_expires_at TIMESTAMPTZ,
-      notifications_enabled BOOLEAN DEFAULT TRUE,
-      emergency_settings JSONB DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS medicamentos (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      nome TEXT NOT NULL,
-      active_ingredient TEXT,
-      principio_ativo TEXT,
-      fabricante TEXT,
-      manufacturer TEXT,
-      dosagem TEXT NOT NULL,
-      unidade TEXT DEFAULT 'comprimido',
-      cor TEXT DEFAULT '#3b82f6',
-      quantidade INTEGER DEFAULT 30,
-      aviso_estoque INTEGER DEFAULT 5,
-      horarios JSONB DEFAULT '["08:00"]'::jsonb,
-      dias_semana JSONB DEFAULT '[1,2,3,4,5,6,7]'::jsonb,
-      observacoes TEXT,
-      ativo BOOLEAN DEFAULT TRUE,
-      status TEXT DEFAULT 'ativo',
-      treatment_type TEXT DEFAULT 'continuous',
-      start_date TEXT,
-      end_date TEXT,
-      treatment_days INTEGER,
-      finished_at TIMESTAMPTZ,
-      important_for_emergency BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS historico_doses (
-      id TEXT PRIMARY KEY,
-      med_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      hora TEXT NOT NULL,
-      dose_date TEXT NOT NULL,
-      status TEXT DEFAULT 'confirmed',
-      atraso_minutos INTEGER DEFAULT 0,
-      motivo TEXT,
-      quantidade_usada INTEGER DEFAULT 1,
-      performed_by TEXT,
-      is_retroactive BOOLEAN DEFAULT FALSE,
-      corrected_at TIMESTAMPTZ,
-      correction_reason TEXT,
-      confirmed_by_name TEXT,
-      confirmed_by_role TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_historico_doses_user_date
-      ON historico_doses (user_id, dose_date);
-
-    CREATE TABLE IF NOT EXISTS health_events (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      date TEXT NOT NULL,
-      time TEXT,
-      doctor TEXT,
-      location TEXT,
-      completed BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS calendar_notes (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      content TEXT NOT NULL,
-      mood TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS dose_observations (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      hist_id TEXT,
-      med_id TEXT,
-      date TEXT NOT NULL,
-      hora TEXT NOT NULL,
-      observation TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS stock_movements (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      medication_id TEXT NOT NULL,
-      med_name TEXT,
-      movement_type TEXT NOT NULL,
-      quantity_before INTEGER NOT NULL,
-      quantity_after INTEGER NOT NULL,
-      quantity_delta INTEGER NOT NULL,
-      purchase_price TEXT,
-      purchase_location TEXT,
-      batch TEXT,
-      expiration_date TEXT,
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS allergies (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      reaction TEXT,
-      severity TEXT DEFAULT 'Moderada',
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS health_conditions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      notes TEXT,
-      diagnosed_at TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS emergency_contacts (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      relation TEXT,
-      relationship TEXT,
-      phone TEXT NOT NULL,
-      secondary_phone TEXT,
-      priority INTEGER DEFAULT 1,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS healthcare_professionals (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      specialty TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      crm TEXT,
-      clinic TEXT,
-      location TEXT,
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS caregiver_relationships (
-      id TEXT PRIMARY KEY,
-      patient_id TEXT NOT NULL,
-      caregiver_id TEXT,
-      caregiver_name TEXT,
-      invite_email TEXT,
-      relationship_label TEXT,
-      permission_level TEXT DEFAULT 'caregiver',
-      status TEXT DEFAULT 'active',
-      invite_token TEXT,
-      invite_expires_at TIMESTAMPTZ,
-      accepted_at TIMESTAMPTZ,
-      revoked_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS caregiver_notes (
-      id TEXT PRIMARY KEY,
-      relationship_id TEXT,
-      patient_id TEXT NOT NULL,
-      caregiver_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      metadata JSONB DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id TEXT PRIMARY KEY,
-      patient_id TEXT NOT NULL,
-      performed_by TEXT,
-      action TEXT NOT NULL,
-      old_value JSONB,
-      new_value JSONB,
-      reason TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS push_subscriptions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      endpoint TEXT NOT NULL UNIQUE,
-      p256dh TEXT NOT NULL,
-      auth TEXT NOT NULL,
-      timezone TEXT DEFAULT 'America/Sao_Paulo',
-      user_agent TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS notification_logs (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      med_id TEXT,
-      event_id TEXT,
-      dose_hora TEXT,
-      data_referencia TEXT NOT NULL,
-      tipo TEXT NOT NULL,
-      sent_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS medication_catalog (
-      id TEXT PRIMARY KEY,
-      commercial_name TEXT NOT NULL,
-      active_ingredient TEXT NOT NULL,
-      dosage TEXT NOT NULL,
-      pharmaceutical_form TEXT NOT NULL,
-      presentation TEXT,
-      unit TEXT DEFAULT 'comprimido',
-      manufacturer TEXT,
-      medicine_type TEXT DEFAULT 'generico',
-      is_reference BOOLEAN DEFAULT FALSE,
-      is_generic BOOLEAN DEFAULT TRUE,
-      is_similar BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS notificacoes (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      tipo TEXT NOT NULL,
-      titulo TEXT NOT NULL,
-      mensagem TEXT NOT NULL,
-      lida BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS approval_requests (
-      id TEXT PRIMARY KEY,
-      patient_id TEXT NOT NULL,
-      caregiver_id TEXT,
-      med_id TEXT,
-      med_nome TEXT,
-      dose_date TEXT,
-      hora TEXT,
-      action_type TEXT NOT NULL,
-      requested_status TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      metadata JSONB DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-  schemaInitialized = true;
+  schemaVerified = true;
+  return true;
 }
 
 export async function checkOraclePostgresHealth() {
@@ -488,19 +321,23 @@ export async function checkOraclePostgresHealth() {
     };
   }
   const pool = getPgPool();
-  const start = Date.now();
   const client = await pool.connect();
   try {
-    await ensureOraclePostgresSchema(client);
-    const res = await client.query('SELECT version(), current_database() AS db, NOW() AS server_time');
+    const connInfo = await verifyDatabaseConnection(client);
+    const schemaInfo = await verifySchemaVersion(client);
     return {
-      ok: true,
+      ok: connInfo.connected && schemaInfo.initialized,
       configured: true,
       mode: cfg.mode,
-      latencyMs: Date.now() - start,
-      database: res.rows[0]?.db,
-      serverTime: res.rows[0]?.server_time,
-      version: res.rows[0]?.version,
+      latencyMs: connInfo.latencyMs,
+      database: connInfo.database,
+      serverTime: connInfo.serverTime,
+      version: connInfo.version,
+      schema: {
+        initialized: schemaInfo.initialized,
+        version: schemaInfo.schemaVersion,
+        missingCoreTables: schemaInfo.missingCoreTables,
+      },
     };
   } finally {
     client.release();
