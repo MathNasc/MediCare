@@ -7,7 +7,7 @@
 
 import { databaseClient } from './databaseClient';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://medicare-amber-five.vercel.app';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://medicare-cuidador.duckdns.org';
 
 // ─── Permissões ───────────────────────────────────────────────────────────────
 export const PERMISSION_LEVELS = {

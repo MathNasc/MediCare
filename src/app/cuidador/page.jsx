@@ -138,11 +138,6 @@ export default function CuidadorWebPage() {
 
   // Verifica token salvo ao inicializar e renova automaticamente se necessário
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
-      window.location.replace('https://medicare-cuidador.duckdns.org/cuidador');
-      return;
-    }
-
     const savedToken = localStorage.getItem('medicare_cuidador_jwt');
     const savedRefresh = localStorage.getItem('medicare_cuidador_refresh_token');
     const savedUserRaw = localStorage.getItem('medicare_cuidador_user');

@@ -1,4 +1,3 @@
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { Shield, ArrowRight, Download, CheckCircle, Calendar, HeartHandshake } from 'lucide-react';
 import CuidadorAutoRedirect from './CuidadorAutoRedirect';
@@ -10,11 +9,6 @@ export default async function HomePage({ searchParams }) {
   const forcePortal = resolvedParams?.portal === '1';
 
   if (!forcePortal) {
-    const headerStore = await headers();
-    const host = headerStore.get('host') || '';
-    if (host.includes('vercel.app')) {
-      redirect('https://medicare-cuidador.duckdns.org/cuidador');
-    }
     redirect('/cuidador');
   }
 

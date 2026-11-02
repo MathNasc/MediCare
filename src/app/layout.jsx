@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  metadataBase: new URL('https://medicare-amber-five.vercel.app'),
+  metadataBase: new URL('https://medicare-cuidador.duckdns.org'),
   title: {
     default: 'MediCare — Sua saúde, acompanhada de perto',
     template: '%s | MediCare',

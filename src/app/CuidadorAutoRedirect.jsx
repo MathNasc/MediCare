@@ -11,10 +11,7 @@ export default function CuidadorAutoRedirect() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('portal') === '1') return;
 
-      if (
-        window.location.hostname === 'medicare-cuidador.duckdns.org' ||
-        window.location.hostname.includes('vercel.app')
-      ) {
+      if (window.location.hostname === 'medicare-cuidador.duckdns.org') {
         window.location.replace('https://medicare-cuidador.duckdns.org/cuidador');
       } else {
         router.replace('/cuidador');
