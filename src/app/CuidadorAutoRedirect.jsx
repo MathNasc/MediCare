@@ -11,14 +11,13 @@ export default function CuidadorAutoRedirect() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('portal') === '1') return;
 
-      const savedToken = localStorage.getItem('medicare_cuidador_jwt');
-      if (savedToken) {
-        document.cookie = 'medicare_cuidador_logged_in=1; path=/; max-age=31536000; SameSite=Lax';
-        if (window.location.hostname === 'medicare-cuidador.duckdns.org') {
-          window.location.replace('https://medicare-cuidador.duckdns.org/cuidador');
-        } else {
-          router.replace('/cuidador');
-        }
+      if (
+        window.location.hostname === 'medicare-cuidador.duckdns.org' ||
+        window.location.hostname.includes('vercel.app')
+      ) {
+        window.location.replace('https://medicare-cuidador.duckdns.org/cuidador');
+      } else {
+        router.replace('/cuidador');
       }
     } catch {
       // ignore storage errors

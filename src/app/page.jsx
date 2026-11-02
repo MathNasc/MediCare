@@ -1,21 +1,21 @@
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { Shield, ArrowRight, Download, CheckCircle, Calendar, HeartHandshake } from 'lucide-react';
 import CuidadorAutoRedirect from './CuidadorAutoRedirect';
+
+export const dynamic = 'force-dynamic';
 
 export default async function HomePage({ searchParams }) {
   const resolvedParams = await searchParams;
   const forcePortal = resolvedParams?.portal === '1';
 
   if (!forcePortal) {
-    const cookieStore = await cookies();
-    const isLoggedCookie =
-      cookieStore.get('medicare_cuidador_logged_in')?.value === '1' ||
-      Boolean(cookieStore.get('medicare_cuidador_jwt')?.value);
-
-    if (isLoggedCookie) {
-      redirect('/cuidador');
+    const headerStore = await headers();
+    const host = headerStore.get('host') || '';
+    if (host.includes('vercel.app')) {
+      redirect('https://medicare-cuidador.duckdns.org/cuidador');
     }
+    redirect('/cuidador');
   }
 
   return (
