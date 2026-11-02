@@ -35,8 +35,6 @@ REMOTE_HASH=$(git rev-parse origin/main)
 LAST_BUILT_HASH=""
 if [ -f "$STATE_FILE" ]; then
   LAST_BUILT_HASH=$(cat "$STATE_FILE" 2>/dev/null || true)
-else
-  LAST_BUILT_HASH=$(git rev-parse HEAD 2>/dev/null || true)
 fi
 
 LOCAL_HASH=$(git rev-parse HEAD)
