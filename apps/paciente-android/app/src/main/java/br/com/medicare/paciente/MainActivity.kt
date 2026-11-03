@@ -1,11 +1,13 @@
 package br.com.medicare.paciente
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -33,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MediCareViewModel by viewModels()
     private var sysNotifGrantedState = mutableStateOf(true)
     private var notifPromptDismissedState = mutableStateOf(false)
+    private var batteryOptIgnoredState = mutableStateOf(true)
+    private var batteryOptPromptDismissedState = mutableStateOf(false)
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -65,6 +69,8 @@ class MainActivity : ComponentActivity() {
             val lastSyncStatus by viewModel.sessionManager.lastSyncStatus.collectAsState()
             val sysNotifGranted by sysNotifGrantedState
             val notifPromptDismissed by notifPromptDismissedState
+            val batteryOptIgnored by batteryOptIgnoredState
+            val batteryOptPromptDismissed by batteryOptPromptDismissedState
 
             var currentTab by remember { mutableStateOf(PatientTab.HOME) }
             val tabHistory = remember { mutableStateListOf<PatientTab>() }
@@ -269,6 +275,29 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         )
+                    } else if (userNotifActive && !batteryOptIgnored && !batteryOptPromptDismissed) {
+                        AlertDialog(
+                            onDismissRequest = { batteryOptPromptDismissedState.value = true },
+                            title = { Text("⚡ Notificar na Economia de Bateria") },
+                            text = {
+                                Text("Para garantir que o MediCare toque nos horários exatos das suas doses mesmo com o Modo Economia de Bateria ativado ou tela bloqueada, permita a execução sem restrições de bateria.")
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        batteryOptPromptDismissedState.value = true
+                                        requestIgnoreBatteryOptimizations()
+                                    }
+                                ) {
+                                    Text("⚡ Liberar na Economia de Bateria")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { batteryOptPromptDismissedState.value = true }) {
+                                    Text("Depois")
+                                }
+                            }
+                        )
                     }
 
                     state.selectedDoseForModal?.let { selectedDose ->
@@ -321,6 +350,25 @@ class MainActivity : ComponentActivity() {
             true
         }
         sysNotifGrantedState.value = runtimeOk && NotificationManagerCompat.from(this).areNotificationsEnabled()
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        batteryOptIgnoredState.value = pm?.isIgnoringBatteryOptimizations(packageName) ?: true
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+                return
+            }
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: Exception) {}
+        }
     }
 
     private fun requestNotificationPermissionIfNeeded() {

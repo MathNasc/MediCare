@@ -29,6 +29,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.Editable;
@@ -81,8 +82,10 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_PROFILE_PHOTO = 1001;
     private static final int REQ_CAPTURE_PROFILE_PHOTO = 1002;
     private static final int REQ_POST_NOTIFICATIONS = 1003;
+    private static final int REQ_IGNORE_BATTERY_OPT = 1004;
     private boolean notificationPromptDismissed = false;
     private boolean notificationRuntimeRequested = false;
+    private boolean batteryOptPromptDismissed = false;
     private AlertDialog activeNotificationPromptDialog = null;
     private JSONArray allergies;
     private JSONObject calNotes;
@@ -181,6 +184,8 @@ public class MainActivity extends Activity {
         this.isActivityResumed = true;
         this.syncPollHandler.removeCallbacks(this.syncPollRunnable);
         if (this.isLoggedIn) {
+            ensureNotificationChannel();
+            scheduleAllMedicationAlarms();
             pullFromBackendIfEmptyOrUpdated();
             this.syncPollHandler.postDelayed(this.syncPollRunnable, 15000L);
         }
@@ -194,17 +199,55 @@ public class MainActivity extends Activity {
     }
 
     private void ensureNotificationChannel() {
+        DoseAlarmReceiver.ensureAlarmChannel(this);
+    }
+
+    private boolean isBatteryOptimizationIgnored() {
         try {
-            if (Build.VERSION.SDK_INT >= 26) {
-                NotificationManager nm = (NotificationManager) getSystemService("notification");
-                if (nm != null) {
-                    NotificationChannel ch = new NotificationChannel("medicare_doses", "Lembretes de Medicamentos", 4);
-                    ch.setDescription("Alertas e alarmes nos horários programados das doses");
-                    ch.enableVibration(true);
-                    nm.createNotificationChannel(ch);
+            if (Build.VERSION.SDK_INT >= 23) {
+                PowerManager pm = (PowerManager) getSystemService("power");
+                if (pm != null) {
+                    return pm.isIgnoringBatteryOptimizations(getPackageName());
                 }
             }
-        } catch (Exception ignored) {}
+            return true;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private boolean isBatterySaverActive() {
+        try {
+            if (Build.VERSION.SDK_INT >= 21) {
+                PowerManager pm = (PowerManager) getSystemService("power");
+                if (pm != null) {
+                    return pm.isPowerSaveMode();
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void requestIgnoreBatteryOptimizations() {
+        try {
+            if (Build.VERSION.SDK_INT >= 23 && !isBatteryOptimizationIgnored()) {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivityForResult(intent, REQ_IGNORE_BATTERY_OPT);
+                return;
+            }
+        } catch (Exception e) {
+            try {
+                if (Build.VERSION.SDK_INT >= 23) {
+                    Intent fallback = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                    startActivityForResult(fallback, REQ_IGNORE_BATTERY_OPT);
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
+        Toast.makeText(this, "✓ Alarmes em segundo plano já estão liberados na Economia de Bateria!", 0).show();
     }
 
     private boolean areSystemNotificationsAllowed() {
@@ -256,25 +299,36 @@ public class MainActivity extends Activity {
             AlarmManager am = (AlarmManager) getSystemService("alarm");
             if (am == null || this.meds == null) return;
             boolean enabled = this.isLoggedIn && areNotificationsFullyActive();
-            int flags = 134217728; // FLAG_UPDATE_CURRENT
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 23) {
-                flags |= 67108864; // FLAG_IMMUTABLE
+                flags |= PendingIntent.FLAG_IMMUTABLE;
             }
+            String today = todayIso();
             for (int i = 0; i < this.meds.length(); i++) {
                 JSONObject med = this.meds.optJSONObject(i);
                 if (med == null) continue;
                 String medId = med.optString("id", "med_" + i);
                 String medName = med.optString("nome", "Medicamento");
-                boolean medActive = med.optBoolean("ativo", true) && !"sos".equalsIgnoreCase(med.optString("treatment_type", "continuous"));
+                String medDosage = med.optString("dosagem", "").trim();
+                String medUnit = med.optString("unidade", "").trim();
+                String doseLabel = medDosage.isEmpty() ? "" : (medUnit.isEmpty() ? medDosage : (medDosage + " " + medUnit));
+                String tType = med.optString("treatment_type", med.optString("tipo_uso", "continuous"));
+                String endDate = med.optString("end_date", med.optString("data_fim", "")).trim();
+                boolean notExpired = endDate.isEmpty() || endDate.length() < 10 || today.compareTo(endDate.substring(0, 10)) <= 0;
+                boolean medActive = med.optBoolean("ativo", true) && !"sos".equalsIgnoreCase(tType) && notExpired;
                 JSONArray horarios = med.optJSONArray("horarios");
                 if (horarios == null) continue;
                 for (int j = 0; j < horarios.length(); j++) {
                     String hStr = horarios.optString(j, "").trim();
                     if (!hStr.contains(":")) continue;
-                    int reqCode = Math.abs((medId + "_" + hStr).hashCode() % 900000) + 10000;
+                    int reqCode = Math.abs((medId + "_" + hStr).hashCode() % 400000) + 10000;
                     Intent alarmIntent = new Intent(this, DoseAlarmReceiver.class);
+                    alarmIntent.setAction(DoseAlarmReceiver.ACTION_DOSE_ALARM);
+                    alarmIntent.putExtra("med_id", medId);
                     alarmIntent.putExtra("med_name", medName);
                     alarmIntent.putExtra("med_time", hStr);
+                    alarmIntent.putExtra("med_dose", doseLabel);
+                    alarmIntent.putExtra("is_snooze", false);
                     PendingIntent pi = PendingIntent.getBroadcast(this, reqCode, alarmIntent, flags);
                     if (!enabled || !medActive) {
                         am.cancel(pi);
@@ -291,16 +345,7 @@ public class MainActivity extends Activity {
                     if (target.getTimeInMillis() <= System.currentTimeMillis()) {
                         target.add(Calendar.DAY_OF_YEAR, 1);
                     }
-                    long triggerAt = target.getTimeInMillis();
-                    if (Build.VERSION.SDK_INT >= 23) {
-                        try {
-                            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                        } catch (SecurityException se) {
-                            am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                        }
-                    } else {
-                        am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                    }
+                    DoseAlarmReceiver.scheduleAlarmClockSafe(this, am, target.getTimeInMillis(), pi);
                 }
             }
         } catch (Exception ignored) {}
@@ -310,18 +355,105 @@ public class MainActivity extends Activity {
         try {
             if (!this.isLoggedIn) return;
             if (!this.prefs.getBoolean("onboarding_completed", false)) return;
-            if (areNotificationsFullyActive()) return;
-            if (this.notificationPromptDismissed) return;
-
-            if (Build.VERSION.SDK_INT >= 33 && !this.notificationRuntimeRequested) {
-                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
-                    this.notificationRuntimeRequested = true;
-                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIFICATIONS);
-                    return;
+            if (!areNotificationsFullyActive()) {
+                if (this.notificationPromptDismissed) return;
+                if (Build.VERSION.SDK_INT >= 33 && !this.notificationRuntimeRequested) {
+                    if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                        this.notificationRuntimeRequested = true;
+                        requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIFICATIONS);
+                        return;
+                    }
                 }
+                showNotificationStartupPromptDialog();
+                return;
             }
-            showNotificationStartupPromptDialog();
+            if (!isBatteryOptimizationIgnored() && !this.batteryOptPromptDismissed) {
+                showBatteryOptimizationPromptDialog();
+            }
         } catch (Exception ignored) {}
+    }
+
+    private void showBatteryOptimizationPromptDialog() {
+        if (this.activeNotificationPromptDialog != null && this.activeNotificationPromptDialog.isShowing()) {
+            return;
+        }
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        this.activeNotificationPromptDialog = dialog;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setGravity(17);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        root.setPadding(dp(24), dp(24), dp(24), dp(20));
+
+        TextView tvIcon = new TextView(this);
+        tvIcon.setText("⚡");
+        tvIcon.setTextSize(sp(28.0f));
+        tvIcon.setGravity(17);
+        tvIcon.setBackground(shape(this.cWarningBg, 28, this.cWarning, 1));
+        LinearLayout.LayoutParams icLp = new LinearLayout.LayoutParams(dp(56), dp(56));
+        icLp.bottomMargin = dp(14);
+        tvIcon.setLayoutParams(icLp);
+        root.addView(tvIcon);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Notificar na Economia de Bateria");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(18.5f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setGravity(17);
+        root.addView(tvTitle);
+
+        TextView tvDesc = new TextView(this);
+        tvDesc.setText("Para garantir que o MediCare toque nos horários exatos das suas doses mesmo com o Modo Economia de Bateria ativado ou tela bloqueada, permita a execução sem restrições de bateria.");
+        tvDesc.setTextColor(this.cTextMuted);
+        tvDesc.setTextSize(sp(14.0f));
+        tvDesc.setGravity(17);
+        tvDesc.setLineSpacing(dp(2), 1.05f);
+        tvDesc.setPadding(0, dp(10), 0, dp(20));
+        root.addView(tvDesc);
+
+        TextView btnAllow = new TextView(this);
+        btnAllow.setText("⚡ Liberar na Economia de Bateria");
+        btnAllow.setTextColor(Color.WHITE);
+        btnAllow.setTextSize(sp(15.0f));
+        btnAllow.setTypeface(null, 1);
+        btnAllow.setGravity(17);
+        btnAllow.setBackground(gradientShape(this.cPrimary, this.cPrimaryHover, 14));
+        btnAllow.setPadding(dp(16), dp(14), dp(16), dp(14));
+        LinearLayout.LayoutParams alLp = new LinearLayout.LayoutParams(-1, -2);
+        alLp.bottomMargin = dp(10);
+        btnAllow.setLayoutParams(alLp);
+        btnAllow.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.batteryOptPromptDismissed = true;
+                dialog.dismiss();
+                requestIgnoreBatteryOptimizations();
+            }
+        });
+        root.addView(btnAllow);
+
+        TextView btnLater = new TextView(this);
+        btnLater.setText("Depois");
+        btnLater.setTextColor(this.cTextMuted);
+        btnLater.setTextSize(sp(14.0f));
+        btnLater.setTypeface(null, 1);
+        btnLater.setGravity(17);
+        btnLater.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+        btnLater.setPadding(dp(16), dp(12), dp(16), dp(12));
+        btnLater.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+        btnLater.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.batteryOptPromptDismissed = true;
+                dialog.dismiss();
+            }
+        });
+        root.addView(btnLater);
+
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
     }
 
     private void showNotificationStartupPromptDialog() {
@@ -448,6 +580,14 @@ public class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_IGNORE_BATTERY_OPT) {
+            scheduleAllMedicationAlarms();
+            render();
+            if (isBatteryOptimizationIgnored()) {
+                Toast.makeText(this, "✓ MediCare liberado na Economia de Bateria!", 0).show();
+            }
+            return;
+        }
         if ((requestCode == REQ_PICK_PROFILE_PHOTO || requestCode == REQ_CAPTURE_PROFILE_PHOTO) && resultCode == RESULT_OK && data != null) {
             try {
                 Bitmap rawBmp = null;
@@ -2329,7 +2469,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.6.3 • Produção");
+        versionBadge.setText("Versão 2.6.4 • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -3227,6 +3367,9 @@ public class MainActivity extends Activity {
                     .put("motivo", "Estorno de dose desfeita (" + normHora + ")")
                     .put("notes", "Estorno de dose desfeita (" + normHora + ")"));
             }
+            if ("tomado".equals(newStatus)) {
+                DoseAlarmReceiver.cancelSnoozeForDose(this, medId, normHora);
+            }
             saveAll();
             render();
             Toast.makeText(this, "tomado".equals(newStatus) ? "✓ Dose confirmada!" : "↩ Confirmação desfeita", 0).show();
@@ -3236,7 +3379,31 @@ public class MainActivity extends Activity {
     private void handleDoseConfirmWithWarning(final JSONObject med, final String dateStr, final String horaStr, final boolean isSnooze) {
         try {
             if (isSnooze) {
-                Toast.makeText(this, "⏰ Lembrete de " + med.optString("nome") + " em 15 minutos", 0).show();
+                try {
+                    AlarmManager am = (AlarmManager) getSystemService("alarm");
+                    if (am != null && med != null) {
+                        String medId = med.optString("id", "med");
+                        String medName = med.optString("nome", "Medicamento");
+                        String medDosage = med.optString("dosagem", "").trim();
+                        String medUnit = med.optString("unidade", "").trim();
+                        String doseLabel = medDosage.isEmpty() ? "" : (medUnit.isEmpty() ? medDosage : (medDosage + " " + medUnit));
+                        int snoozeReqCode = Math.abs((medId + "_" + horaStr).hashCode() % 400000) + 510000;
+                        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+                        if (Build.VERSION.SDK_INT >= 23) {
+                            flags |= PendingIntent.FLAG_IMMUTABLE;
+                        }
+                        Intent snoozeIntent = new Intent(this, DoseAlarmReceiver.class);
+                        snoozeIntent.setAction(DoseAlarmReceiver.ACTION_DOSE_ALARM);
+                        snoozeIntent.putExtra("med_id", medId);
+                        snoozeIntent.putExtra("med_name", medName);
+                        snoozeIntent.putExtra("med_time", horaStr);
+                        snoozeIntent.putExtra("med_dose", doseLabel);
+                        snoozeIntent.putExtra("is_snooze", true);
+                        PendingIntent snoozePi = PendingIntent.getBroadcast(this, snoozeReqCode, snoozeIntent, flags);
+                        DoseAlarmReceiver.scheduleAlarmClockSafe(this, am, System.currentTimeMillis() + 15L * 60000L, snoozePi);
+                    }
+                } catch (Exception ignored) {}
+                Toast.makeText(this, "⏰ Lembrete de " + med.optString("nome") + " agendado para daqui a 15 minutos", 0).show();
                 return;
             }
             if (isPatientProfileRole()) {
@@ -3386,6 +3553,63 @@ public class MainActivity extends Activity {
                 return a.optString("hora", "").compareTo(b.optString("hora", ""));
             }
         });
+
+        // 2b. Battery Saver / Battery Optimization alert banner if restricted
+        if (areNotificationsFullyActive() && !isBatteryOptimizationIgnored()) {
+            boolean powerSaveOn = isBatterySaverActive();
+            LinearLayout batBanner = new LinearLayout(this);
+            batBanner.setOrientation(0);
+            batBanner.setGravity(16);
+            batBanner.setBackground(shape(powerSaveOn ? Color.parseColor("#26F59E0B") : this.cWarningBg, 14, this.cWarning, 1));
+            batBanner.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout.LayoutParams bbLp = new LinearLayout.LayoutParams(-1, -2);
+            bbLp.bottomMargin = dp(14);
+            batBanner.setLayoutParams(bbLp);
+
+            TextView bEmoji = new TextView(this);
+            bEmoji.setText("⚡");
+            bEmoji.setTextSize(sp(20.0f));
+            bEmoji.setPadding(0, 0, dp(10), 0);
+            batBanner.addView(bEmoji);
+
+            LinearLayout bTextCol = new LinearLayout(this);
+            bTextCol.setOrientation(1);
+            bTextCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            TextView bTitle = new TextView(this);
+            bTitle.setText(powerSaveOn ? "Modo Economia de Bateria ativo" : "Proteger alarmes na Economia de Bateria");
+            bTitle.setTextColor(this.isDarkMode ? Color.parseColor("#FBBF24") : Color.parseColor("#B45309"));
+            bTitle.setTextSize(sp(13.0f));
+            bTitle.setTypeface(null, 1);
+            bTextCol.addView(bTitle);
+
+            TextView bSub = new TextView(this);
+            bSub.setText("Toque para liberar o MediCare em segundo plano e nunca perder o horário da dose.");
+            bSub.setTextColor(this.cTextMain);
+            bSub.setTextSize(sp(12.0f));
+            bTextCol.addView(bSub);
+            batBanner.addView(bTextCol);
+
+            TextView btnFreeBat = new TextView(this);
+            btnFreeBat.setText("Liberar");
+            btnFreeBat.setTextColor(Color.WHITE);
+            btnFreeBat.setTextSize(sp(12.5f));
+            btnFreeBat.setTypeface(null, 1);
+            btnFreeBat.setGravity(17);
+            btnFreeBat.setBackground(shape(this.cWarning, 10, 0, 0));
+            btnFreeBat.setPadding(dp(12), dp(8), dp(12), dp(8));
+            LinearLayout.LayoutParams fbLp = new LinearLayout.LayoutParams(-2, -2);
+            fbLp.leftMargin = dp(8);
+            btnFreeBat.setLayoutParams(fbLp);
+            batBanner.addView(btnFreeBat);
+
+            batBanner.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    requestIgnoreBatteryOptimizations();
+                }
+            });
+            linearLayout.addView(batBanner);
+        }
 
         // 3. Critical stock alert banner
         if (criticalCount > 0) {
@@ -9247,6 +9471,63 @@ public class MainActivity extends Activity {
         });
         rNotif.addView(btnNotifToggle);
         card.addView(rNotif);
+
+        View div4 = new View(this);
+        div4.setBackgroundColor(this.cBorder);
+        div4.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        card.addView(div4);
+
+        // Row 5: Economia de Bateria / Alarmes Exatos
+        final boolean batIgnored = isBatteryOptimizationIgnored();
+        LinearLayout rBat = new LinearLayout(this);
+        rBat.setOrientation(0);
+        rBat.setGravity(16);
+        rBat.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        TextView tvBatIcon = new TextView(this);
+        tvBatIcon.setText("⚡");
+        tvBatIcon.setTextSize(sp(22.0f));
+        tvBatIcon.setPadding(0, 0, dp(14), 0);
+        rBat.addView(tvBatIcon);
+
+        LinearLayout batCol = new LinearLayout(this);
+        batCol.setOrientation(1);
+        batCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvBatTitle = new TextView(this);
+        tvBatTitle.setText("Economia de Bateria");
+        tvBatTitle.setTextColor(this.cTextMain);
+        tvBatTitle.setTextSize(sp(16.0f));
+        tvBatTitle.setTypeface(null, 1);
+        batCol.addView(tvBatTitle);
+
+        TextView tvBatSub = new TextView(this);
+        tvBatSub.setText(batIgnored
+            ? "Sem restrições • Notifica mesmo em Economia de Bateria"
+            : "Restrição ativa • Toque para liberar alarmes na Economia de Bateria");
+        tvBatSub.setTextColor(batIgnored ? this.cSuccess : this.cWarning);
+        tvBatSub.setTextSize(sp(13.0f));
+        tvBatSub.setPadding(0, dp(2), 0, 0);
+        batCol.addView(tvBatSub);
+
+        rBat.addView(batCol);
+
+        TextView btnBatToggle = new TextView(this);
+        btnBatToggle.setText(batIgnored ? "Liberado ✓" : "Liberar");
+        btnBatToggle.setTextColor(batIgnored ? this.cSuccess : Color.WHITE);
+        btnBatToggle.setTextSize(sp(14.0f));
+        btnBatToggle.setTypeface(null, 1);
+        btnBatToggle.setGravity(17);
+        btnBatToggle.setBackground(shape(batIgnored ? this.cSurfaceHover : this.cWarning, 12, batIgnored ? this.cSuccess : this.cWarning, batIgnored ? 1 : 0));
+        btnBatToggle.setPadding(dp(14), dp(10), dp(14), dp(10));
+        btnBatToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                requestIgnoreBatteryOptimizations();
+            }
+        });
+        rBat.addView(btnBatToggle);
+        card.addView(rBat);
 
         linearLayout.addView(card);
     }

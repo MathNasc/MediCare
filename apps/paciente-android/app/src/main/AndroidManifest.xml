@@ -6,11 +6,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Notificações e Lembretes Exatos de Medicamentos -->
+    <!-- Notificações e Lembretes Exatos de Medicamentos (Inclusive em Economia de Bateria / Doze) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -27,6 +30,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -52,7 +57,8 @@
         <receiver
             android:name=".notifications.DoseAlarmReceiver"
             android:enabled="true"
-            android:exported="false">
+            android:exported="false"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="br.com.medicare.paciente.ACTION_TRIGGER_DOSE_ALARM" />
                 <action android:name="br.com.medicare.paciente.ACTION_CONFIRM_DOSE" />
@@ -60,17 +66,20 @@
             </intent-filter>
         </receiver>
 
-        <!-- Receiver para Reagendamento em Reboot, Mudança de Horário, Fuso Horário ou Atualização do App -->
+        <!-- Receiver para Reagendamento em Reboot, Mudança de Horário, Fuso Horário, Economia de Bateria ou Atualização do App -->
         <receiver
             android:name=".notifications.BootAndTimeChangeReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+                <action android:name="android.os.action.POWER_SAVE_MODE_CHANGED" />
             </intent-filter>
         </receiver>
 

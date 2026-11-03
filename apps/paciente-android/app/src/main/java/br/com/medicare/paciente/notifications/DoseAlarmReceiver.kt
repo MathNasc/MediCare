@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -23,7 +24,7 @@ import javax.inject.Inject
 
 /**
  * BroadcastReceiver responsável por:
- * 1. Disparar notificações ricas nos horários programados (com prevenção de duplicidade se já confirmada).
+ * 1. Disparar notificações ricas nos horários programados (com WakeLock para acordar a CPU na Economia de Bateria).
  * 2. Processar a ação rápida "✓ Tomei agora" diretamente da barra de notificações.
  * 3. Processar a ação rápida "⏰ 15 minutos" reagendando o lembrete.
  */
@@ -35,6 +36,14 @@ class DoseAlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val pendingResult = goAsync()
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val wakeLock = powerManager?.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "medicare:dose_alarm_wakelock"
+        )?.apply {
+            setReferenceCounted(false)
+            acquire(15_000L)
+        }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         scope.launch {
@@ -50,7 +59,7 @@ class DoseAlarmReceiver : BroadcastReceiver() {
 
                 when (intent.action) {
                     DoseAlarmScheduler.ACTION_TRIGGER_DOSE_ALARM -> {
-                        // 1. Verifica se o medicamento ainda está ativo eagenda a ocorrência do dia seguinte
+                        // 1. Verifica se o medicamento ainda está ativo e agenda a ocorrência do dia seguinte
                         val med = repository.getMedicationById(medId)
                         if (med != null && alarmScheduler.shouldScheduleMedication(med)) {
                             alarmScheduler.scheduleNextOccurrence(med, hora)
@@ -106,6 +115,11 @@ class DoseAlarmReceiver : BroadcastReceiver() {
                     }
                 }
             } finally {
+                try {
+                    if (wakeLock?.isHeld == true) {
+                        wakeLock.release()
+                    }
+                } catch (_: Exception) {}
                 pendingResult.finish()
             }
         }
@@ -196,6 +210,7 @@ class DoseAlarmReceiver : BroadcastReceiver() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setFullScreenIntent(contentPendingIntent, true)
             .setAutoCancel(true)
             .setContentIntent(contentPendingIntent)
             .addAction(0, "✓ Tomei agora", confirmPendingIntent)

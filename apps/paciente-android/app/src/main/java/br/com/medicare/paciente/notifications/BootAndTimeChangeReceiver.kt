@@ -1,8 +1,10 @@
 package br.com.medicare.paciente.notifications
 
+import android.app.AlarmManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
 import br.com.medicare.paciente.data.repository.MediCareRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +18,8 @@ import javax.inject.Inject
  * - O aparelho é reiniciado (BOOT_COMPLETED / LOCKED_BOOT_COMPLETED)
  * - O aplicativo é atualizado (MY_PACKAGE_REPLACED)
  * - O horário ou fuso horário do aparelho é alterado (TIME_SET / TIMEZONE_CHANGED)
+ * - O Modo Economia de Bateria é ativado/desativado (POWER_SAVE_MODE_CHANGED)
+ * - A permissão de alarme exato é concedida (SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED)
  */
 @AndroidEntryPoint
 class BootAndTimeChangeReceiver : BroadcastReceiver() {
@@ -29,7 +33,9 @@ class BootAndTimeChangeReceiver : BroadcastReceiver() {
             Intent.ACTION_LOCKED_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
-            Intent.ACTION_TIMEZONE_CHANGED
+            Intent.ACTION_TIMEZONE_CHANGED,
+            PowerManager.ACTION_POWER_SAVE_MODE_CHANGED,
+            AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
         )
         if (intent.action !in validActions) return
 

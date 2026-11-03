@@ -1,13 +1,17 @@
 package br.com.medicare.paciente.notifications
 
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
+import br.com.medicare.paciente.MainActivity
 import br.com.medicare.paciente.domain.model.Medication
 import br.com.medicare.paciente.domain.model.TreatmentType
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,17 +26,18 @@ import javax.inject.Singleton
  * Orquestrador nativo de alarmes de medicamentos via AlarmManager.
  *
  * Responsabilidades:
- * 1. Agendar alarmes exatos (setExactAndAllowWhileIdle) para os horários configurados.
+ * 1. Agendar alarmes críticos via setAlarmClock (com fallback para setExactAndAllowWhileIdle)
+ *    que acordam o aparelho no horário exato mesmo em Modo Economia de Bateria e Doze Mode.
  * 2. Agendar repetição/adiamento de 15 minutos quando a dose não for confirmada.
  * 3. Cancelar alarmes de repetição e remover a notificação ativa assim que a dose é confirmada.
- * 4. Reagendar todos os medicamentos ativos após reboot, troca de fuso ou edição de tratamento.
+ * 4. Reagendar todos os medicamentos ativos após reboot, troca de fuso, economia de bateria ou edição.
  */
 @Singleton
 class DoseAlarmScheduler @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
-        const val CHANNEL_ID = "medicare_dose_reminders"
+        const val CHANNEL_ID = "medicare_dose_reminders_v2"
         const val ACTION_TRIGGER_DOSE_ALARM = "br.com.medicare.paciente.ACTION_TRIGGER_DOSE_ALARM"
         const val ACTION_CONFIRM_DOSE = "br.com.medicare.paciente.ACTION_CONFIRM_DOSE"
         const val ACTION_SNOOZE_DOSE = "br.com.medicare.paciente.ACTION_SNOOZE_DOSE"
@@ -62,15 +67,24 @@ class DoseAlarmScheduler @Inject constructor(
     fun ensureNotificationChannel() {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             ?: return
+        val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Lembretes de Medicamentos",
+            "Alarmes Críticos de Medicamentos",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Alertas sonoros e visuais nos horários programados das doses"
+            description = "Alertas sonoros e visuais prioritários nos horários programados das doses, inclusive em Economia de Bateria"
             enableVibration(true)
-            vibrationPattern = longArrayOf(0, 250, 150, 250)
+            vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
+            enableLights(true)
             setBypassDnd(true)
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            setSound(soundUri, audioAttributes)
         }
         manager.createNotificationChannel(channel)
     }
@@ -240,6 +254,24 @@ class DoseAlarmScheduler @Inject constructor(
 
     private fun scheduleExactSafe(triggerAtMillis: Long, pendingIntent: PendingIntent) {
         val am = alarmManager ?: return
+        val showAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val showPendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            showAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            // setAlarmClock acorda o dispositivo no minuto exato mesmo em Modo Economia de Bateria e Doze Mode
+            val clockInfo = AlarmManager.AlarmClockInfo(triggerAtMillis, showPendingIntent)
+            am.setAlarmClock(clockInfo, pendingIntent)
+            return
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {
+        }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
