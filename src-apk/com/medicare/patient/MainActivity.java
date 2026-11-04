@@ -147,6 +147,8 @@ public class MainActivity extends Activity {
     private String lastSyncTimestamp = "Sincronização automática ativa";
     private boolean backendStatusOk = true;
     private volatile boolean hasUnsyncedLocalChanges = false;
+    private volatile long localMutationVersion = 0L;
+    private final Object syncNetworkLock = new Object();
     private boolean isActivityResumed = false;
     private final Handler syncPollHandler = new Handler(Looper.getMainLooper());
     private final Runnable syncPollRunnable = new Runnable() {
@@ -2023,6 +2025,7 @@ public class MainActivity extends Activity {
     }
 
     private void saveAll() {
+        this.localMutationVersion++;
         this.hasUnsyncedLocalChanges = true;
         saveLocalStateOnly();
         if (this.isLoggedIn) {
@@ -2115,7 +2118,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < this.meds.length(); i++) {
             JSONObject med = this.meds.optJSONObject(i);
             if (med != null && med.optBoolean("ativo", true)) {
-                int q = med.has("quantidade") ? med.optInt("quantidade", 30) : med.optInt("estoque_atual", 30);
+                int q = getMedStock(med);
                 if (q <= 5) {
                     count++;
                 }
@@ -3070,19 +3073,96 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    private JSONObject findLiveMed(JSONObject med) {
+        if (med == null || this.meds == null) return med;
+        String targetId = med.optString("id", "").trim();
+        String targetDet = !targetId.isEmpty() ? toDeterministicServerUuid(targetId, "med") : "";
+        String targetName = optCleanString(med, "nome", "").toLowerCase(Locale.ROOT);
+        String targetDose = optCleanString(med, "dosagem", "").toLowerCase(Locale.ROOT);
+
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject m = this.meds.optJSONObject(i);
+            if (m == null) continue;
+            if (m == med) return m;
+            String mId = m.optString("id", "").trim();
+            if (!targetId.isEmpty() && !mId.isEmpty()) {
+                if (targetId.equalsIgnoreCase(mId)) return m;
+                String mDet = toDeterministicServerUuid(mId, "med");
+                if (!targetDet.isEmpty() && (targetDet.equalsIgnoreCase(mId) || targetDet.equalsIgnoreCase(mDet))) {
+                    return m;
+                }
+            }
+            if (!targetName.isEmpty()) {
+                String mName = optCleanString(m, "nome", "").toLowerCase(Locale.ROOT);
+                String mDose = optCleanString(m, "dosagem", "").toLowerCase(Locale.ROOT);
+                if (targetName.equals(mName) && targetDose.equals(mDose)) {
+                    return m;
+                }
+            }
+        }
+        return med;
+    }
+
     private int getMedStock(JSONObject med) {
         if (med == null) return 0;
-        if (med.has("quantidade")) return med.optInt("quantidade", 0);
-        return med.optInt("estoque_atual", 0);
+        JSONObject live = findLiveMed(med);
+        JSONObject ref = live != null ? live : med;
+        if (ref.has("_local_stock_val") && !ref.isNull("_local_stock_val")) {
+            return ref.optInt("_local_stock_val", ref.optInt("quantidade", 0));
+        }
+        if (ref.has("quantidade") && !ref.isNull("quantidade")) {
+            return ref.optInt("quantidade", 0);
+        }
+        return ref.optInt("estoque_atual", 0);
     }
 
     private void setMedStock(JSONObject med, int newQty) {
         if (med == null) return;
         try {
             int val = newQty;
+            long nowMs = System.currentTimeMillis();
+            this.localMutationVersion++;
+            this.hasUnsyncedLocalChanges = true;
             med.put("quantidade", val);
             med.put("estoque_atual", val);
+            med.put("_local_stock_val", val);
+            med.put("_local_stock_updated_ms", nowMs);
             med.put("_local_unsynced", true);
+
+            if (this.meds != null) {
+                String targetId = med.optString("id", "").trim();
+                String targetDet = !targetId.isEmpty() ? toDeterministicServerUuid(targetId, "med") : "";
+                String targetName = optCleanString(med, "nome", "").toLowerCase(Locale.ROOT);
+                String targetDose = optCleanString(med, "dosagem", "").toLowerCase(Locale.ROOT);
+                for (int i = 0; i < this.meds.length(); i++) {
+                    JSONObject m = this.meds.optJSONObject(i);
+                    if (m == null) continue;
+                    boolean match = (m == med);
+                    if (!match) {
+                        String mId = m.optString("id", "").trim();
+                        if (!targetId.isEmpty() && !mId.isEmpty()) {
+                            String mDet = toDeterministicServerUuid(mId, "med");
+                            if (targetId.equalsIgnoreCase(mId) || (!targetDet.isEmpty() && (targetDet.equalsIgnoreCase(mId) || targetDet.equalsIgnoreCase(mDet)))) {
+                                match = true;
+                            }
+                        }
+                        if (!match && !targetName.isEmpty()) {
+                            String mName = optCleanString(m, "nome", "").toLowerCase(Locale.ROOT);
+                            String mDose = optCleanString(m, "dosagem", "").toLowerCase(Locale.ROOT);
+                            if (targetName.equals(mName) && targetDose.equals(mDose)) {
+                                match = true;
+                            }
+                        }
+                    }
+                    if (match) {
+                        m.put("quantidade", val);
+                        m.put("estoque_atual", val);
+                        m.put("_local_stock_val", val);
+                        m.put("_local_stock_updated_ms", nowMs);
+                        m.put("_local_unsynced", true);
+                    }
+                }
+            }
         } catch (Exception ignored) {}
     }
 
@@ -3369,8 +3449,62 @@ public class MainActivity extends Activity {
         styleDialogWindow(dialog);
     }
 
+    private int computeUndoRestoredStock(JSONObject med, String dateStr, String horaStr) {
+        JSONObject live = findLiveMed(med);
+        JSONObject ref = live != null ? live : med;
+        int curSt = getMedStock(ref);
+        if (ref == null) return curSt + 1;
+        String medId = ref.optString("id", "");
+        String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : todayIso());
+        String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "08:00");
+
+        if (this.doseLogs != null) {
+            for (int i = this.doseLogs.length() - 1; i >= 0; i--) {
+                JSONObject log = this.doseLogs.optJSONObject(i);
+                if (log == null) continue;
+                if (doesDoseLogMatchMed(log, medId)
+                        && normDate.equals(extractDoseLogDate(log))
+                        && normHora.equals(extractDoseLogTime(log))) {
+                    if (log.has("stock_after_dose") && !log.isNull("stock_after_dose")) {
+                        int afterDose = log.optInt("stock_after_dose", 0);
+                        int beforeDose = log.optInt("stock_before_dose", afterDose + 1);
+                        if (afterDose < 0 && curSt == 0) {
+                            return beforeDose;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        if (curSt == 0 && this.stockMovements != null) {
+            String expectedNote = "Dose confirmada (" + normHora + ")";
+            for (int i = this.stockMovements.length() - 1; i >= 0; i--) {
+                JSONObject sm = this.stockMovements.optJSONObject(i);
+                if (sm == null) continue;
+                String smMedId = sm.optString("med_id", sm.optString("medication_id", ""));
+                if (doesDoseLogMatchMed(sm, medId) || medId.equalsIgnoreCase(smMedId)) {
+                    String smDate = sm.optString("date", "");
+                    String smMot = sm.optString("motivo", sm.optString("notes", ""));
+                    if (normDate.equals(smDate) && expectedNote.equalsIgnoreCase(smMot.trim())) {
+                        int qAfter = sm.optInt("quantity_after", sm.optInt("new_quantity", 0));
+                        int qBefore = sm.optInt("quantity_before", sm.optInt("previous_quantity", 0));
+                        if (qAfter < 0 && qBefore == 0) {
+                            return 0;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        return curSt + 1;
+    }
+
     private void registerDose(JSONObject med, String dateStr, String horaStr, String targetStatus) {
         try {
+            JSONObject liveMed = findLiveMed(med);
+            if (liveMed != null) {
+                med = liveMed;
+            }
             if (isPatientProfileRole()) {
                 showCaregiverDoseRequestDialog(med, dateStr, horaStr, targetStatus);
                 return;
@@ -3378,6 +3512,8 @@ public class MainActivity extends Activity {
             String medId = med.optString("id");
             String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : todayIso());
             String normHora = horaStr != null && horaStr.length() >= 5 && horaStr.charAt(2) == ':' ? horaStr.substring(0, 5) : (horaStr != null ? horaStr : "08:00");
+
+            int preComputedUndoStock = computeUndoRestoredStock(med, normDate, normHora);
 
             String prevStatus = "pendente";
             String preservedId = "";
@@ -3431,6 +3567,7 @@ public class MainActivity extends Activity {
                 removeDeletedRecordId(entryId);
             }
 
+            int currentStock = getMedStock(med);
             JSONObject logEntry = new JSONObject();
             logEntry.put("id", entryId);
             logEntry.put("med_id", medId);
@@ -3446,12 +3583,12 @@ public class MainActivity extends Activity {
             logEntry.put("_local_unsynced", true);
             logEntry.put("updated_at_ms", System.currentTimeMillis());
 
-            cleanedLogs.put(logEntry);
-            this.doseLogs = cleanedLogs;
-
-            int currentStock = getMedStock(med);
             if ("tomado".equals(newStatus) && !"tomado".equals(prevStatus)) {
                 int nextStock = currentStock - 1;
+                logEntry.put("stock_before_dose", currentStock);
+                logEntry.put("stock_after_dose", nextStock);
+                cleanedLogs.put(logEntry);
+                this.doseLogs = cleanedLogs;
                 setMedStock(med, nextStock);
                 this.stockMovements.put(new JSONObject()
                     .put("id", "sm-" + System.currentTimeMillis())
@@ -3478,7 +3615,9 @@ public class MainActivity extends Activity {
                     .put("motivo", "Dose confirmada (" + normHora + ")")
                     .put("notes", "Dose confirmada (" + normHora + ")"));
             } else if (!"tomado".equals(newStatus) && "tomado".equals(prevStatus)) {
-                int nextStock = currentStock + 1;
+                int nextStock = preComputedUndoStock;
+                cleanedLogs.put(logEntry);
+                this.doseLogs = cleanedLogs;
                 setMedStock(med, nextStock);
                 this.stockMovements.put(new JSONObject()
                     .put("id", "sm-" + System.currentTimeMillis())
@@ -3504,6 +3643,9 @@ public class MainActivity extends Activity {
                     .put("created_at", normDate + "T" + nowTime + ":00.000Z")
                     .put("motivo", "Estorno de dose desfeita (" + normHora + ")")
                     .put("notes", "Estorno de dose desfeita (" + normHora + ")"));
+            } else {
+                cleanedLogs.put(logEntry);
+                this.doseLogs = cleanedLogs;
             }
             if ("tomado".equals(newStatus)) {
                 DoseAlarmReceiver.cancelSnoozeForDose(this, medId, normHora);
@@ -3519,16 +3661,19 @@ public class MainActivity extends Activity {
             if (onProceed != null) onProceed.run();
             return;
         }
-        final int curStock = getMedStock(med);
+        final JSONObject targetMed = findLiveMed(med) != null ? findLiveMed(med) : med;
+        final int curStock = getMedStock(targetMed);
         final int useQty = Math.max(1, qtyToConsume);
         final int resultingStock = curStock - useQty;
         if (curStock <= 0 || resultingStock < 0) {
-            String medName = med.optString("nome", "este medicamento");
-            String unitStr = optCleanString(med, "unidade", optCleanString(med, "forma", "unidade"));
-            String dlgTitle = "⚠️ Estoque zerado";
-            String dlgMsg = (curStock <= 0
-                ? "O estoque de " + medName + " está zerado (" + curStock + " " + unitStr + (Math.abs(curStock) == 1 ? "" : "s") + ")."
-                : "O estoque atual de " + medName + " (" + curStock + ") é menor que a quantidade informada (" + useQty + ").")
+            String medName = targetMed.optString("nome", "este medicamento");
+            String unitStr = optCleanString(targetMed, "unidade", optCleanString(targetMed, "forma", "unidade"));
+            String dlgTitle = curStock < 0 ? "⚠️ Estoque negativado" : "⚠️ Estoque zerado";
+            String dlgMsg = (curStock < 0
+                ? "O estoque de " + medName + " já está negativado (" + curStock + " " + unitStr + (Math.abs(curStock) == 1 ? "" : "s") + ")."
+                : (curStock == 0
+                    ? "O estoque de " + medName + " está zerado (0 " + unitStr + "s)."
+                    : "O estoque atual de " + medName + " (" + curStock + ") é menor que a quantidade informada (" + useQty + ")."))
                 + "\n\nTem certeza que deseja seguir mesmo assim?\nO estoque ficará negativado em " + resultingStock + " para que, caso precise desfazer a dosagem, ele retorne para " + curStock + ".";
             showStyledConfirmDialog(dlgTitle, dlgMsg, "Sim, seguir", "Cancelar", this.cDanger, new Runnable() {
                 @Override
@@ -3620,13 +3765,14 @@ public class MainActivity extends Activity {
             showCaregiverDoseRequestDialog(med, dateStr, horaStr, "pendente");
             return;
         }
-        int curSt = getMedStock(med);
-        int restoredSt = curSt + 1;
-        String msg = "A dose de " + med.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque (saldo passará de " + curSt + " para " + restoredSt + ").";
+        final JSONObject targetMed = findLiveMed(med) != null ? findLiveMed(med) : med;
+        int curSt = getMedStock(targetMed);
+        int restoredSt = computeUndoRestoredStock(targetMed, dateStr, horaStr);
+        String msg = "A dose de " + targetMed.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque (saldo passará de " + curSt + " para " + restoredSt + ").";
         showStyledConfirmDialog("↩ Desfazer confirmação?", msg, "Desfazer", "Cancelar", this.cWarning, new Runnable() {
             @Override
             public void run() {
-                registerDose(med, dateStr, horaStr, "pendente");
+                registerDose(targetMed, dateStr, horaStr, "pendente");
             }
         });
     }
@@ -12087,11 +12233,26 @@ public class MainActivity extends Activity {
                 if (matchedIdx >= 0) {
                     matchedLocalIndices.add(String.valueOf(matchedIdx));
                     JSONObject lm = this.meds.optJSONObject(matchedIdx);
-                    if (lm != null && lm.optBoolean("_local_unsynced", false) && this.hasUnsyncedLocalChanges) {
+                    if (lm != null && lm.optBoolean("_local_unsynced", false)) {
                         lm.put("id", rId);
                         merged.put(lm);
                     } else {
                         if (lm != null) {
+                            int localStock = lm.has("_local_stock_val") && !lm.isNull("_local_stock_val")
+                                ? lm.optInt("_local_stock_val", lm.optInt("quantidade", 0))
+                                : (lm.has("quantidade") ? lm.optInt("quantidade", 0) : lm.optInt("estoque_atual", 0));
+                            int remoteStock = rm.optInt("quantidade", rm.optInt("estoque_atual", 0));
+                            long localStockUpdatedMs = lm.optLong("_local_stock_updated_ms", 0L);
+                            boolean recentLocalStockEdit = localStockUpdatedMs > 0L && (System.currentTimeMillis() - localStockUpdatedMs) < 30000L;
+                            // Preserve negative local stock if the remote server clamped it to 0 or if edited locally within 30s
+                            if ((localStock < 0 && remoteStock == 0) || recentLocalStockEdit) {
+                                rm.put("quantidade", localStock);
+                                rm.put("estoque_atual", localStock);
+                                rm.put("_local_stock_val", localStock);
+                                rm.put("_local_stock_updated_ms", localStockUpdatedMs);
+                            } else {
+                                rm.put("_local_stock_val", remoteStock);
+                            }
                             Iterator<String> keys = lm.keys();
                             while (keys.hasNext()) {
                                 String k = keys.next();
@@ -12592,154 +12753,158 @@ public class MainActivity extends Activity {
     /* JADX INFO: Access modifiers changed from: package-private */
     /* renamed from: lambda$syncWithBackendSilently$23$com-medicare-patient-MainActivity, reason: not valid java name */
     public /* synthetic */ void m24x90e7608c(final boolean z) {
-        try {
-            if (!this.isLoggedIn) return;
-            // First pull and merge any caregiver additions/updates so we never overwrite them
-            final boolean pulledChanges = pullAndMergeFromBackendSync();
+        synchronized (this.syncNetworkLock) {
+            try {
+                if (!this.isLoggedIn) return;
+                final long syncVersionAtStart = this.localMutationVersion;
+                // First pull and merge any caregiver additions/updates so we never overwrite them
+                final boolean pulledChanges = pullAndMergeFromBackendSync();
 
-            HttpURLConnection httpURLConnection = (HttpURLConnection) new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync").openConnection();
-            httpURLConnection.setRequestMethod("POST");
-            httpURLConnection.setConnectTimeout(8000);
-            httpURLConnection.setReadTimeout(8000);
-            boolean z2 = true;
-            httpURLConnection.setDoOutput(true);
-            httpURLConnection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-            if (!EMBEDDED_API_KEY.isEmpty()) {
-                httpURLConnection.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
-            }
-            String patId = resolveCurrentAccountUserId();
-            JSONObject syncProfile = new JSONObject(this.profile.toString());
-            syncProfile.put("id", patId);
-            String apelido = this.profile.optString("apelido", this.profile.optString("social_name", "")).trim();
-            if (!apelido.isEmpty()) {
-                syncProfile.put("social_name", apelido);
-            } else {
-                syncProfile.remove("social_name");
-            }
-            String rawDob = this.profile.optString("data_nascimento", this.profile.optString("dob", "")).trim();
-            String isoDob = parseDateInputToIso(rawDob, "");
-            if (isoDob.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
-                syncProfile.put("dob", isoDob);
-            } else {
-                syncProfile.remove("dob");
-            }
-            String sexoVal = this.profile.optString("sexo", this.profile.optString("sex", "")).trim();
-            if (!sexoVal.isEmpty()) {
-                syncProfile.put("sex", sexoVal);
-            } else {
-                syncProfile.remove("sex");
-            }
-            String telVal = this.profile.optString("telefone", this.profile.optString("phone", "")).trim();
-            if (!telVal.isEmpty()) {
-                syncProfile.put("phone", telVal);
-            } else {
-                syncProfile.remove("phone");
-            }
-            String endVal = this.profile.optString("endereco", this.profile.optString("address", "")).trim();
-            if (!endVal.isEmpty()) {
-                syncProfile.put("address", endVal);
-            } else {
-                syncProfile.remove("address");
-            }
-            String rawWeight = this.profile.optString("peso", this.profile.optString("weight", "")).replace(",", ".").replaceAll("[^0-9.]", "").trim();
-            if (!rawWeight.isEmpty()) {
-                syncProfile.put("weight", rawWeight);
-            } else {
-                syncProfile.remove("weight");
-            }
-            String rawHeight = this.profile.optString("altura", this.profile.optString("height", "")).replace(",", ".").replaceAll("[^0-9.]", "").trim();
-            if (!rawHeight.isEmpty()) {
-                syncProfile.put("height", rawHeight);
-            } else {
-                syncProfile.remove("height");
-            }
-            String btVal = this.profile.optString("tipo_sanguineo", this.profile.optString("blood_type", "")).trim();
-            if (!btVal.isEmpty()) {
-                syncProfile.put("blood_type", btVal);
-            } else {
-                syncProfile.remove("blood_type");
-            }
-            JSONObject jSONObject = new JSONObject();
-            jSONObject.put("patientId", patId);
-            jSONObject.put("userId", patId);
-            jSONObject.put("profile", syncProfile);
-            jSONObject.put("user", syncProfile);
-            jSONObject.put("medicamentos", this.meds);
-            jSONObject.put("meds", this.meds);
-            jSONObject.put("historico_doses", this.doseLogs);
-            jSONObject.put("history", this.doseLogs);
-            jSONObject.put("health_events", this.events);
-            jSONObject.put("events", this.events);
-            jSONObject.put("calendar_notes", this.calNotes);
-            jSONObject.put("notes", this.calNotesList);
-            jSONObject.put("stock_movements", this.stockMovements);
-            jSONObject.put("allergies", this.allergies);
-            jSONObject.put("health_conditions", this.conditions);
-            jSONObject.put("conditions", this.conditions);
-            jSONObject.put("emergency_contacts", this.contacts);
-            jSONObject.put("contacts", this.contacts);
-            jSONObject.put("healthcare_professionals", this.professionals);
-            jSONObject.put("professionals", this.professionals);
-            jSONObject.put("caregiver_relationships", this.caregivers);
-            jSONObject.put("caregivers", this.caregivers);
-            jSONObject.put("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
-            jSONObject.put("approval_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
-            byte[] bytes = jSONObject.toString().getBytes(StandardCharsets.UTF_8);
-            OutputStream outputStream = httpURLConnection.getOutputStream();
-            outputStream.write(bytes);
-            outputStream.close();
-            int responseCode = httpURLConnection.getResponseCode();
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader((responseCode < 200 || responseCode >= 400) ? httpURLConnection.getErrorStream() : httpURLConnection.getInputStream(), StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            while (true) {
-                String readLine = bufferedReader.readLine();
-                if (readLine == null) {
-                    break;
+                HttpURLConnection httpURLConnection = (HttpURLConnection) new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync").openConnection();
+                httpURLConnection.setRequestMethod("POST");
+                httpURLConnection.setConnectTimeout(8000);
+                httpURLConnection.setReadTimeout(8000);
+                boolean z2 = true;
+                httpURLConnection.setDoOutput(true);
+                httpURLConnection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                if (!EMBEDDED_API_KEY.isEmpty()) {
+                    httpURLConnection.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
+                }
+                String patId = resolveCurrentAccountUserId();
+                JSONObject syncProfile = new JSONObject(this.profile.toString());
+                syncProfile.put("id", patId);
+                String apelido = this.profile.optString("apelido", this.profile.optString("social_name", "")).trim();
+                if (!apelido.isEmpty()) {
+                    syncProfile.put("social_name", apelido);
                 } else {
-                    sb.append(readLine);
+                    syncProfile.remove("social_name");
                 }
-            }
-            bufferedReader.close();
-            JSONObject jSONObject2 = new JSONObject(sb.toString());
-            if (responseCode != 200) {
-                z2 = false;
-            }
-            String returnedUserId = jSONObject2.optString("userId", "").trim();
-            if (!returnedUserId.isEmpty() && patId.equalsIgnoreCase(returnedUserId)) {
-                this.profile.put("id", returnedUserId);
-                this.prefs.edit().putString("profile", this.profile.toString()).apply();
-            }
-            final boolean optBoolean = jSONObject2.optBoolean("ok", z2);
-            if (optBoolean) {
-                this.hasUnsyncedLocalChanges = false;
-                for (int i = 0; i < this.meds.length(); i++) {
-                    JSONObject m = this.meds.optJSONObject(i);
-                    if (m != null) m.remove("_local_unsynced");
+                String rawDob = this.profile.optString("data_nascimento", this.profile.optString("dob", "")).trim();
+                String isoDob = parseDateInputToIso(rawDob, "");
+                if (isoDob.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+                    syncProfile.put("dob", isoDob);
+                } else {
+                    syncProfile.remove("dob");
                 }
-                for (int i = 0; i < this.doseLogs.length(); i++) {
-                    JSONObject dl = this.doseLogs.optJSONObject(i);
-                    if (dl != null) dl.remove("_local_unsynced");
+                String sexoVal = this.profile.optString("sexo", this.profile.optString("sex", "")).trim();
+                if (!sexoVal.isEmpty()) {
+                    syncProfile.put("sex", sexoVal);
+                } else {
+                    syncProfile.remove("sex");
                 }
-            }
-            final String format = new SimpleDateFormat(getDeviceDatePattern() + " HH:mm", getDeviceLocale()).format(new Date());
-            runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda8
-                @Override // java.lang.Runnable
-                public final void run() {
-                    if (pulledChanges) {
-                        MainActivity.this.saveLocalStateOnly();
-                        MainActivity.this.scheduleAllMedicationAlarms();
-                        MainActivity.this.render();
+                String telVal = this.profile.optString("telefone", this.profile.optString("phone", "")).trim();
+                if (!telVal.isEmpty()) {
+                    syncProfile.put("phone", telVal);
+                } else {
+                    syncProfile.remove("phone");
+                }
+                String endVal = this.profile.optString("endereco", this.profile.optString("address", "")).trim();
+                if (!endVal.isEmpty()) {
+                    syncProfile.put("address", endVal);
+                } else {
+                    syncProfile.remove("address");
+                }
+                String rawWeight = this.profile.optString("peso", this.profile.optString("weight", "")).replace(",", ".").replaceAll("[^0-9.]", "").trim();
+                if (!rawWeight.isEmpty()) {
+                    syncProfile.put("weight", rawWeight);
+                } else {
+                    syncProfile.remove("weight");
+                }
+                String rawHeight = this.profile.optString("altura", this.profile.optString("height", "")).replace(",", ".").replaceAll("[^0-9.]", "").trim();
+                if (!rawHeight.isEmpty()) {
+                    syncProfile.put("height", rawHeight);
+                } else {
+                    syncProfile.remove("height");
+                }
+                String btVal = this.profile.optString("tipo_sanguineo", this.profile.optString("blood_type", "")).trim();
+                if (!btVal.isEmpty()) {
+                    syncProfile.put("blood_type", btVal);
+                } else {
+                    syncProfile.remove("blood_type");
+                }
+                JSONObject jSONObject = new JSONObject();
+                jSONObject.put("patientId", patId);
+                jSONObject.put("userId", patId);
+                jSONObject.put("profile", syncProfile);
+                jSONObject.put("user", syncProfile);
+                jSONObject.put("medicamentos", this.meds);
+                jSONObject.put("meds", this.meds);
+                jSONObject.put("historico_doses", this.doseLogs);
+                jSONObject.put("history", this.doseLogs);
+                jSONObject.put("health_events", this.events);
+                jSONObject.put("events", this.events);
+                jSONObject.put("calendar_notes", this.calNotes);
+                jSONObject.put("notes", this.calNotesList);
+                jSONObject.put("stock_movements", this.stockMovements);
+                jSONObject.put("allergies", this.allergies);
+                jSONObject.put("health_conditions", this.conditions);
+                jSONObject.put("conditions", this.conditions);
+                jSONObject.put("emergency_contacts", this.contacts);
+                jSONObject.put("contacts", this.contacts);
+                jSONObject.put("healthcare_professionals", this.professionals);
+                jSONObject.put("professionals", this.professionals);
+                jSONObject.put("caregiver_relationships", this.caregivers);
+                jSONObject.put("caregivers", this.caregivers);
+                jSONObject.put("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
+                jSONObject.put("approval_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
+                byte[] bytes = jSONObject.toString().getBytes(StandardCharsets.UTF_8);
+                OutputStream outputStream = httpURLConnection.getOutputStream();
+                outputStream.write(bytes);
+                outputStream.close();
+                int responseCode = httpURLConnection.getResponseCode();
+                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader((responseCode < 200 || responseCode >= 400) ? httpURLConnection.getErrorStream() : httpURLConnection.getInputStream(), StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                while (true) {
+                    String readLine = bufferedReader.readLine();
+                    if (readLine == null) {
+                        break;
+                    } else {
+                        sb.append(readLine);
                     }
-                    MainActivity.this.m22xc335e10a(optBoolean, format, z);
                 }
-            });
-        } catch (Exception e) {
-            runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda9
-                @Override // java.lang.Runnable
-                public final void run() {
-                    MainActivity.this.m23x2a0ea0cb(z);
+                bufferedReader.close();
+                JSONObject jSONObject2 = new JSONObject(sb.toString());
+                if (responseCode != 200) {
+                    z2 = false;
                 }
-            });
+                String returnedUserId = jSONObject2.optString("userId", "").trim();
+                if (!returnedUserId.isEmpty() && patId.equalsIgnoreCase(returnedUserId)) {
+                    this.profile.put("id", returnedUserId);
+                    this.prefs.edit().putString("profile", this.profile.toString()).apply();
+                }
+                final boolean optBoolean = jSONObject2.optBoolean("ok", z2);
+                final boolean noNewerLocalMutation = (this.localMutationVersion == syncVersionAtStart);
+                if (optBoolean && noNewerLocalMutation) {
+                    this.hasUnsyncedLocalChanges = false;
+                    for (int i = 0; i < this.meds.length(); i++) {
+                        JSONObject m = this.meds.optJSONObject(i);
+                        if (m != null) m.remove("_local_unsynced");
+                    }
+                    for (int i = 0; i < this.doseLogs.length(); i++) {
+                        JSONObject dl = this.doseLogs.optJSONObject(i);
+                        if (dl != null) dl.remove("_local_unsynced");
+                    }
+                }
+                final String format = new SimpleDateFormat(getDeviceDatePattern() + " HH:mm", getDeviceLocale()).format(new Date());
+                runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda8
+                    @Override // java.lang.Runnable
+                    public final void run() {
+                        if (pulledChanges && MainActivity.this.localMutationVersion == syncVersionAtStart) {
+                            MainActivity.this.saveLocalStateOnly();
+                            MainActivity.this.scheduleAllMedicationAlarms();
+                            MainActivity.this.render();
+                        }
+                        MainActivity.this.m22xc335e10a(optBoolean, format, z);
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda9
+                    @Override // java.lang.Runnable
+                    public final void run() {
+                        MainActivity.this.m23x2a0ea0cb(z);
+                    }
+                });
+            }
         }
     }
 
@@ -12750,24 +12915,29 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                try {
-                    if (!MainActivity.this.isLoggedIn) return;
-                    boolean changed = MainActivity.this.pullAndMergeFromBackendSync();
-                    if (changed) {
-                        final String format = new SimpleDateFormat(MainActivity.this.getDeviceDatePattern() + " HH:mm", MainActivity.this.getDeviceLocale()).format(new Date());
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                MainActivity.this.backendStatusOk = true;
-                                MainActivity.this.lastSyncTimestamp = "Sincronizado em " + format;
-                                MainActivity.this.prefs.edit().putString("last_sync_timestamp", MainActivity.this.lastSyncTimestamp).apply();
-                                MainActivity.this.saveLocalStateOnly();
-                                MainActivity.this.scheduleAllMedicationAlarms();
-                                MainActivity.this.render();
-                            }
-                        });
-                    }
-                } catch (Exception ignored) {}
+                synchronized (MainActivity.this.syncNetworkLock) {
+                    try {
+                        if (!MainActivity.this.isLoggedIn) return;
+                        if (MainActivity.this.hasUnsyncedLocalChanges) return;
+                        final long versionBeforePull = MainActivity.this.localMutationVersion;
+                        boolean changed = MainActivity.this.pullAndMergeFromBackendSync();
+                        if (changed && MainActivity.this.localMutationVersion == versionBeforePull) {
+                            final String format = new SimpleDateFormat(MainActivity.this.getDeviceDatePattern() + " HH:mm", MainActivity.this.getDeviceLocale()).format(new Date());
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (MainActivity.this.localMutationVersion != versionBeforePull) return;
+                                    MainActivity.this.backendStatusOk = true;
+                                    MainActivity.this.lastSyncTimestamp = "Sincronizado em " + format;
+                                    MainActivity.this.prefs.edit().putString("last_sync_timestamp", MainActivity.this.lastSyncTimestamp).apply();
+                                    MainActivity.this.saveLocalStateOnly();
+                                    MainActivity.this.scheduleAllMedicationAlarms();
+                                    MainActivity.this.render();
+                                }
+                            });
+                        }
+                    } catch (Exception ignored) {}
+                }
             }
         }).start();
     }

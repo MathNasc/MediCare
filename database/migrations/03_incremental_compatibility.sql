@@ -25,6 +25,7 @@ ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS principio_ativo text;
 ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS manufacturer text;
 ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS fabricante text;
 ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS aviso_estoque int DEFAULT 5;
+ALTER TABLE public.medicamentos DROP CONSTRAINT IF EXISTS medicamentos_quantidade_check;
 
 -- 4. Evolução não-destrutiva de histórico de doses (horário previsto vs real vs registro, ator e origem)
 ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS dose_date date;

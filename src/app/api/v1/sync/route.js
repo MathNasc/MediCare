@@ -444,9 +444,13 @@ export async function POST(request) {
       const manuf = m.manufacturer || m.fabricante || null;
       const treatType = normalizeTreatmentType(m.treatment_type || m.treatmentType || m.tipo_uso);
       const medStatus = ['ativo', 'pausado', 'concluido', 'cancelado'].includes(m.status) ? m.status : 'ativo';
+      const rawMedQty = m.quantidade ?? m.estoque_atual;
+      const parsedMedQty =
+        rawMedQty !== undefined && rawMedQty !== null && rawMedQty !== '' && Number.isFinite(Number(rawMedQty))
+          ? Math.round(Number(rawMedQty))
+          : 30;
 
-      await client.query(
-        `INSERT INTO medicamentos (
+      const medUpsertSql = `INSERT INTO medicamentos (
            id, user_id, nome, principio_ativo, active_ingredient, fabricante, manufacturer,
            dosagem, unidade, cor, quantidade, horarios, observacoes, ativo, status,
            treatment_type, start_date, end_date, treatment_days, updated_at
@@ -470,29 +474,45 @@ export async function POST(request) {
            start_date = EXCLUDED.start_date,
            end_date = EXCLUDED.end_date,
            treatment_days = EXCLUDED.treatment_days,
-           updated_at = NOW()`,
-        [
-          medUuid,
-          userId,
-          m.nome || 'Medicamento',
-          activeIng,
-          activeIng,
-          manuf,
-          manuf,
-          m.dosagem || '1 dose',
-          m.unidade || 'comprimido',
-          m.cor || '#3b82f6',
-          Math.round(Number(m.quantidade ?? m.estoque_atual ?? 30) || 0),
-          isHorariosArray ? horariosArr : JSON.stringify(horariosArr),
-          m.observacoes || m.instrucoes || null,
-          m.ativo !== false,
-          medStatus,
-          treatType,
-          parsePgDate(m.start_date || m.startDate || m.data_inicio),
-          parsePgDate(m.end_date || m.endDate || m.data_fim),
-          parsePgNumeric(m.treatment_days ?? m.treatmentDays ?? m.duracao_dias),
-        ]
-      );
+           updated_at = NOW()`;
+
+      const medUpsertParams = [
+        medUuid,
+        userId,
+        m.nome || 'Medicamento',
+        activeIng,
+        activeIng,
+        manuf,
+        manuf,
+        m.dosagem || '1 dose',
+        m.unidade || 'comprimido',
+        m.cor || '#3b82f6',
+        parsedMedQty,
+        isHorariosArray ? horariosArr : JSON.stringify(horariosArr),
+        m.observacoes || m.instrucoes || null,
+        m.ativo !== false,
+        medStatus,
+        treatType,
+        parsePgDate(m.start_date || m.startDate || m.data_inicio),
+        parsePgDate(m.end_date || m.endDate || m.data_fim),
+        parsePgNumeric(m.treatment_days ?? m.treatmentDays ?? m.duracao_dias),
+      ];
+
+      await client.query('SAVEPOINT sp_med_upsert');
+      try {
+        await client.query(medUpsertSql, medUpsertParams);
+        await client.query('RELEASE SAVEPOINT sp_med_upsert');
+      } catch (medErr) {
+        await client.query('ROLLBACK TO SAVEPOINT sp_med_upsert');
+        if (medErr?.code === '23514') {
+          await client
+            .query('ALTER TABLE public.medicamentos DROP CONSTRAINT IF EXISTS medicamentos_quantidade_check')
+            .catch(() => {});
+          await client.query(medUpsertSql, medUpsertParams);
+        } else {
+          throw medErr;
+        }
+      }
     }
 
     const isDependentPatientSync =

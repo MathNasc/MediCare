@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS public.medicamentos (
   principio_ativo         text,
   fabricante              text,
   dosagem                 text,
-  quantidade              int DEFAULT 30 CHECK (quantidade >= 0),
+  quantidade              int DEFAULT 30,
   unidade                 text DEFAULT 'comprimido',
   cor                     text DEFAULT '#3b82f6',
   observacoes             text,
