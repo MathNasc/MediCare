@@ -71,6 +71,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -1428,7 +1429,113 @@ public class MainActivity extends Activity {
     }
 
     private String todayIso() {
-        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        sdf.setTimeZone(TimeZone.getDefault());
+        return sdf.format(new Date());
+    }
+
+    private String nowLocalTimeHm() {
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm", Locale.US);
+        sdf.setTimeZone(TimeZone.getDefault());
+        return sdf.format(new Date());
+    }
+
+    private String nowUtcIso() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return sdf.format(new Date());
+    }
+
+    private String[] parseUtcTimestampToLocalDateAndTime(String rawIso) {
+        if (rawIso == null) return null;
+        String s = rawIso.trim();
+        if (s.length() < 16) return null;
+        try {
+            boolean isUtc = s.endsWith("Z") || s.endsWith("z")
+                    || s.endsWith("+00") || s.endsWith("+00:00") || s.endsWith("+0000");
+            if (!isUtc) return null;
+            String normalized = s.replace('T', ' ');
+            String ymdHms;
+            if (normalized.length() >= 19 && normalized.charAt(13) == ':' && normalized.charAt(16) == ':') {
+                ymdHms = normalized.substring(0, 19);
+            } else if (normalized.length() >= 16 && normalized.charAt(13) == ':') {
+                ymdHms = normalized.substring(0, 16) + ":00";
+            } else {
+                return null;
+            }
+            SimpleDateFormat utcFmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+            utcFmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Date parsedDate = utcFmt.parse(ymdHms);
+            if (parsedDate == null) return null;
+
+            TimeZone localTz = TimeZone.getDefault();
+            SimpleDateFormat localDateFmt = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            localDateFmt.setTimeZone(localTz);
+            SimpleDateFormat localTimeFmt = new SimpleDateFormat("HH:mm", Locale.US);
+            localTimeFmt.setTimeZone(localTz);
+
+            return new String[]{
+                localDateFmt.format(parsedDate),
+                localTimeFmt.format(parsedDate)
+            };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void sanitizeJsonObjectNulls(JSONObject obj) {
+        if (obj == null) return;
+        try {
+            JSONArray names = obj.names();
+            if (names == null) return;
+            for (int i = 0; i < names.length(); i++) {
+                String k = names.optString(i, "");
+                if (k.isEmpty()) continue;
+                if (obj.isNull(k)) {
+                    obj.remove(k);
+                    continue;
+                }
+                Object val = obj.opt(k);
+                if (val instanceof String) {
+                    String s = ((String) val).trim();
+                    if ("null".equalsIgnoreCase(s) || "undefined".equalsIgnoreCase(s)) {
+                        obj.remove(k);
+                    }
+                } else if (val instanceof JSONObject) {
+                    sanitizeJsonObjectNulls((JSONObject) val);
+                } else if (val instanceof JSONArray) {
+                    sanitizeJsonArrayNulls((JSONArray) val);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void sanitizeJsonArrayNulls(JSONArray arr) {
+        if (arr == null) return;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject obj = arr.optJSONObject(i);
+            if (obj != null) {
+                sanitizeJsonObjectNulls(obj);
+            }
+        }
+    }
+
+    private void sanitizeAllInMemoryData() {
+        try {
+            sanitizeJsonObjectNulls(this.profile);
+            sanitizeJsonArrayNulls(this.meds);
+            sanitizeJsonArrayNulls(this.doseLogs);
+            sanitizeJsonArrayNulls(this.events);
+            sanitizeJsonObjectNulls(this.calNotes);
+            sanitizeJsonArrayNulls(this.calNotesList);
+            sanitizeJsonArrayNulls(this.stockMovements);
+            sanitizeJsonArrayNulls(this.allergies);
+            sanitizeJsonArrayNulls(this.conditions);
+            sanitizeJsonArrayNulls(this.contacts);
+            sanitizeJsonArrayNulls(this.professionals);
+            sanitizeJsonArrayNulls(this.caregivers);
+            sanitizeJsonArrayNulls(this.pendingDoseRequests);
+        } catch (Exception ignored) {}
     }
 
     private Locale getDeviceLocale() {
@@ -1823,6 +1930,8 @@ public class MainActivity extends Activity {
             this.caregivers = snap.optJSONArray("caregivers") != null ? snap.optJSONArray("caregivers") : new JSONArray();
             this.aiMessages = snap.optJSONArray("ai_messages") != null ? snap.optJSONArray("ai_messages") : new JSONArray();
             this.pendingDoseRequests = snap.optJSONArray("pending_dose_requests") != null ? snap.optJSONArray("pending_dose_requests") : new JSONArray();
+            sanitizeAllInMemoryData();
+            deduplicateStockMovements();
             this.prefs.edit().putBoolean("onboarding_completed", snap.optBoolean("onboarding_completed", true)).apply();
             return true;
         } catch (Exception e) {
@@ -1933,6 +2042,8 @@ public class MainActivity extends Activity {
                 this.caregivers = new JSONArray(this.prefs.getString("caregivers", "[]"));
                 this.aiMessages = new JSONArray(this.prefs.getString("ai_messages", "[]"));
                 this.pendingDoseRequests = new JSONArray(this.prefs.getString("pending_dose_requests", "[]"));
+                sanitizeAllInMemoryData();
+                deduplicateStockMovements();
 
                 if ("maria.silva@email.com".equalsIgnoreCase(this.profile.optString("email", ""))) {
                     this.isLoggedIn = false;
@@ -2990,7 +3101,7 @@ public class MainActivity extends Activity {
 
     private String extractDoseLogDate(JSONObject log) {
         if (log == null) return "";
-        String[] fields = {"data", "dose_date", "date", "created_at"};
+        String[] fields = {"data", "dose_date", "date"};
         for (int i = 0; i < fields.length; i++) {
             String raw = optCleanString(log, fields[i], "");
             if (raw.length() >= 10) {
@@ -2998,6 +3109,18 @@ public class MainActivity extends Activity {
             }
             if (!raw.isEmpty()) {
                 return raw;
+            }
+        }
+        String createdAt = optCleanString(log, "created_at", "");
+        if (!createdAt.isEmpty()) {
+            if (!createdAt.endsWith(":00.000Z") || log.optBoolean("_utc_created_at", false)) {
+                String[] localDt = parseUtcTimestampToLocalDateAndTime(createdAt);
+                if (localDt != null && !localDt[0].isEmpty()) {
+                    return localDt[0];
+                }
+            }
+            if (createdAt.length() >= 10) {
+                return createdAt.substring(0, 10);
             }
         }
         return "";
@@ -3550,7 +3673,9 @@ public class MainActivity extends Activity {
                 }
             }
 
-            String nowTime = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+            String nowTime = nowLocalTimeHm();
+            String actionDate = todayIso();
+            String utcNow = nowUtcIso();
             int atrasoMin = 0;
             try {
                 String[] p1 = normHora.split(":");
@@ -3571,10 +3696,11 @@ public class MainActivity extends Activity {
             JSONObject logEntry = new JSONObject();
             logEntry.put("id", entryId);
             logEntry.put("med_id", medId);
-            logEntry.put("med_nome", med.optString("nome") + " " + med.optString("dosagem"));
+            logEntry.put("med_nome", (optCleanString(med, "nome", "") + " " + optCleanString(med, "dosagem", "")).trim());
             logEntry.put("data", normDate);
             logEntry.put("dose_date", normDate);
-            logEntry.put("created_at", normDate + "T" + nowTime + ":00.000Z");
+            logEntry.put("created_at", utcNow);
+            logEntry.put("_utc_created_at", true);
             logEntry.put("horario", normHora);
             logEntry.put("hora", normHora);
             logEntry.put("status", newStatus);
@@ -3591,11 +3717,11 @@ public class MainActivity extends Activity {
                 this.doseLogs = cleanedLogs;
                 setMedStock(med, nextStock);
                 this.stockMovements.put(new JSONObject()
-                    .put("id", "sm-" + System.currentTimeMillis())
+                    .put("id", UUID.randomUUID().toString())
                     .put("med_id", medId)
                     .put("medication_id", medId)
-                    .put("med_nome", med.optString("nome"))
-                    .put("med_name", med.optString("nome"))
+                    .put("med_nome", optCleanString(med, "nome", ""))
+                    .put("med_name", optCleanString(med, "nome", ""))
                     .put("tipo", "saida")
                     .put("movement_type", "consumption")
                     .put("qtd", 1)
@@ -3607,11 +3733,12 @@ public class MainActivity extends Activity {
                     .put("quantity_before", currentStock)
                     .put("new_quantity", nextStock)
                     .put("quantity_after", nextStock)
-                    .put("date", normDate)
+                    .put("date", actionDate)
                     .put("time", nowTime)
                     .put("hora", nowTime)
-                    .put("data", normDate + " " + nowTime)
-                    .put("created_at", normDate + "T" + nowTime + ":00.000Z")
+                    .put("data", actionDate + " " + nowTime)
+                    .put("created_at", utcNow)
+                    .put("_utc_created_at", true)
                     .put("motivo", "Dose confirmada (" + normHora + ")")
                     .put("notes", "Dose confirmada (" + normHora + ")"));
             } else if (!"tomado".equals(newStatus) && "tomado".equals(prevStatus)) {
@@ -3620,11 +3747,11 @@ public class MainActivity extends Activity {
                 this.doseLogs = cleanedLogs;
                 setMedStock(med, nextStock);
                 this.stockMovements.put(new JSONObject()
-                    .put("id", "sm-" + System.currentTimeMillis())
+                    .put("id", UUID.randomUUID().toString())
                     .put("med_id", medId)
                     .put("medication_id", medId)
-                    .put("med_nome", med.optString("nome"))
-                    .put("med_name", med.optString("nome"))
+                    .put("med_nome", optCleanString(med, "nome", ""))
+                    .put("med_name", optCleanString(med, "nome", ""))
                     .put("tipo", "entrada")
                     .put("movement_type", "correction")
                     .put("qtd", 1)
@@ -3636,11 +3763,12 @@ public class MainActivity extends Activity {
                     .put("quantity_before", currentStock)
                     .put("new_quantity", nextStock)
                     .put("quantity_after", nextStock)
-                    .put("date", normDate)
+                    .put("date", actionDate)
                     .put("time", nowTime)
                     .put("hora", nowTime)
-                    .put("data", normDate + " " + nowTime)
-                    .put("created_at", normDate + "T" + nowTime + ":00.000Z")
+                    .put("data", actionDate + " " + nowTime)
+                    .put("created_at", utcNow)
+                    .put("_utc_created_at", true)
                     .put("motivo", "Estorno de dose desfeita (" + normHora + ")")
                     .put("notes", "Estorno de dose desfeita (" + normHora + ")"));
             } else {
@@ -4907,8 +5035,10 @@ public class MainActivity extends Activity {
                                 log.put("id", "sos-" + System.currentTimeMillis());
                                 log.put("med_id", med.optString("id"));
                                 log.put("med_nome", med.optString("nome") + " " + med.optString("dosagem"));
+                                String utcSos = nowUtcIso();
                                 log.put("data", today);
-                                log.put("created_at", today + "T" + h + ":00.000Z");
+                                log.put("created_at", utcSos);
+                                log.put("_utc_created_at", true);
                                 log.put("horario", h);
                                 log.put("hora", h);
                                 log.put("status", "confirmed");
@@ -4921,11 +5051,11 @@ public class MainActivity extends Activity {
                                 setMedStock(med, nextSt);
                                 String sosReason = mot.isEmpty() ? "Uso SOS" : "Uso SOS: " + mot;
                                 MainActivity.this.stockMovements.put(new JSONObject()
-                                    .put("id", "sm-" + System.currentTimeMillis())
-                                    .put("med_id", med.optString("id"))
-                                    .put("medication_id", med.optString("id"))
-                                    .put("med_nome", med.optString("nome"))
-                                    .put("med_name", med.optString("nome"))
+                                    .put("id", UUID.randomUUID().toString())
+                                    .put("med_id", optCleanString(med, "id", ""))
+                                    .put("medication_id", optCleanString(med, "id", ""))
+                                    .put("med_nome", optCleanString(med, "nome", ""))
+                                    .put("med_name", optCleanString(med, "nome", ""))
                                     .put("tipo", "saida")
                                     .put("movement_type", "consumption")
                                     .put("qtd", qUsed)
@@ -4941,7 +5071,8 @@ public class MainActivity extends Activity {
                                     .put("time", h)
                                     .put("hora", h)
                                     .put("data", today + " " + h)
-                                    .put("created_at", today + "T" + h + ":00.000Z")
+                                    .put("created_at", utcSos)
+                                    .put("_utc_created_at", true)
                                     .put("motivo", sosReason)
                                     .put("notes", sosReason));
                                 saveAll();
@@ -5045,15 +5176,16 @@ public class MainActivity extends Activity {
     private void showStockMovementModal(final JSONObject med, final int prevQty, final int newQty) {
         final int diff = newQty - prevQty;
         final String today = todayIso();
-        final String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+        final String hm = nowLocalTimeHm();
+        final String utcNow = nowUtcIso();
         final JSONObject sm = new JSONObject();
         try {
             String defaultMotivo = diff > 0 ? "Reposição de estoque" : "Ajuste manual de estoque";
-            sm.put("id", "sm-" + System.currentTimeMillis());
-            sm.put("med_id", med.optString("id"));
-            sm.put("medication_id", med.optString("id"));
-            sm.put("med_nome", med.optString("nome"));
-            sm.put("med_name", med.optString("nome"));
+            sm.put("id", UUID.randomUUID().toString());
+            sm.put("med_id", optCleanString(med, "id", ""));
+            sm.put("medication_id", optCleanString(med, "id", ""));
+            sm.put("med_nome", optCleanString(med, "nome", ""));
+            sm.put("med_name", optCleanString(med, "nome", ""));
             sm.put("tipo", diff >= 0 ? "entrada" : "saida");
             sm.put("movement_type", diff >= 0 ? "purchase" : "adjustment");
             sm.put("qtd", Math.abs(diff));
@@ -5065,15 +5197,12 @@ public class MainActivity extends Activity {
             sm.put("quantity_before", prevQty);
             sm.put("new_quantity", newQty);
             sm.put("quantity_after", newQty);
-            sm.put("pharmacy", "");
-            sm.put("purchase_location", "");
-            sm.put("price_paid", "");
-            sm.put("purchase_price", "");
             sm.put("date", today);
             sm.put("time", hm);
             sm.put("hora", hm);
             sm.put("data", today + " " + hm);
-            sm.put("created_at", today + "T" + hm + ":00.000Z");
+            sm.put("created_at", utcNow);
+            sm.put("_utc_created_at", true);
             sm.put("motivo", defaultMotivo);
             sm.put("notes", defaultMotivo);
             this.stockMovements.put(sm);
@@ -7151,19 +7280,26 @@ public class MainActivity extends Activity {
 
     private boolean isCalendarStockMovement(JSONObject sm) {
         if (sm == null) return false;
-        String movType = sm.optString("movement_type", "").trim().toLowerCase(Locale.ROOT);
+        String movType = optCleanString(sm, "movement_type", "").toLowerCase(Locale.ROOT);
         if ("consumption".equals(movType)) return false;
-        String mot = sm.optString("motivo", "").trim();
+        String mot = optCleanString(sm, "motivo", optCleanString(sm, "notes", ""));
         if (mot.startsWith("Dose tomada") || mot.startsWith("Uso SOS")) return false;
         return true;
     }
 
     private String getStockMovementDate(JSONObject sm) {
         if (sm == null) return "";
-        String raw = sm.optString("date", "");
-        if (raw.isEmpty()) raw = sm.optString("data", "");
-        if (raw.isEmpty()) raw = sm.optString("data_hora", "");
-        if (raw.isEmpty()) raw = sm.optString("created_at", "");
+        String createdAt = optCleanString(sm, "created_at", "");
+        if (!createdAt.isEmpty() && (!createdAt.endsWith(":00.000Z") || sm.optBoolean("_utc_created_at", false))) {
+            String[] localDt = parseUtcTimestampToLocalDateAndTime(createdAt);
+            if (localDt != null && !localDt[0].isEmpty()) {
+                return localDt[0];
+            }
+        }
+        String raw = optCleanString(sm, "date", "");
+        if (raw.isEmpty()) raw = optCleanString(sm, "data", "");
+        if (raw.isEmpty()) raw = optCleanString(sm, "data_hora", "");
+        if (raw.isEmpty()) raw = createdAt;
         raw = raw.trim();
         if (raw.length() >= 10) return raw.substring(0, 10);
         return raw;
@@ -7171,18 +7307,24 @@ public class MainActivity extends Activity {
 
     private String getStockMovementTime(JSONObject sm) {
         if (sm == null) return "";
-        String tm = sm.optString("time", sm.optString("hora", "")).trim();
+        String createdAt = optCleanString(sm, "created_at", "");
+        if (!createdAt.isEmpty() && (!createdAt.endsWith(":00.000Z") || sm.optBoolean("_utc_created_at", false))) {
+            String[] localDt = parseUtcTimestampToLocalDateAndTime(createdAt);
+            if (localDt != null && !localDt[1].isEmpty()) {
+                return localDt[1];
+            }
+        }
+        String tm = optCleanString(sm, "time", optCleanString(sm, "hora", ""));
         if (!tm.isEmpty()) {
             if (tm.length() >= 5 && tm.charAt(2) == ':') {
                 return tm.substring(0, 5);
             }
             return tm;
         }
-        String dataStr = sm.optString("data", "").trim();
+        String dataStr = optCleanString(sm, "data", "");
         if (dataStr.length() >= 16 && dataStr.charAt(10) == ' ') {
             return dataStr.substring(11, 16);
         }
-        String createdAt = sm.optString("created_at", "").trim();
         if (createdAt.length() >= 16 && createdAt.charAt(10) == 'T') {
             return createdAt.substring(11, 16);
         }
@@ -7191,29 +7333,34 @@ public class MainActivity extends Activity {
 
     private int getStockMovementDelta(JSONObject sm) {
         if (sm == null) return 0;
-        if (sm.has("quantity_change")) return sm.optInt("quantity_change", 0);
-        if (sm.has("quantity_changed")) return sm.optInt("quantity_changed", 0);
-        if (sm.has("quantity_delta")) return sm.optInt("quantity_delta", 0);
-        if (sm.has("delta")) return sm.optInt("delta", 0);
+        if (sm.has("quantity_change") && !sm.isNull("quantity_change")) return sm.optInt("quantity_change", 0);
+        if (sm.has("quantity_changed") && !sm.isNull("quantity_changed")) return sm.optInt("quantity_changed", 0);
+        if (sm.has("quantity_delta") && !sm.isNull("quantity_delta")) return sm.optInt("quantity_delta", 0);
+        if (sm.has("delta") && !sm.isNull("delta")) return sm.optInt("delta", 0);
         int q = sm.optInt("qtd", 0);
-        if ("saida".equalsIgnoreCase(sm.optString("tipo", ""))) return -q;
+        if ("saida".equalsIgnoreCase(optCleanString(sm, "tipo", ""))) return -q;
         return q;
     }
 
     private String resolveStockMovementMedName(JSONObject sm) {
         if (sm == null) return "";
-        String medNome = sm.optString("med_nome", sm.optString("med_name", "")).trim();
+        String medNome = optCleanString(sm, "med_nome", optCleanString(sm, "med_name", ""));
         if (!medNome.isEmpty()) return medNome;
-        String medId = sm.optString("med_id", sm.optString("medication_id", "")).trim();
+        String medId = optCleanString(sm, "med_id", optCleanString(sm, "medication_id", ""));
         if (!medId.isEmpty() && this.meds != null) {
             for (int i = 0; i < this.meds.length(); i++) {
                 JSONObject m = this.meds.optJSONObject(i);
-                if (m != null && medId.equals(m.optString("id"))) {
-                    return m.optString("nome", "").trim();
+                if (m != null) {
+                    String mId = optCleanString(m, "id", "");
+                    if (medId.equalsIgnoreCase(mId)
+                            || medId.equalsIgnoreCase(toDeterministicServerUuid(mId, "med"))
+                            || mId.equalsIgnoreCase(toDeterministicServerUuid(medId, "med"))) {
+                        return optCleanString(m, "nome", "");
+                    }
                 }
             }
         }
-        String rawTitle = sm.optString("title", sm.optString("titulo", "")).trim();
+        String rawTitle = optCleanString(sm, "title", optCleanString(sm, "titulo", ""));
         if (!rawTitle.isEmpty()) {
             String cleaned = rawTitle.replace("📦", "").trim();
             if (cleaned.regionMatches(true, 0, "Reposição:", 0, 10)) {
@@ -7235,7 +7382,7 @@ public class MainActivity extends Activity {
     private String formatStockMovementCardText(JSONObject sm) {
         if (sm == null) return "📦 Movimentação de estoque";
         String tm = getStockMovementTime(sm);
-        String explicitTitle = sm.optString("title", sm.optString("titulo", "")).trim();
+        String explicitTitle = optCleanString(sm, "title", optCleanString(sm, "titulo", ""));
         String medNome = resolveStockMovementMedName(sm);
         String mainText;
         if (!medNome.isEmpty()) {
@@ -7244,13 +7391,16 @@ public class MainActivity extends Activity {
             String deltaStr = delta > 0 ? "(+" + delta + ")" : "(" + delta + ")";
             mainText = "📦 " + prefix + medNome + " " + deltaStr + (tm.isEmpty() ? "" : " às " + tm);
         } else if (!explicitTitle.isEmpty()) {
-            String cleanTitle = explicitTitle.replaceAll("(\\d{2}:\\d{2}):\\d{2}", "$1");
+            String cleanTitle = explicitTitle.replaceAll("(\\d{2}:\\d{2}):\\d{2}", "$1")
+                    .replace(" • null", "")
+                    .replace("• null", "")
+                    .trim();
             mainText = "📦 " + cleanTitle + (tm.isEmpty() || cleanTitle.contains(" às ") ? "" : " às " + tm);
         } else {
             mainText = "📦 Movimentação de estoque" + (tm.isEmpty() ? "" : " às " + tm);
         }
-        String pharm = sm.optString("pharmacy", sm.optString("purchase_location", "")).trim();
-        String mot = sm.optString("motivo", sm.optString("notes", sm.optString("description", sm.optString("notas", "")))).trim();
+        String pharm = optCleanString(sm, "pharmacy", optCleanString(sm, "purchase_location", ""));
+        String mot = optCleanString(sm, "motivo", optCleanString(sm, "notes", optCleanString(sm, "description", optCleanString(sm, "notas", ""))));
         if (!pharm.isEmpty()) {
             mainText += " • " + pharm;
         }
@@ -7258,10 +7408,11 @@ public class MainActivity extends Activity {
                 && !"Reposição de estoque".equalsIgnoreCase(mot)
                 && !"Atualização de estoque".equalsIgnoreCase(mot)
                 && !"Ajuste manual".equalsIgnoreCase(mot)
-                && !"Ajuste manual de estoque".equalsIgnoreCase(mot)) {
+                && !"Ajuste manual de estoque".equalsIgnoreCase(mot)
+                && !"Correção de estoque".equalsIgnoreCase(mot)) {
             mainText += " • " + mot;
         }
-        return mainText;
+        return mainText.replace(" • null", "").replace("• null", "");
     }
 
     private boolean migrateStockEventsFromEvents() {
@@ -7351,31 +7502,32 @@ public class MainActivity extends Activity {
             JSONObject sm = this.stockMovements.optJSONObject(i);
             if (sm == null) continue;
             try {
+                sanitizeJsonObjectNulls(sm);
                 String normDate = getStockMovementDate(sm);
-                if (!normDate.isEmpty() && !normDate.equals(sm.optString("date", ""))) {
+                if (!normDate.isEmpty() && !normDate.equals(optCleanString(sm, "date", ""))) {
                     sm.put("date", normDate);
                     changed = true;
                 }
                 String normTime = getStockMovementTime(sm);
                 if (!normTime.isEmpty()) {
-                    if (!normTime.equals(sm.optString("time", "")) || !normTime.equals(sm.optString("hora", ""))) {
+                    if (!normTime.equals(optCleanString(sm, "time", "")) || !normTime.equals(optCleanString(sm, "hora", ""))) {
                         sm.put("time", normTime);
                         sm.put("hora", normTime);
                         changed = true;
                     }
                     String expectedData = normDate.isEmpty() ? "" : (normDate + " " + normTime);
-                    if (!expectedData.isEmpty() && !expectedData.equals(sm.optString("data", ""))) {
+                    if (!expectedData.isEmpty() && !expectedData.equals(optCleanString(sm, "data", ""))) {
                         sm.put("data", expectedData);
                         changed = true;
                     }
                 }
                 String resolvedMedName = resolveStockMovementMedName(sm);
-                if (!resolvedMedName.isEmpty() && sm.optString("med_nome", "").trim().isEmpty()) {
+                if (!resolvedMedName.isEmpty() && optCleanString(sm, "med_nome", "").isEmpty()) {
                     sm.put("med_nome", resolvedMedName);
                     sm.put("med_name", resolvedMedName);
                     changed = true;
                 }
-                if (!resolvedMedName.isEmpty() && sm.optString("med_id", "").trim().isEmpty() && this.meds != null) {
+                if (!resolvedMedName.isEmpty() && optCleanString(sm, "med_id", "").isEmpty() && this.meds != null) {
                     for (int mIdx = 0; mIdx < this.meds.length(); mIdx++) {
                         JSONObject mObj = this.meds.optJSONObject(mIdx);
                         if (mObj != null && resolvedMedName.equalsIgnoreCase(mObj.optString("nome", "").trim())) {
@@ -7404,7 +7556,7 @@ public class MainActivity extends Activity {
             String smTime = getStockMovementTime(sm);
             int smDelta = getStockMovementDelta(sm);
             String smMed = resolveStockMovementMedName(sm).toLowerCase(Locale.ROOT);
-            String smMot = sm.optString("motivo", sm.optString("notes", "")).trim().toLowerCase(Locale.ROOT);
+            String smMot = optCleanString(sm, "motivo", optCleanString(sm, "notes", "")).toLowerCase(Locale.ROOT);
             String smCardText = formatStockMovementCardText(sm).trim().toLowerCase(Locale.ROOT);
 
             int duplicateIdx = -1;
@@ -7421,7 +7573,7 @@ public class MainActivity extends Activity {
                 String exTime = getStockMovementTime(existing);
                 int exDelta = getStockMovementDelta(existing);
                 String exMed = resolveStockMovementMedName(existing).toLowerCase(Locale.ROOT);
-                String exMot = existing.optString("motivo", existing.optString("notes", "")).trim().toLowerCase(Locale.ROOT);
+                String exMot = optCleanString(existing, "motivo", optCleanString(existing, "notes", "")).toLowerCase(Locale.ROOT);
                 if (smDelta == exDelta && (!smTime.isEmpty() && smTime.equals(exTime)) && (smMed.equals(exMed) || smMed.isEmpty() || exMed.isEmpty())) {
                     duplicateIdx = j;
                     break;
@@ -7434,8 +7586,8 @@ public class MainActivity extends Activity {
             if (duplicateIdx >= 0) {
                 changed = true;
                 JSONObject existing = clean.optJSONObject(duplicateIdx);
-                boolean exHasId = existing != null && !existing.optString("med_id", "").trim().isEmpty();
-                boolean smHasId = !sm.optString("med_id", "").trim().isEmpty();
+                boolean exHasId = existing != null && !optCleanString(existing, "med_id", "").isEmpty();
+                boolean smHasId = !optCleanString(sm, "med_id", "").isEmpty();
                 if (smHasId && !exHasId) {
                     try {
                         clean.put(duplicateIdx, sm);
@@ -7688,7 +7840,7 @@ public class MainActivity extends Activity {
                 nCard.setLayoutParams(ncLp);
 
                 TextView tvNT = new TextView(this);
-                tvNT.setText("[" + nObj.optString("category", "Geral") + "] " + nObj.optString("text"));
+                tvNT.setText("[" + optCleanString(nObj, "category", "Geral") + "] " + optCleanString(nObj, "text", optCleanString(nObj, "content", "")));
                 tvNT.setTextColor(this.cTextMain);
                 tvNT.setTextSize(sp(13.0f));
                 tvNT.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -7736,7 +7888,7 @@ public class MainActivity extends Activity {
             final int eIdx = i;
             final JSONObject ev = this.events.optJSONObject(i);
             if (ev != null && !isStockEvent(ev)) {
-                String evDate = ev.optString("date", ev.optString("data", "")).trim();
+                String evDate = optCleanString(ev, "date", optCleanString(ev, "data", ""));
                 if (evDate.length() >= 10) evDate = evDate.substring(0, 10);
                 if (dateStr.equals(evDate)) {
                     evItems++;
@@ -7750,10 +7902,10 @@ public class MainActivity extends Activity {
                     eCard.setLayoutParams(ecLp);
 
                     TextView tvET = new TextView(this);
-                    String t = ev.optString("title", ev.optString("titulo", "Evento"));
-                    String tm = ev.optString("time", ev.optString("hora", ""));
+                    String t = optCleanString(ev, "title", optCleanString(ev, "titulo", "Evento"));
+                    String tm = optCleanString(ev, "time", optCleanString(ev, "hora", ""));
                     if (tm.length() >= 5 && tm.charAt(2) == ':') tm = tm.substring(0, 5);
-                    String loc = ev.optString("location", ev.optString("local", ""));
+                    String loc = optCleanString(ev, "location", optCleanString(ev, "local", ""));
                     tvET.setText("📅 " + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
                     tvET.setTextColor(this.cTextMain);
                     tvET.setTextSize(sp(13.0f));
@@ -11862,9 +12014,9 @@ public class MainActivity extends Activity {
                 }
 
                 // Fourth Row: Motivo / Notes + Pharmacy / Price
-                String mot = sm.optString("motivo", sm.optString("notes", sm.optString("description", ""))).trim();
-                String pharm = sm.optString("pharmacy", sm.optString("purchase_location", "")).trim();
-                String price = sm.optString("price_paid", sm.optString("purchase_price", "")).trim();
+                String mot = optCleanString(sm, "motivo", optCleanString(sm, "notes", optCleanString(sm, "description", "")));
+                String pharm = optCleanString(sm, "pharmacy", optCleanString(sm, "purchase_location", ""));
+                String price = optCleanString(sm, "price_paid", optCleanString(sm, "purchase_price", ""));
                 StringBuilder detailSb = new StringBuilder();
                 if (!mot.isEmpty()) {
                     detailSb.append("Motivo: ").append(mot);
@@ -11873,7 +12025,7 @@ public class MainActivity extends Activity {
                     if (detailSb.length() > 0) detailSb.append("  •  ");
                     detailSb.append("Local: ").append(pharm);
                 }
-                if (!price.isEmpty() && !"0".equals(price) && !"0.0".equals(price) && !"null".equalsIgnoreCase(price)) {
+                if (!price.isEmpty() && !"0".equals(price) && !"0.0".equals(price)) {
                     if (detailSb.length() > 0) detailSb.append("  •  ");
                     detailSb.append("Valor: R$ ").append(price);
                 }
@@ -11962,16 +12114,17 @@ public class MainActivity extends Activity {
                     if (newQty != curStock) {
                         int diff = newQty - curStock;
                         String today = todayIso();
-                        String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+                        String hm = nowLocalTimeHm();
+                        String utcNow = nowUtcIso();
                         String reason = etReason.getText().toString().trim();
                         if (reason.isEmpty()) reason = "Correção de estoque";
                         setMedStock(med, newQty);
                         JSONObject sm = new JSONObject();
-                        sm.put("id", "sm-" + System.currentTimeMillis());
-                        sm.put("med_id", med.optString("id"));
-                        sm.put("medication_id", med.optString("id"));
-                        sm.put("med_nome", med.optString("nome"));
-                        sm.put("med_name", med.optString("nome"));
+                        sm.put("id", UUID.randomUUID().toString());
+                        sm.put("med_id", optCleanString(med, "id", ""));
+                        sm.put("medication_id", optCleanString(med, "id", ""));
+                        sm.put("med_nome", optCleanString(med, "nome", ""));
+                        sm.put("med_name", optCleanString(med, "nome", ""));
                         sm.put("tipo", diff >= 0 ? "entrada" : "saida");
                         sm.put("movement_type", "correction");
                         sm.put("qtd", Math.abs(diff));
@@ -11987,7 +12140,8 @@ public class MainActivity extends Activity {
                         sm.put("time", hm);
                         sm.put("hora", hm);
                         sm.put("data", today + " " + hm);
-                        sm.put("created_at", today + "T" + hm + ":00.000Z");
+                        sm.put("created_at", utcNow);
+                        sm.put("_utc_created_at", true);
                         sm.put("motivo", reason);
                         sm.put("notes", reason);
                         MainActivity.this.stockMovements.put(sm);
@@ -12037,16 +12191,23 @@ public class MainActivity extends Activity {
             return trimmed.toLowerCase(Locale.ROOT);
         }
         try {
-            String seed = (prefix != null ? prefix : "id") + ":" + trimmed;
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            String pfx = (prefix != null ? prefix : "medicare");
+            if ("stk".equals(pfx)) pfx = "sm";
+            else if ("evt".equals(pfx)) pfx = "event";
+            else if ("cnt".equals(pfx)) pfx = "ct";
+            else if ("prof".equals(pfx)) pfx = "pr";
+            String uid = resolveCurrentAccountUserId();
+            String seed = (!uid.isEmpty() && !pfx.contains(":"))
+                ? (pfx + ":" + uid + ":" + trimmed)
+                : (pfx + ":" + trimmed);
+            MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] hash = md.digest(seed.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder();
             for (int i = 0; i < 16 && i < hash.length; i++) {
                 hex.append(String.format(Locale.US, "%02x", hash[i] & 0xFF));
             }
             String h = hex.toString();
-            String v = Integer.toHexString((Integer.parseInt(h.substring(16, 17), 16) & 0x3) | 0x8);
-            return h.substring(0, 8) + "-" + h.substring(8, 12) + "-4" + h.substring(13, 16) + "-" + v + h.substring(17, 20) + "-" + h.substring(20, 32);
+            return h.substring(0, 8) + "-" + h.substring(8, 12) + "-4" + h.substring(13, 16) + "-a" + h.substring(17, 20) + "-" + h.substring(20, 32);
         } catch (Exception e) {
             return trimmed;
         }
@@ -12112,6 +12273,7 @@ public class MainActivity extends Activity {
         if (rm == null) return null;
         try {
             JSONObject m = new JSONObject(rm.toString());
+            sanitizeJsonObjectNulls(m);
             String nome = optCleanString(m, "nome", optCleanString(m, "name", ""));
             m.put("nome", nome);
             String pa = optCleanString(m, "principio_ativo", optCleanString(m, "active_ingredient", ""));
@@ -12406,6 +12568,7 @@ public class MainActivity extends Activity {
                 JSONObject roRaw = remoteArr.optJSONObject(r);
                 if (roRaw == null) continue;
                 JSONObject ro = new JSONObject(roRaw.toString());
+                sanitizeJsonObjectNulls(ro);
                 String rId = optCleanString(ro, "id", "");
                 if (!rId.isEmpty() && deletedIds.contains(rId.toLowerCase(Locale.ROOT))) {
                     deleteRemoteRecord(tableName, rId, idPrefix);
@@ -12434,6 +12597,48 @@ public class MainActivity extends Activity {
                     String dt = optCleanString(ro, "date", "");
                     if (dt.length() >= 10) dt = dt.substring(0, 10);
                     ro.put("date", dt);
+                    String txt = optCleanString(ro, "text", optCleanString(ro, "content", optCleanString(ro, "description", "")));
+                    if (!txt.isEmpty()) {
+                        ro.put("text", txt);
+                        ro.put("content", txt);
+                    }
+                    ro.put("category", optCleanString(ro, "category", "Geral"));
+                } else if ("stock_movements".equals(targetField)) {
+                    ro.put("_utc_created_at", true);
+                    String mId = optCleanString(ro, "med_id", optCleanString(ro, "medication_id", ""));
+                    if (!mId.isEmpty()) {
+                        ro.put("med_id", mId);
+                        ro.put("medication_id", mId);
+                    }
+                    String mName = optCleanString(ro, "med_nome", optCleanString(ro, "med_name", ""));
+                    if (!mName.isEmpty()) {
+                        ro.put("med_nome", mName);
+                        ro.put("med_name", mName);
+                    }
+                    String mot = optCleanString(ro, "motivo", optCleanString(ro, "notes", optCleanString(ro, "description", "")));
+                    if (!mot.isEmpty()) {
+                        ro.put("motivo", mot);
+                        ro.put("notes", mot);
+                    } else {
+                        ro.remove("motivo");
+                        ro.remove("notes");
+                    }
+                    String pharm = optCleanString(ro, "pharmacy", optCleanString(ro, "purchase_location", ""));
+                    if (!pharm.isEmpty()) {
+                        ro.put("pharmacy", pharm);
+                        ro.put("purchase_location", pharm);
+                    } else {
+                        ro.remove("pharmacy");
+                        ro.remove("purchase_location");
+                    }
+                    String createdAt = optCleanString(ro, "created_at", "");
+                    String[] localDt = parseUtcTimestampToLocalDateAndTime(createdAt);
+                    if (localDt != null) {
+                        ro.put("date", localDt[0]);
+                        ro.put("time", localDt[1]);
+                        ro.put("hora", localDt[1]);
+                        ro.put("data", localDt[0] + " " + localDt[1]);
+                    }
                 } else if ("allergies".equals(targetField)) {
                     String nm = optCleanString(ro, "nome", optCleanString(ro, "name", optCleanString(ro, "allergen", "")));
                     ro.put("nome", nm);
@@ -12825,6 +13030,7 @@ public class MainActivity extends Activity {
                 JSONObject jSONObject = new JSONObject();
                 jSONObject.put("patientId", patId);
                 jSONObject.put("userId", patId);
+                jSONObject.put("timezone", TimeZone.getDefault().getID());
                 jSONObject.put("profile", syncProfile);
                 jSONObject.put("user", syncProfile);
                 jSONObject.put("medicamentos", this.meds);

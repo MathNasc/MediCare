@@ -67,6 +67,27 @@ function parsePgNumeric(val) {
   return Number.isFinite(num) ? num : null;
 }
 
+function cleanNullableText(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined') return null;
+  return s;
+}
+
+function getLocalTodayIso(tz = 'America/Sao_Paulo') {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz || 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  } catch {
+    const d = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+}
+
 function normalizeTreatmentType(val) {
   const s = String(val || '')
     .toLowerCase()
@@ -259,6 +280,14 @@ export async function GET(request) {
       });
     }
 
+    const cleanStockMovements = stockRes.rows.map((row) => ({
+      ...row,
+      med_name: cleanNullableText(row.med_name),
+      purchase_location: cleanNullableText(row.purchase_location),
+      batch: cleanNullableText(row.batch),
+      notes: cleanNullableText(row.notes),
+    }));
+
     return NextResponse.json(
       {
         ok: true,
@@ -284,7 +313,7 @@ export async function GET(request) {
         healthcare_professionals: profRes.rows,
         caregivers: cgRes.rows,
         caregiver_relationships: cgRes.rows,
-        stock_movements: stockRes.rows,
+        stock_movements: cleanStockMovements,
         approval_requests: approvalRes.rows,
         pending_dose_requests: approvalRes.rows.filter(r => r.status === 'pending'),
         notificacoes: notifRes.rows,
@@ -529,12 +558,13 @@ export async function POST(request) {
       const medExists = await client.query('SELECT 1 FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
       if (medExists.rowCount === 0) continue;
 
+      const clientTz = cleanNullableText(body.timezone) || 'America/Sao_Paulo';
       const rawDoseDate =
         h.date ||
         h.data ||
         h.dose_date ||
-        (h.created_at ? String(h.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10));
-      const doseDate = parsePgDate(rawDoseDate) || new Date().toISOString().slice(0, 10);
+        (h.created_at ? String(h.created_at).slice(0, 10) : getLocalTodayIso(clientTz));
+      const doseDate = parsePgDate(rawDoseDate) || getLocalTodayIso(clientTz);
       const rawHora = String(h.hora || h.horario || '08:00').trim();
       const hora = parsePgTime(rawHora) || (rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora);
       const normStatus = normalizeDoseStatus(h.status);
@@ -740,7 +770,7 @@ export async function POST(request) {
 
     for (const sm of stockMovements) {
       const rawMedId = sm.medication_id || sm.med_id || '';
-      const smMedName = sm.med_name || sm.med_nome || sm.nome || null;
+      const smMedName = cleanNullableText(sm.med_name || sm.med_nome || sm.nome);
       let resolvedMedUuid =
         medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
       if (!resolvedMedUuid && smMedName) {
@@ -761,14 +791,19 @@ export async function POST(request) {
       const qChanged =
         parsePgNumeric(sm.quantity_changed ?? sm.quantity_delta ?? sm.quantity_change ?? sm.delta ?? sm.qtd) ?? 0;
       const qAfter = parsePgNumeric(sm.quantity_after ?? sm.new_quantity) ?? (qBefore + qChanged);
+      const rawSmCreatedAt = cleanNullableText(sm.created_at);
+      const validSmCreatedAt =
+        rawSmCreatedAt && !rawSmCreatedAt.endsWith(':00.000Z') && !Number.isNaN(Date.parse(rawSmCreatedAt))
+          ? new Date(rawSmCreatedAt).toISOString()
+          : null;
 
       await client.query(
         `INSERT INTO stock_movements (
            id, user_id, medication_id, med_name, movement_type,
            quantity_before, quantity_changed, quantity_delta, quantity_after,
-           purchase_price, purchase_location, batch, expiration_date, notes
+           purchase_price, purchase_location, batch, expiration_date, notes, created_at
          )
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15::timestamptz, NOW()))
          ON CONFLICT (id) DO UPDATE SET
            med_name = COALESCE(EXCLUDED.med_name, stock_movements.med_name),
            movement_type = EXCLUDED.movement_type,
@@ -777,8 +812,8 @@ export async function POST(request) {
            quantity_delta = EXCLUDED.quantity_delta,
            quantity_after = EXCLUDED.quantity_after,
            purchase_price = COALESCE(EXCLUDED.purchase_price, stock_movements.purchase_price),
-           purchase_location = COALESCE(EXCLUDED.purchase_location, stock_movements.purchase_location),
-           notes = COALESCE(EXCLUDED.notes, stock_movements.notes)`,
+           purchase_location = COALESCE(EXCLUDED.purchase_location, NULLIF(BTRIM(stock_movements.purchase_location), 'null')),
+           notes = COALESCE(EXCLUDED.notes, NULLIF(BTRIM(stock_movements.notes), 'null'))`,
         [
           smUuid,
           userId,
@@ -790,10 +825,11 @@ export async function POST(request) {
           qChanged,
           qAfter,
           parsePgNumeric(sm.purchase_price ?? sm.price_paid ?? sm.preco),
-          sm.purchase_location || sm.pharmacy || sm.local || null,
-          sm.batch || sm.lote || null,
+          cleanNullableText(sm.purchase_location ?? sm.pharmacy ?? sm.local),
+          cleanNullableText(sm.batch ?? sm.lote),
           parsePgDate(sm.expiration_date || sm.validade),
-          sm.notes || sm.motivo || sm.description || sm.observacoes || null,
+          cleanNullableText(sm.notes ?? sm.motivo ?? sm.description ?? sm.observacoes),
+          validSmCreatedAt,
         ]
       );
     }
