@@ -672,7 +672,10 @@ private fun DayPanelDialog(
     }
     val dayStockMovements = remember(state.stockMovements, dateIso) {
         state.stockMovements
-            .filter { it.createdAt.startsWith(dateIso) && it.movementType != "consumption" }
+            .filter {
+                it.createdAt.startsWith(dateIso) &&
+                    (it.movementType != "consumption" || (it.reason ?: "").startsWith("Uso SOS", ignoreCase = true))
+            }
             .distinctBy { sm ->
                 val hm = if (sm.createdAt.length >= 16 && sm.createdAt[10] == 'T') sm.createdAt.substring(11, 16) else ""
                 "${sm.medicationId}|${sm.quantityDelta}|$hm"
@@ -690,6 +693,12 @@ private fun DayPanelDialog(
     }
     val activeScheduledMeds = remember(state.medications) {
         state.medications.filter { it.ativo && it.treatmentType != "sos" }
+    }
+    val sosDayHist = remember(dayHist, state.medications) {
+        dayHist.filter { rec ->
+            val med = state.medications.firstOrNull { it.id == rec.medId }
+            med?.treatmentType == "sos" || (rec.retroactiveReason ?: "").startsWith("Uso SOS", ignoreCase = true)
+        }
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -816,6 +825,40 @@ private fun DayPanelDialog(
                                     modifier = Modifier.clickable {
                                         onRequestDoseObs(doseKey, "${med.nome} às $hora", obsText ?: "")
                                     }
+                                )
+                            }
+                        }
+                    }
+
+                    sosDayHist.forEach { rec ->
+                        val med = state.medications.firstOrNull { it.id == rec.medId }
+                        val medLabel = if (med != null) "${med.nome} (${med.dosagem})" else (rec.medName.ifBlank { "Medicamento SOS" })
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(tokens.bg2)
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("🆘 $medLabel", color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Uso SOS às ${rec.hora}", color = Color(0xFFFB923C), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    if (!rec.retroactiveReason.isNullOrBlank()) {
+                                        Text("📝 ${rec.retroactiveReason}", color = tokens.sub, fontSize = 11.sp)
+                                    }
+                                    CaregiverBadge(rec)
+                                }
+                                Text(
+                                    text = "✓ SOS Tomado",
+                                    color = MediCareColors.Green,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold
                                 )
                             }
                         }

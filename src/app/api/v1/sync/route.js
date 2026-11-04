@@ -262,10 +262,17 @@ export async function GET(request) {
         : '';
       const rawHora = String(row.hora || row.horario || '').trim();
       const normHora = rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora;
-      const slotKey =
-        normHora.toUpperCase() === 'SOS'
-          ? `id:${row.id}`
-          : `${row.med_id}|${rawDate}|${normHora}`;
+      const matchedMedRow = medsRes.rows.find((m) => String(m.id || '') === String(row.med_id || ''));
+      const isSosRow =
+        normHora.toUpperCase() === 'SOS' ||
+        (matchedMedRow && normalizeTreatmentType(matchedMedRow.treatment_type || matchedMedRow.tipo_uso) === 'sos') ||
+        String(row.motivo || row.correction_reason || '')
+          .trim()
+          .toLowerCase()
+          .startsWith('uso sos');
+      const slotKey = isSosRow
+        ? `id:${row.id}`
+        : `${row.med_id}|${rawDate}|${normHora}`;
       if (seenDoseSlots.has(slotKey)) continue;
       seenDoseSlots.add(slotKey);
       const normSt = normalizeDoseStatus(row.status);
@@ -277,6 +284,7 @@ export async function GET(request) {
         hora: normHora,
         horario: normHora,
         status: normSt,
+        ...(isSosRow ? { is_sos: true, horario_programado: 'SOS' } : {}),
       });
     }
 
@@ -585,12 +593,18 @@ export async function POST(request) {
         continue;
       }
 
-      const doseUuid =
-        hora.toUpperCase() === 'SOS'
-          ? toDeterministicUuid(h.id || `${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`)
-          : toDeterministicUuid(`${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`);
+      const isSosDose =
+        hora.toUpperCase() === 'SOS' ||
+        Boolean(h.is_sos) ||
+        String(h.horario_programado || '').toUpperCase() === 'SOS' ||
+        String(h.id || '').startsWith('sos-') ||
+        String(h.motivo || h.reason || '').trim().toLowerCase().startsWith('uso sos');
 
-      if (hora.toUpperCase() !== 'SOS') {
+      const doseUuid = isSosDose
+        ? toDeterministicUuid(h.id || `${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`)
+        : toDeterministicUuid(`${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`);
+
+      if (!isSosDose) {
         await client.query(
           `DELETE FROM historico_doses
            WHERE user_id = $1
