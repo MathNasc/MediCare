@@ -144,6 +144,7 @@ public class MainActivity extends Activity {
     private boolean showCalSearch = false;
     private String calSearchQuery = "";
     private String aiSubView = "main";
+    private boolean isAiLoading = false;
     private String profileSubView = "main";
     private String selectedStockMedId = "";
     private String lastSyncTimestamp = "Sincronização automática ativa";
@@ -2161,25 +2162,34 @@ public class MainActivity extends Activity {
         LinearLayout linearLayout = new LinearLayout(this);
         linearLayout.setOrientation(1);
         linearLayout.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
-        ScrollView scrollView = new ScrollView(this);
-        scrollView.setFillViewport(true);
-        scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        linearLayout2.setOrientation(1);
-        linearLayout2.setPadding(dp(16), dp(22), dp(16), dp(32));
-        if ("home".equals(this.activeTab)) {
-            buildHomeTab(linearLayout2);
-        } else if ("meds".equals(this.activeTab)) {
-            buildMedsTab(linearLayout2);
-        } else if ("calendar".equals(this.activeTab)) {
-            buildCalendarTab(linearLayout2);
-        } else if ("ai".equals(this.activeTab)) {
-            buildAiTab(linearLayout2);
-        } else if ("profile".equals(this.activeTab)) {
-            buildProfileTab(linearLayout2);
+        if ("ai".equals(this.activeTab) && "chat".equals(this.aiSubView)) {
+            LinearLayout chatViewport = new LinearLayout(this);
+            chatViewport.setOrientation(1);
+            chatViewport.setPadding(dp(14), dp(16), dp(14), dp(10));
+            chatViewport.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            buildAiChatSubView(chatViewport);
+            linearLayout.addView(chatViewport);
+        } else {
+            ScrollView scrollView = new ScrollView(this);
+            scrollView.setFillViewport(true);
+            scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            LinearLayout linearLayout2 = new LinearLayout(this);
+            linearLayout2.setOrientation(1);
+            linearLayout2.setPadding(dp(16), dp(22), dp(16), dp(32));
+            if ("home".equals(this.activeTab)) {
+                buildHomeTab(linearLayout2);
+            } else if ("meds".equals(this.activeTab)) {
+                buildMedsTab(linearLayout2);
+            } else if ("calendar".equals(this.activeTab)) {
+                buildCalendarTab(linearLayout2);
+            } else if ("ai".equals(this.activeTab)) {
+                buildAiTab(linearLayout2);
+            } else if ("profile".equals(this.activeTab)) {
+                buildProfileTab(linearLayout2);
+            }
+            scrollView.addView(linearLayout2);
+            linearLayout.addView(scrollView);
         }
-        scrollView.addView(linearLayout2);
-        linearLayout.addView(scrollView);
         View navBorder = new View(this);
         navBorder.setBackgroundColor(this.cBorder);
         navBorder.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
@@ -8917,7 +8927,7 @@ public class MainActivity extends Activity {
         topRow.setOrientation(0);
         topRow.setGravity(16);
         LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(-1, -2);
-        trLp.bottomMargin = dp(12);
+        trLp.bottomMargin = dp(10);
         topRow.setLayoutParams(trLp);
 
         TextView btnBack = new TextView(this);
@@ -8927,7 +8937,7 @@ public class MainActivity extends Activity {
         btnBack.setGravity(17);
         btnBack.setBackground(shape(this.cSurface, 12, this.cBorder, 1));
         LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        bkLp.rightMargin = dp(12);
+        bkLp.rightMargin = dp(10);
         btnBack.setLayoutParams(bkLp);
         btnBack.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -8938,6 +8948,16 @@ public class MainActivity extends Activity {
         });
         topRow.addView(btnBack);
 
+        TextView tvAvatar = new TextView(this);
+        tvAvatar.setText("🩺");
+        tvAvatar.setTextSize(sp(17.0f));
+        tvAvatar.setGravity(17);
+        tvAvatar.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 12));
+        LinearLayout.LayoutParams avLp = new LinearLayout.LayoutParams(dp(38), dp(38));
+        avLp.rightMargin = dp(10);
+        tvAvatar.setLayoutParams(avLp);
+        topRow.addView(tvAvatar);
+
         LinearLayout titleCol = new LinearLayout(this);
         titleCol.setOrientation(1);
         titleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -8945,36 +8965,64 @@ public class MainActivity extends Activity {
         TextView tvT = new TextView(this);
         tvT.setText("Assistente de Saúde");
         tvT.setTextColor(this.cTextMain);
-        tvT.setTextSize(sp(16.0f));
+        tvT.setTextSize(sp(15.5f));
         tvT.setTypeface(null, 1);
         titleCol.addView(tvT);
 
         TextView tvS = new TextView(this);
-        tvS.setText("Online • Respostas baseadas nos seus dados");
+        tvS.setText("● Online • Baseado nos seus dados");
         tvS.setTextColor(this.cSuccess);
-        tvS.setTextSize(sp(12.0f));
+        tvS.setTextSize(sp(11.5f));
         titleCol.addView(tvS);
 
         topRow.addView(titleCol);
+
+        if (this.aiMessages != null && this.aiMessages.length() > 1) {
+            TextView btnClearChat = new TextView(this);
+            btnClearChat.setText("🗑 Limpar");
+            btnClearChat.setTextColor(this.cTextMuted);
+            btnClearChat.setTextSize(sp(11.5f));
+            btnClearChat.setTypeface(null, 1);
+            btnClearChat.setGravity(17);
+            btnClearChat.setBackground(shape(this.cSurface, 10, this.cBorder, 1));
+            btnClearChat.setPadding(dp(10), dp(7), dp(10), dp(7));
+            btnClearChat.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.aiMessages = new JSONArray();
+                    saveAll();
+                    render();
+                }
+            });
+            topRow.addView(btnClearChat);
+        }
+
         linearLayout.addView(topRow);
 
+        // Main chat card filling all remaining vertical space (weight = 1.0f)
         LinearLayout chatCard = new LinearLayout(this);
         chatCard.setOrientation(1);
         chatCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
-        chatCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+        chatCard.setPadding(dp(12), dp(12), dp(12), dp(12));
+        chatCard.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
 
-        ScrollView msgsScroll = new ScrollView(this);
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, dp(360));
+        final ScrollView msgsScroll = new ScrollView(this);
+        msgsScroll.setFillViewport(true);
+        msgsScroll.setVerticalScrollBarEnabled(false);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, 0, 1.0f);
         msgsScroll.setLayoutParams(scrollLp);
 
         LinearLayout msgsLayout = new LinearLayout(this);
         msgsLayout.setOrientation(1);
+        msgsLayout.setPadding(dp(2), dp(4), dp(2), dp(6));
 
         if (this.aiMessages.length() == 0) {
             try {
+                String pName = optCleanString(this.profile, "social_name", optCleanString(this.profile, "nome", "paciente"));
+                if (pName.contains(" ")) pName = pName.split("\\s+")[0];
                 JSONObject welcomeMsg = new JSONObject();
                 welcomeMsg.put("role", "assistant");
-                welcomeMsg.put("text", "Olá, " + this.profile.optString("nome", "paciente") + "! Sou seu Assistente de Saúde. Como posso ajudar você hoje?");
+                welcomeMsg.put("text", "Olá, " + pName + "! 👋\nSou seu Assistente de Saúde MediCare.\n\nPosso ajudar você a revisar seus horários de hoje, explicar para que serve cada medicamento, checar seu estoque ou preparar um resumo para sua próxima consulta médica.");
                 this.aiMessages.put(welcomeMsg);
             } catch (Exception ignored) {}
         }
@@ -8986,42 +9034,130 @@ public class MainActivity extends Activity {
             String text = msg.optString("text", "");
 
             LinearLayout msgRow = new LinearLayout(this);
-            msgRow.setOrientation(0);
+            msgRow.setOrientation(1);
             LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
             rowLp.bottomMargin = dp(10);
             msgRow.setLayoutParams(rowLp);
 
-            TextView bubble = new TextView(this);
-            bubble.setText(text);
-            bubble.setTextSize(sp(14.0f));
-            bubble.setPadding(dp(14), dp(12), dp(14), dp(12));
-
             if ("user".equals(role)) {
                 msgRow.setGravity(5);
+                TextView bubble = new TextView(this);
+                bubble.setText(text);
+                bubble.setTextSize(sp(14.0f));
                 bubble.setTextColor(Color.WHITE);
-                bubble.setBackground(shape(this.cPrimary, 16, 0, 0));
+                bubble.setLineSpacing(dp(2), 1.05f);
+                bubble.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 16));
+                bubble.setPadding(dp(14), dp(11), dp(14), dp(11));
                 LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
-                bLp.leftMargin = dp(40);
+                bLp.leftMargin = dp(42);
                 bubble.setLayoutParams(bLp);
+                msgRow.addView(bubble);
             } else {
                 msgRow.setGravity(3);
+                LinearLayout botBox = new LinearLayout(this);
+                botBox.setOrientation(1);
+                botBox.setBackground(shape(this.cBgMain, 16, this.cBorder, 1));
+                botBox.setPadding(dp(14), dp(11), dp(14), dp(12));
+                LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-1, -2);
+                bLp.rightMargin = dp(6);
+                botBox.setLayoutParams(bLp);
+
+                TextView botHdr = new TextView(this);
+                botHdr.setText("🩺 Assistente MediCare");
+                botHdr.setTextColor(this.cPrimary);
+                botHdr.setTextSize(sp(11.0f));
+                botHdr.setTypeface(null, 1);
+                botHdr.setPadding(0, 0, 0, dp(4));
+                botBox.addView(botHdr);
+
+                TextView bubble = new TextView(this);
+                bubble.setText(text);
+                bubble.setTextSize(sp(14.0f));
                 bubble.setTextColor(this.cTextMain);
-                bubble.setBackground(shape(this.cBgMain, 16, this.cBorder, 1));
-                LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
-                bLp.rightMargin = dp(40);
-                bubble.setLayoutParams(bLp);
+                bubble.setLineSpacing(dp(3), 1.05f);
+                botBox.addView(bubble);
+
+                msgRow.addView(botBox);
             }
-            msgRow.addView(bubble);
             msgsLayout.addView(msgRow);
+        }
+
+        if (this.isAiLoading) {
+            LinearLayout typingBox = new LinearLayout(this);
+            typingBox.setOrientation(0);
+            typingBox.setGravity(16);
+            typingBox.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+            typingBox.setPadding(dp(14), dp(10), dp(14), dp(10));
+            LinearLayout.LayoutParams tbLp = new LinearLayout.LayoutParams(-2, -2);
+            tbLp.bottomMargin = dp(8);
+            typingBox.setLayoutParams(tbLp);
+
+            TextView tvTyping = new TextView(this);
+            tvTyping.setText("⏳ Assistente analisando seus dados...");
+            tvTyping.setTextColor(this.cTextMuted);
+            tvTyping.setTextSize(sp(12.5f));
+            tvTyping.setTypeface(null, 2);
+            typingBox.addView(tvTyping);
+            msgsLayout.addView(typingBox);
         }
 
         msgsScroll.addView(msgsLayout);
         chatCard.addView(msgsScroll);
 
+        msgsScroll.post(new Runnable() {
+            @Override
+            public void run() {
+                msgsScroll.fullScroll(View.FOCUS_DOWN);
+            }
+        });
+
+        // Quick suggestion chips right above the input bar
+        HorizontalScrollView quickScroll = new HorizontalScrollView(this);
+        quickScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout.LayoutParams qsLp = new LinearLayout.LayoutParams(-1, -2);
+        qsLp.topMargin = dp(8);
+        qsLp.bottomMargin = dp(8);
+        quickScroll.setLayoutParams(qsLp);
+
+        LinearLayout quickRow = new LinearLayout(this);
+        quickRow.setOrientation(0);
+        String[][] quickChips = {
+            {"💊 Meus remédios", "Quais remédios tomo hoje?"},
+            {"⏰ Próxima dose", "Qual é a minha próxima dose de hoje?"},
+            {"📦 Meu estoque", "Como está a situação do meu estoque?"},
+            {"📊 Minha adesão", "Como está minha adesão ao tratamento?"},
+            {"🩺 Resumo médico", "Gerar resumo para consulta médica"}
+        };
+        for (int qIdx = 0; qIdx < quickChips.length; qIdx++) {
+            final String chipLabel = quickChips[qIdx][0];
+            final String chipPrompt = quickChips[qIdx][1];
+            TextView chipTv = new TextView(this);
+            chipTv.setText(chipLabel);
+            chipTv.setTextColor(this.isDarkMode ? Color.parseColor("#93C5FD") : this.cPrimary);
+            chipTv.setTextSize(sp(11.5f));
+            chipTv.setTypeface(null, 1);
+            chipTv.setBackground(shape(Color.argb(26, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 10, Color.argb(70, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 1));
+            chipTv.setPadding(dp(11), dp(6), dp(11), dp(6));
+            LinearLayout.LayoutParams cpLp = new LinearLayout.LayoutParams(-2, -2);
+            cpLp.rightMargin = dp(6);
+            chipTv.setLayoutParams(cpLp);
+            chipTv.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!MainActivity.this.isAiLoading) {
+                        sendAiMessage(chipPrompt);
+                    }
+                }
+            });
+            quickRow.addView(chipTv);
+        }
+        quickScroll.addView(quickRow);
+        chatCard.addView(quickScroll);
+
+        // Input bar pinned at bottom of chatCard
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(0);
         inputRow.setGravity(16);
-        inputRow.setPadding(0, dp(10), 0, 0);
 
         final EditText etInput = new EditText(this);
         etInput.setHint("Digite sua dúvida aqui...");
@@ -9035,13 +9171,13 @@ public class MainActivity extends Activity {
         etInput.setLayoutParams(etLp);
         inputRow.addView(etInput);
 
-        TextView btnSend = createButton("Enviar", this.cPrimary, Color.WHITE);
+        TextView btnSend = createButton(this.isAiLoading ? "..." : "Enviar", this.cPrimary, Color.WHITE);
         btnSend.setPadding(dp(16), dp(11), dp(16), dp(11));
         btnSend.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 String prompt = etInput.getText().toString().trim();
-                if (!prompt.isEmpty()) {
+                if (!prompt.isEmpty() && !MainActivity.this.isAiLoading) {
                     sendAiMessage(prompt);
                 }
             }
@@ -9058,11 +9194,13 @@ public class MainActivity extends Activity {
             userMsg.put("role", "user");
             userMsg.put("text", prompt);
             this.aiMessages.put(userMsg);
+            this.isAiLoading = true;
             saveAll();
             render();
 
             queryAi(prompt);
         } catch (Exception e) {
+            this.isAiLoading = false;
             e.printStackTrace();
         }
     }
@@ -9115,13 +9253,16 @@ public class MainActivity extends Activity {
                     @Override
                     public void run() {
                         try {
+                            MainActivity.this.isAiLoading = false;
                             JSONObject aiMsg = new JSONObject();
                             aiMsg.put("role", "assistant");
                             aiMsg.put("text", reply);
                             MainActivity.this.aiMessages.put(aiMsg);
                             saveAll();
                             render();
-                        } catch (Exception ignored) {}
+                        } catch (Exception ignored) {
+                            MainActivity.this.isAiLoading = false;
+                        }
                     }
                 });
             }
@@ -9133,20 +9274,58 @@ public class MainActivity extends Activity {
         int medCount = this.meds.length();
         int algCount = this.allergies.length();
 
-        if (pLower.contains("explicar") || pLower.contains("hoje") || pLower.contains("remédio") || pLower.contains("medica")) {
+        if (pLower.contains("próxima") || pLower.contains("proxima") || pLower.contains("horário") || pLower.contains("horario")) {
+            if (medCount == 0) {
+                return "Você ainda não possui medicamentos cadastrados.";
+            }
+            String todayStr = todayIso();
+            int pendingCount = 0;
+            StringBuilder sb = new StringBuilder("⏰ Horários de hoje (" + formatDateForDeviceLocale(todayStr) + "):\n\n");
+            for (int i = 0; i < medCount; i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m == null || !m.optBoolean("ativo", true) || "sos".equals(getMedType(m))) continue;
+                JSONArray hrs = m.optJSONArray("horarios");
+                if (hrs == null) continue;
+                String mId = m.optString("id");
+                String unitStr = optCleanString(m, "unidade", optCleanString(m, "forma", "comprimido"));
+                String uIcon = getMedUnitIcon(unitStr);
+                for (int h = 0; h < hrs.length(); h++) {
+                    String hStr = hrs.optString(h);
+                    boolean taken = "tomado".equals(getDoseStatus(mId, todayStr, hStr));
+                    if (!taken) pendingCount++;
+                    sb.append(taken ? "✅ " : "⏳ ").append(hStr).append(" — ").append(uIcon).append(" ")
+                      .append(m.optString("nome")).append(" (").append(optCleanString(m, "dosagem", unitStr)).append(")")
+                      .append(taken ? " [Tomado]\n" : " [Pendente]\n");
+                }
+            }
+            if (pendingCount == 0) {
+                sb.append("\n🎉 Parabéns! Todas as doses programadas para hoje já foram confirmadas.");
+            } else {
+                sb.append("\nRestam ").append(pendingCount).append(" dose(s) pendente(s) para hoje.");
+            }
+            return sb.toString().trim();
+        } else if (pLower.contains("explicar") || pLower.contains("hoje") || pLower.contains("remédio") || pLower.contains("remedio") || pLower.contains("medica")) {
             if (medCount == 0) {
                 return "Você ainda não cadastrou nenhum medicamento. Vá na aba Medicamentos para adicionar.";
             }
-            StringBuilder sb = new StringBuilder("Aqui está um resumo simples dos seus medicamentos:\n\n");
+            StringBuilder sb = new StringBuilder("Aqui está um resumo completo dos seus medicamentos:\n\n");
             for (int i = 0; i < medCount; i++) {
                 JSONObject m = this.meds.optJSONObject(i);
-                if (m != null) {
+                if (m != null && m.optBoolean("ativo", true)) {
                     String tType = getMedType(m);
-                    String typeText = "continuous".equals(tType) ? "Uso contínuo" : ("temporary".equals(tType) ? "Tratamento temporário" : "Apenas se necessário (SOS)");
-                    sb.append("💊 ").append(m.optString("nome")).append(" (").append(m.optString("dosagem")).append(")\n")
-                      .append("• Tipo: ").append(typeText).append("\n")
-                      .append("• Horários: ").append(m.optJSONArray("horarios") != null && m.optJSONArray("horarios").length() > 0 ? joinArray(m.optJSONArray("horarios")) : "Livre").append("\n")
-                      .append("• Estoque: ").append(getMedStock(m)).append(" unid.\n\n");
+                    String typeText = "continuous".equals(tType) ? "Uso contínuo" : ("temporary".equals(tType) ? "Tratamento temporário" : "Uso sob demanda (SOS)");
+                    String unitStr = optCleanString(m, "unidade", optCleanString(m, "forma", "comprimido"));
+                    String uIcon = getMedUnitIcon(unitStr);
+                    String doseStr = optCleanString(m, "dosagem", "");
+                    int curStock = getMedStock(m);
+                    String hrsFormatted = (m.optJSONArray("horarios") != null && m.optJSONArray("horarios").length() > 0)
+                        ? joinArray(m.optJSONArray("horarios")).replace(",", ", ").replace(",  ", ", ")
+                        : "Livre (SOS)";
+                    sb.append(uIcon).append(" ").append(m.optString("nome"))
+                      .append(doseStr.isEmpty() ? "" : " (" + doseStr + ")").append("\n")
+                      .append("• Tipo: ").append(typeText).append(" · ").append(getMedUnitShortLabel(unitStr)).append("\n")
+                      .append("• Horários: ").append(hrsFormatted).append("\n")
+                      .append("• Estoque: ").append(curStock).append(" ").append(formatMedUnitPlural(curStock, unitStr)).append("\n\n");
                 }
             }
             return sb.toString().trim();
@@ -9155,19 +9334,22 @@ public class MainActivity extends Activity {
             int total = this.doseLogs.length();
             for (int i = 0; i < total; i++) {
                 JSONObject d = this.doseLogs.optJSONObject(i);
-                if (d != null && "tomado".equals(d.optString("status"))) taken++;
+                if (d != null && "tomado".equals(normalizeDoseStatusLocal(d.optString("status")))) taken++;
             }
             int pct = total > 0 ? (taken * 100 / total) : 100;
-            return "📊 Resumo de Adesão ao Tratamento:\n• Doses registradas: " + total + "\n• Doses tomadas: " + taken + "\n• Índice de adesão: " + pct + "%\n\nContinue acompanhando seus horários diariamente!";
+            return "📊 Resumo de Adesão ao Tratamento:\n• Doses registradas: " + total + "\n• Doses confirmadas: " + taken + "\n• Índice de adesão: " + pct + "%\n\nContinue acompanhando seus horários diariamente!";
         } else if (pLower.contains("estoque") || pLower.contains("acabando")) {
             if (medCount == 0) return "Você não possui medicamentos cadastrados para controlar o estoque.";
-            StringBuilder sb = new StringBuilder("📦 Situação do seu estoque:\n\n");
+            StringBuilder sb = new StringBuilder("📦 Situação atual do seu estoque:\n\n");
             for (int i = 0; i < medCount; i++) {
                 JSONObject m = this.meds.optJSONObject(i);
-                if (m != null) {
+                if (m != null && m.optBoolean("ativo", true)) {
                     int current = getMedStock(m);
-                    sb.append(current <= 5 ? "🚨 " : "✅ ").append(m.optString("nome")).append(": ").append(current).append(" unidades restantes");
-                    if (current <= 5) sb.append(" (Precisa repor em breve!)");
+                    String unitStr = optCleanString(m, "unidade", optCleanString(m, "forma", "comprimido"));
+                    sb.append(current <= 5 ? "🚨 " : "✅ ").append(m.optString("nome")).append(": ")
+                      .append(current).append(" ").append(formatMedUnitPlural(current, unitStr));
+                    if (current <= 0) sb.append(" (Esgotado!)");
+                    else if (current <= 5) sb.append(" (Precisa repor em breve!)");
                     sb.append("\n");
                 }
             }
@@ -9178,7 +9360,7 @@ public class MainActivity extends Activity {
                 + "\nAlergias registradas: " + algCount
                 + "\n\nLeve este resumo para seu médico avaliar a evolução do seu tratamento.";
         } else {
-            return "Compreendi sua dúvida sobre \"" + prompt + "\". Caso sinta algum sintoma diferente ou tenha dúvidas sobre mudar horários, converse sempre com seu médico.";
+            return "Compreendi sua dúvida sobre \"" + prompt + "\". Você pode tocar nas sugestões rápidas abaixo para consultar seus horários de hoje, detalhes dos medicamentos, situação do estoque ou resumo para o médico.";
         }
     }
 

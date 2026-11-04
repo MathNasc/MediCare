@@ -1548,7 +1548,7 @@ fun PatientAiScreen(
                 val summaryText = buildString {
                     appendLine("🩺 RESUMO PARA CONSULTA MÉDICA — MEDICARE")
                     appendLine("Paciente: ${state.user?.nome ?: "Paciente"}")
-                    appendLine("Tipo sanguíneo: ${state.user?.bloodType ?: "O+"}")
+                    appendLine("Tipo sanguíneo: ${state.user?.bloodType?.takeIf { it.isNotBlank() } ?: "Não informado"}")
                     appendLine()
                     appendLine("💊 MEDICAMENTOS EM USO (${activeMeds.size}):")
                     activeMeds.forEach { m ->
@@ -1594,12 +1594,16 @@ fun PatientAiScreen(
             }
 
             "chat" -> {
+                val chatScrollState = rememberScrollState()
+                LaunchedEffect(state.aiMessages.size, state.aiLoading) {
+                    chatScrollState.animateScrollTo(chatScrollState.maxValue)
+                }
                 Column(modifier = Modifier.fillMaxSize()) {
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(chatScrollState),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         state.aiMessages.forEach { (role, msg) ->
@@ -1608,28 +1612,64 @@ fun PatientAiScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
                             ) {
-                                Box(
+                                Column(
                                     modifier = Modifier
-                                        .widthIn(max = 300.dp)
+                                        .then(if (isUser) Modifier.widthIn(max = 310.dp) else Modifier.fillMaxWidth(0.97f))
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(if (isUser) MediCareColors.Blue else tokens.bg1)
                                         .border(1.dp, if (isUser) MediCareColors.Blue else tokens.bdr, RoundedCornerShape(16.dp))
                                         .padding(14.dp)
                                 ) {
+                                    if (!isUser) {
+                                        Text(
+                                            text = "🩺 Assistente MediCare",
+                                            color = MediCareColors.Blue,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                    }
                                     Text(
                                         text = msg,
                                         color = if (isUser) Color.White else tokens.txt,
-                                        fontSize = 14.sp
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
                                     )
                                 }
                             }
                         }
                         if (state.aiLoading) {
-                            Text("Assistente analisando...", color = tokens.muted, fontSize = 12.sp)
+                            Text("⏳ Assistente analisando seus dados...", color = tokens.muted, fontSize = 12.sp)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            "💊 Meus remédios" to "Quais remédios tomo hoje?",
+                            "⏰ Próxima dose" to "Qual é a minha próxima dose de hoje?",
+                            "📦 Meu estoque" to "Como está a situação do meu estoque?",
+                            "📊 Minha adesão" to "Como está minha adesão ao tratamento?"
+                        ).forEach { (lbl, q) ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MediCareColors.Blue.copy(alpha = 0.14f))
+                                    .border(1.dp, MediCareColors.Blue.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                                    .clickable { if (!state.aiLoading) onSendQuestion(q) }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(lbl, color = MediCareColors.Blue, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = questionInput,
@@ -1640,7 +1680,7 @@ fun PatientAiScreen(
                         )
                         Button(
                             onClick = {
-                                if (questionInput.isNotBlank()) {
+                                if (questionInput.isNotBlank() && !state.aiLoading) {
                                     onSendQuestion(questionInput)
                                     questionInput = ""
                                 }
