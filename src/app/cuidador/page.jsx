@@ -2325,9 +2325,16 @@ export default function CuidadorWebPage() {
                     <option value="">Selecione...</option>
                     <option value="comprimido">Comprimido</option>
                     <option value="capsula">Cápsula</option>
+                    <option value="spray">Spray / Jato Nasal</option>
+                    <option value="jato (spray)">Jato (Spray)</option>
                     <option value="gotas">Gotas</option>
                     <option value="ml">mL</option>
+                    <option value="sache">Sachê</option>
+                    <option value="aplicacao">Aplicação</option>
+                    <option value="inalacao">Inalação</option>
                     <option value="ampola">Ampola / Dose</option>
+                    <option value="unidade">Unidade</option>
+                    <option value="g">Grama (g)</option>
                   </select>
                 </div>
               </div>

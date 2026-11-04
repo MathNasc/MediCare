@@ -135,7 +135,8 @@ public class MainActivity extends Activity {
     private String activeTab = "home";
     private List<String> tabHistory = new ArrayList();
     private long lastBackPressTime = 0;
-    private String medFilter = "todos";
+    private String medFilter = "all";
+    private String medUnitFilter = "all";
     private String selectedCalDate = EMBEDDED_API_KEY;
     private String calViewMode = "month";
     private int calYear = 2026;
@@ -4539,28 +4540,155 @@ public class MainActivity extends Activity {
         linearLayout.addView(timelineCard);
     }
 
+    private String getMedUnitCategory(JSONObject med) {
+        if (med == null) return "comprimido";
+        String raw = optCleanString(med, "unidade", optCleanString(med, "forma", "comprimido")).toLowerCase(Locale.ROOT).trim();
+        if (raw.contains("spray") || raw.contains("jato") || raw.contains("inala") || raw.contains("aerossol") || raw.contains("bombinha")) {
+            return "spray";
+        }
+        if (raw.contains("comprimido") || raw.equals("cp") || raw.contains("dragea") || raw.contains("drágea")) {
+            return "comprimido";
+        }
+        if (raw.contains("capsula") || raw.contains("cápsula")) {
+            return "capsula";
+        }
+        if (raw.contains("gota")) {
+            return "gotas";
+        }
+        if (raw.equals("ml") || raw.contains("xarope") || raw.contains("solucao") || raw.contains("solução") || raw.contains("suspens")) {
+            return "ml";
+        }
+        if (raw.contains("sache") || raw.contains("sachê") || raw.contains("envelope")) {
+            return "sache";
+        }
+        if (raw.contains("ampola") || raw.contains("injec") || raw.contains("injeç")) {
+            return "ampola";
+        }
+        if (raw.contains("aplicac") || raw.contains("aplicaç") || raw.contains("pomada") || raw.contains("creme")) {
+            return "aplicacao";
+        }
+        return "outros";
+    }
+
+    private String getMedUnitIcon(String unitRaw) {
+        String raw = unitRaw == null ? "" : unitRaw.toLowerCase(Locale.ROOT).trim();
+        if (raw.contains("spray") || raw.contains("jato") || raw.contains("inala") || raw.contains("aerossol")) {
+            return "💨";
+        }
+        if (raw.contains("gota")) {
+            return "💧";
+        }
+        if (raw.equals("ml") || raw.contains("xarope") || raw.contains("soluc") || raw.contains("soluç")) {
+            return "🧪";
+        }
+        if (raw.contains("ampola") || raw.contains("injec") || raw.contains("injeç")) {
+            return "💉";
+        }
+        if (raw.contains("sache") || raw.contains("sachê")) {
+            return "✉️";
+        }
+        if (raw.contains("aplicac") || raw.contains("aplicaç") || raw.contains("pomada") || raw.contains("creme")) {
+            return "🧴";
+        }
+        return "💊";
+    }
+
+    private String getMedUnitShortLabel(String unitRaw) {
+        String raw = (unitRaw == null || unitRaw.trim().isEmpty()) ? "comprimido" : unitRaw.trim();
+        String lower = raw.toLowerCase(Locale.ROOT);
+        if (lower.equals("jato (spray)")) return "Spray (jato)";
+        if (lower.equals("spray")) return "Spray";
+        if (lower.equals("comprimido")) return "Comprimido";
+        if (lower.equals("cápsula") || lower.equals("capsula")) return "Cápsula";
+        if (lower.equals("gotas")) return "Gotas";
+        if (lower.equals("ml")) return "mL";
+        if (lower.equals("sachê") || lower.equals("sache")) return "Sachê";
+        if (lower.equals("aplicação") || lower.equals("aplicacao")) return "Aplicação";
+        if (lower.equals("inalação") || lower.equals("inalacao")) return "Inalação";
+        if (lower.equals("ampola")) return "Ampola";
+        return raw.substring(0, 1).toUpperCase(Locale.ROOT) + raw.substring(1);
+    }
+
+    private String formatMedUnitPlural(int qty, String unitRaw) {
+        String raw = (unitRaw == null || unitRaw.trim().isEmpty()) ? "comprimido" : unitRaw.trim();
+        String lower = raw.toLowerCase(Locale.ROOT);
+        int abs = Math.abs(qty);
+        if (lower.equals("ml") || lower.equals("g") || lower.equals("mg") || lower.equals("mcg") || lower.equals("ui")) {
+            return raw;
+        }
+        if (lower.equals("gotas")) {
+            return abs == 1 ? "gota" : "gotas";
+        }
+        if (lower.equals("jato (spray)")) {
+            return abs == 1 ? "jato (spray)" : "jatos (spray)";
+        }
+        if (lower.equals("aplicação") || lower.equals("aplicacao")) {
+            return abs == 1 ? "aplicação" : "aplicações";
+        }
+        if (lower.equals("inalação") || lower.equals("inalacao")) {
+            return abs == 1 ? "inalação" : "inalações";
+        }
+        if (abs == 1) {
+            return raw;
+        }
+        return raw.endsWith("s") ? raw : (raw + "s");
+    }
+
     private void buildMedsTab(LinearLayout linearLayout) {
-        if ("todos".equals(this.medFilter) || "continuo".equals(this.medFilter)) {
+        if (this.medFilter == null || this.medFilter.isEmpty() || "todos".equals(this.medFilter)) {
+            this.medFilter = "all";
+        } else if ("continuo".equals(this.medFilter)) {
             this.medFilter = "continuous";
         } else if ("temporario".equals(this.medFilter)) {
             this.medFilter = "temporary";
         }
+        if (this.medUnitFilter == null || this.medUnitFilter.isEmpty() || "todos".equals(this.medUnitFilter)) {
+            this.medUnitFilter = "all";
+        }
 
-        // Header: "Meus medicamentos" + "＋ Novo"
+        // Collect active medications and count by treatment_type and unit category
+        ArrayList<Integer> allActiveIndices = new ArrayList<>();
+        ArrayList<Integer> contIndices = new ArrayList<>();
+        ArrayList<Integer> tempIndices = new ArrayList<>();
+        ArrayList<Integer> sosIndices = new ArrayList<>();
+
+        for (int i = 0; i < this.meds.length(); i++) {
+            JSONObject m = this.meds.optJSONObject(i);
+            if (m != null && m.optBoolean("ativo", true)) {
+                allActiveIndices.add(i);
+                String t = getMedType(m);
+                if ("temporary".equals(t)) tempIndices.add(i);
+                else if ("sos".equals(t)) sosIndices.add(i);
+                else contIndices.add(i);
+            }
+        }
+
+        // Header: "Meus medicamentos" + subtitle + "＋ Novo"
         LinearLayout headerRow = new LinearLayout(this);
         headerRow.setOrientation(0);
         headerRow.setGravity(16);
         LinearLayout.LayoutParams hrLp = new LinearLayout.LayoutParams(-1, -2);
-        hrLp.bottomMargin = dp(20);
+        hrLp.bottomMargin = dp(14);
         headerRow.setLayoutParams(hrLp);
+
+        LinearLayout titleWrap = new LinearLayout(this);
+        titleWrap.setOrientation(1);
+        titleWrap.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
         TextView titleTv = new TextView(this);
         titleTv.setText("Meus medicamentos");
         titleTv.setTextColor(this.cTextMain);
         titleTv.setTextSize(sp(22.0f));
         titleTv.setTypeface(null, 1);
-        titleTv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-        headerRow.addView(titleTv);
+        titleWrap.addView(titleTv);
+
+        TextView subTitleTv = new TextView(this);
+        subTitleTv.setText(allActiveIndices.size() == 1 ? "1 medicamento ativo" : (allActiveIndices.size() + " medicamentos ativos"));
+        subTitleTv.setTextColor(this.cTextMuted);
+        subTitleTv.setTextSize(sp(12.5f));
+        subTitleTv.setPadding(0, dp(2), 0, 0);
+        titleWrap.addView(subTitleTv);
+        headerRow.addView(titleWrap);
 
         TextView addBtn = new TextView(this);
         addBtn.setText("＋ Novo");
@@ -4578,49 +4706,44 @@ public class MainActivity extends Activity {
         headerRow.addView(addBtn);
         linearLayout.addView(headerRow);
 
-        // Separate meds by treatment_type
-        ArrayList<Integer> contIndices = new ArrayList<>();
-        ArrayList<Integer> tempIndices = new ArrayList<>();
-        ArrayList<Integer> sosIndices = new ArrayList<>();
-        for (int i = 0; i < this.meds.length(); i++) {
-            JSONObject m = this.meds.optJSONObject(i);
-            if (m != null && m.optBoolean("ativo", true)) {
-                String t = getMedType(m);
-                if ("temporary".equals(t)) tempIndices.add(i);
-                else if ("sos".equals(t)) sosIndices.add(i);
-                else contIndices.add(i);
-            }
-        }
+        // 1. Primary Filter Row: Por Tipo de Tratamento (Todos | Contínuo | Temporário | SOS)
+        TextView typeFilterLbl = new TextView(this);
+        typeFilterLbl.setText("FILTRAR POR TIPO DE USO");
+        typeFilterLbl.setTextColor(this.cTextLight);
+        typeFilterLbl.setTextSize(sp(10.5f));
+        typeFilterLbl.setTypeface(null, 1);
+        typeFilterLbl.setPadding(dp(2), 0, 0, dp(6));
+        linearLayout.addView(typeFilterLbl);
 
-        // Tabs row: 💊 Contínuos (0) | 📅 Temporários (0) | 🚨 SOS (0)
         HorizontalScrollView tabScroll = new HorizontalScrollView(this);
         tabScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout.LayoutParams tsLp = new LinearLayout.LayoutParams(-1, -2);
-        tsLp.bottomMargin = dp(20);
+        tsLp.bottomMargin = dp(12);
         tabScroll.setLayoutParams(tsLp);
 
         LinearLayout tabsRow = new LinearLayout(this);
         tabsRow.setOrientation(0);
         Object[][] tabDefs = {
-            {"continuous", "💊 Contínuos", contIndices.size()},
-            {"temporary", "📅 Temporários", tempIndices.size()},
-            {"sos", "🚨 SOS", sosIndices.size()}
+            {"all", "📋 Todos", allActiveIndices.size()},
+            {"continuous", "🔄 Contínuo", contIndices.size()},
+            {"temporary", "📅 Temporário", tempIndices.size()},
+            {"sos", "🆘 SOS", sosIndices.size()}
         };
-        for (int tIdx = 0; tIdx < 3; tIdx++) {
+        for (int tIdx = 0; tIdx < tabDefs.length; tIdx++) {
             final String tabId = (String) tabDefs[tIdx][0];
             String tabLabel = (String) tabDefs[tIdx][1];
             int tabCount = (Integer) tabDefs[tIdx][2];
-            boolean isActive = tabId.equals(this.medFilter);
+            final boolean isActive = tabId.equals(this.medFilter);
 
             LinearLayout tabPill = new LinearLayout(this);
             tabPill.setOrientation(0);
             tabPill.setGravity(16);
             if (isActive) {
-                tabPill.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 14));
+                tabPill.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
             } else {
-                tabPill.setBackground(shape(this.cSurface, 14, this.cBorder, 1));
+                tabPill.setBackground(shape(this.cSurface, 13, this.cBorder, 1));
             }
-            tabPill.setPadding(dp(16), dp(12), dp(16), dp(12));
+            tabPill.setPadding(dp(13), dp(9), dp(13), dp(9));
             LinearLayout.LayoutParams tpLp = new LinearLayout.LayoutParams(-2, -2);
             tpLp.rightMargin = dp(8);
             tabPill.setLayoutParams(tpLp);
@@ -4628,24 +4751,28 @@ public class MainActivity extends Activity {
             TextView lblTv = new TextView(this);
             lblTv.setText(tabLabel);
             lblTv.setTextColor(isActive ? -1 : this.cTextMuted);
-            lblTv.setTextSize(sp(14.0f));
+            lblTv.setTextSize(sp(13.0f));
             lblTv.setTypeface(null, isActive ? 1 : 0);
-            lblTv.setPadding(0, 0, dp(8), 0);
+            lblTv.setPadding(0, 0, dp(7), 0);
             tabPill.addView(lblTv);
 
             TextView cntTv = new TextView(this);
             cntTv.setText(String.valueOf(tabCount));
             cntTv.setTextColor(isActive ? -1 : this.cTextLight);
-            cntTv.setTextSize(sp(12.0f));
+            cntTv.setTextSize(sp(11.5f));
             cntTv.setTypeface(null, 1);
-            cntTv.setBackground(shape(isActive ? Color.parseColor("#33FFFFFF") : this.cSurfaceHover, 12, 0, 0));
-            cntTv.setPadding(dp(8), dp(2), dp(8), dp(2));
+            cntTv.setBackground(shape(isActive ? Color.parseColor("#33FFFFFF") : this.cSurfaceHover, 10, 0, 0));
+            cntTv.setPadding(dp(7), dp(2), dp(7), dp(2));
             tabPill.addView(cntTv);
 
             tabPill.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    MainActivity.this.medFilter = tabId;
+                    if (isActive && !"all".equals(tabId)) {
+                        MainActivity.this.medFilter = "all";
+                    } else {
+                        MainActivity.this.medFilter = tabId;
+                    }
                     MainActivity.this.render();
                 }
             });
@@ -4654,53 +4781,274 @@ public class MainActivity extends Activity {
         tabScroll.addView(tabsRow);
         linearLayout.addView(tabScroll);
 
-        ArrayList<Integer> activeIndices = "temporary".equals(this.medFilter) ? tempIndices : ("sos".equals(this.medFilter) ? sosIndices : contIndices);
-        String emptyIcon = "temporary".equals(this.medFilter) ? "📅" : ("sos".equals(this.medFilter) ? "🚨" : "💊");
-        String emptyTitle = "temporary".equals(this.medFilter) ? "Nenhum medicamento temporário" : ("sos".equals(this.medFilter) ? "Nenhum medicamento SOS" : "Nenhum medicamento contínuo");
-        String emptyDesc = "temporary".equals(this.medFilter) ? "Você não possui tratamentos com data de fim programada." : ("sos".equals(this.medFilter) ? "Você não possui medicamentos para uso eventual cadastrados." : "Você não possui medicamentos de uso contínuo.");
+        // Determine indices matching the selected treatment type filter first
+        ArrayList<Integer> typeMatchedIndices;
+        if ("continuous".equals(this.medFilter)) {
+            typeMatchedIndices = contIndices;
+        } else if ("temporary".equals(this.medFilter)) {
+            typeMatchedIndices = tempIndices;
+        } else if ("sos".equals(this.medFilter)) {
+            typeMatchedIndices = sosIndices;
+        } else {
+            typeMatchedIndices = allActiveIndices;
+        }
+
+        // Count units within typeMatchedIndices (and overall) so the user can filter by Comprimido, Spray, etc.
+        int cntComprimido = 0, cntSpray = 0, cntCapsula = 0, cntGotas = 0, cntMl = 0, cntSache = 0, cntAmpola = 0, cntAplicacao = 0, cntOutros = 0;
+        int totSache = 0, totAmpola = 0, totAplicacao = 0, totOutros = 0;
+        for (int i = 0; i < allActiveIndices.size(); i++) {
+            JSONObject m = this.meds.optJSONObject(allActiveIndices.get(i));
+            String uCat = getMedUnitCategory(m);
+            if ("sache".equals(uCat)) totSache++;
+            else if ("ampola".equals(uCat)) totAmpola++;
+            else if ("aplicacao".equals(uCat)) totAplicacao++;
+            else if ("outros".equals(uCat)) totOutros++;
+        }
+        for (int i = 0; i < typeMatchedIndices.size(); i++) {
+            JSONObject m = this.meds.optJSONObject(typeMatchedIndices.get(i));
+            String uCat = getMedUnitCategory(m);
+            if ("comprimido".equals(uCat)) cntComprimido++;
+            else if ("spray".equals(uCat)) cntSpray++;
+            else if ("capsula".equals(uCat)) cntCapsula++;
+            else if ("gotas".equals(uCat)) cntGotas++;
+            else if ("ml".equals(uCat)) cntMl++;
+            else if ("sache".equals(uCat)) cntSache++;
+            else if ("ampola".equals(uCat)) cntAmpola++;
+            else if ("aplicacao".equals(uCat)) cntAplicacao++;
+            else cntOutros++;
+        }
+
+        // 2. Secondary Filter Row: Por Formato / Unidade (Todos | Comprimido | Spray | Cápsula | Gotas | mL ...)
+        TextView unitFilterLbl = new TextView(this);
+        unitFilterLbl.setText("FILTRAR POR FORMATO / UNIDADE");
+        unitFilterLbl.setTextColor(this.cTextLight);
+        unitFilterLbl.setTextSize(sp(10.5f));
+        unitFilterLbl.setTypeface(null, 1);
+        unitFilterLbl.setPadding(dp(2), 0, 0, dp(6));
+        linearLayout.addView(unitFilterLbl);
+
+        HorizontalScrollView unitScroll = new HorizontalScrollView(this);
+        unitScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout.LayoutParams usLp = new LinearLayout.LayoutParams(-1, -2);
+        usLp.bottomMargin = dp(14);
+        unitScroll.setLayoutParams(usLp);
+
+        LinearLayout unitsRow = new LinearLayout(this);
+        unitsRow.setOrientation(0);
+
+        ArrayList<Object[]> unitDefs = new ArrayList<>();
+        unitDefs.add(new Object[]{"all", "✨ Todos", typeMatchedIndices.size()});
+        unitDefs.add(new Object[]{"comprimido", "💊 Comprimido", cntComprimido});
+        unitDefs.add(new Object[]{"spray", "💨 Spray", cntSpray});
+        unitDefs.add(new Object[]{"capsula", "💊 Cápsula", cntCapsula});
+        unitDefs.add(new Object[]{"gotas", "💧 Gotas", cntGotas});
+        unitDefs.add(new Object[]{"ml", "🧪 mL / Líquido", cntMl});
+        if (totSache > 0 || "sache".equals(this.medUnitFilter)) {
+            unitDefs.add(new Object[]{"sache", "✉️ Sachê", cntSache});
+        }
+        if (totAplicacao > 0 || "aplicacao".equals(this.medUnitFilter)) {
+            unitDefs.add(new Object[]{"aplicacao", "🧴 Aplicação", cntAplicacao});
+        }
+        if (totAmpola > 0 || "ampola".equals(this.medUnitFilter)) {
+            unitDefs.add(new Object[]{"ampola", "💉 Ampola", cntAmpola});
+        }
+        if (totOutros > 0 || "outros".equals(this.medUnitFilter)) {
+            unitDefs.add(new Object[]{"outros", "📦 Outros", cntOutros});
+        }
+
+        for (int uIdx = 0; uIdx < unitDefs.size(); uIdx++) {
+            Object[] uDef = unitDefs.get(uIdx);
+            final String uId = (String) uDef[0];
+            String uLabel = (String) uDef[1];
+            int uCount = (Integer) uDef[2];
+            final boolean isUnitActive = uId.equals(this.medUnitFilter);
+
+            LinearLayout unitChip = new LinearLayout(this);
+            unitChip.setOrientation(0);
+            unitChip.setGravity(16);
+            int activeChipColor = Color.parseColor("#0EA5E9");
+            if (isUnitActive) {
+                unitChip.setBackground(shape(Color.argb(38, Color.red(activeChipColor), Color.green(activeChipColor), Color.blue(activeChipColor)), 11, activeChipColor, 1));
+            } else {
+                unitChip.setBackground(shape(this.cSurface, 11, this.cBorder, 1));
+            }
+            unitChip.setPadding(dp(11), dp(7), dp(11), dp(7));
+            LinearLayout.LayoutParams ucLp = new LinearLayout.LayoutParams(-2, -2);
+            ucLp.rightMargin = dp(7);
+            unitChip.setLayoutParams(ucLp);
+
+            TextView uLblTv = new TextView(this);
+            uLblTv.setText(uLabel);
+            uLblTv.setTextColor(isUnitActive ? (this.isDarkMode ? Color.parseColor("#38BDF8") : Color.parseColor("#0284C7")) : this.cTextMuted);
+            uLblTv.setTextSize(sp(12.0f));
+            uLblTv.setTypeface(null, isUnitActive ? 1 : 0);
+            unitChip.addView(uLblTv);
+
+            if (uCount > 0 || isUnitActive) {
+                TextView uCntTv = new TextView(this);
+                uCntTv.setText(String.valueOf(uCount));
+                uCntTv.setTextColor(isUnitActive ? Color.WHITE : this.cTextLight);
+                uCntTv.setTextSize(sp(10.5f));
+                uCntTv.setTypeface(null, 1);
+                uCntTv.setBackground(shape(isUnitActive ? activeChipColor : this.cSurfaceHover, 8, 0, 0));
+                uCntTv.setPadding(dp(6), dp(1), dp(6), dp(1));
+                LinearLayout.LayoutParams uCntLp = new LinearLayout.LayoutParams(-2, -2);
+                uCntLp.leftMargin = dp(6);
+                uCntTv.setLayoutParams(uCntLp);
+                unitChip.addView(uCntTv);
+            }
+
+            unitChip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (isUnitActive && !"all".equals(uId)) {
+                        MainActivity.this.medUnitFilter = "all";
+                    } else {
+                        MainActivity.this.medUnitFilter = uId;
+                    }
+                    MainActivity.this.render();
+                }
+            });
+            unitsRow.addView(unitChip);
+        }
+        unitScroll.addView(unitsRow);
+        linearLayout.addView(unitScroll);
+
+        // Apply unit filter on top of typeMatchedIndices
+        ArrayList<Integer> activeIndices = new ArrayList<>();
+        for (int i = 0; i < typeMatchedIndices.size(); i++) {
+            int medIdx = typeMatchedIndices.get(i);
+            JSONObject m = this.meds.optJSONObject(medIdx);
+            if ("all".equals(this.medUnitFilter) || this.medUnitFilter.equals(getMedUnitCategory(m))) {
+                activeIndices.add(medIdx);
+            }
+        }
+
+        // Active filter status bar + "Limpar filtros" button when any filter is selected
+        boolean hasActiveFilter = !"all".equals(this.medFilter) || !"all".equals(this.medUnitFilter);
+        if (hasActiveFilter) {
+            LinearLayout filterBar = new LinearLayout(this);
+            filterBar.setOrientation(0);
+            filterBar.setGravity(16);
+            filterBar.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
+            filterBar.setPadding(dp(12), dp(8), dp(12), dp(8));
+            LinearLayout.LayoutParams fbLp = new LinearLayout.LayoutParams(-1, -2);
+            fbLp.bottomMargin = dp(14);
+            filterBar.setLayoutParams(fbLp);
+
+            TextView fbInfo = new TextView(this);
+            fbInfo.setText("🔍 Exibindo " + activeIndices.size() + " de " + allActiveIndices.size() + " medicamentos");
+            fbInfo.setTextColor(this.cTextMuted);
+            fbInfo.setTextSize(sp(12.0f));
+            fbInfo.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            filterBar.addView(fbInfo);
+
+            TextView btnResetFilters = new TextView(this);
+            btnResetFilters.setText("✕ Mostrar todos");
+            btnResetFilters.setTextColor(this.cPrimary);
+            btnResetFilters.setTextSize(sp(12.0f));
+            btnResetFilters.setTypeface(null, 1);
+            btnResetFilters.setPadding(dp(8), dp(2), dp(4), dp(2));
+            btnResetFilters.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.medFilter = "all";
+                    MainActivity.this.medUnitFilter = "all";
+                    MainActivity.this.render();
+                }
+            });
+            filterBar.addView(btnResetFilters);
+            linearLayout.addView(filterBar);
+        }
 
         if (activeIndices.isEmpty()) {
+            String emptyIcon = "spray".equals(this.medUnitFilter) ? "💨" : ("temporary".equals(this.medFilter) ? "📅" : ("sos".equals(this.medFilter) ? "🆘" : "💊"));
+            String emptyTitle;
+            String emptyDesc;
+            if (allActiveIndices.isEmpty()) {
+                emptyTitle = "Nenhum medicamento cadastrado";
+                emptyDesc = "Toque em \"＋ Novo\" para cadastrar seus medicamentos de uso contínuo, temporário ou SOS.";
+            } else if (!"all".equals(this.medUnitFilter) && !"all".equals(this.medFilter)) {
+                emptyTitle = "Nenhum medicamento para este filtro";
+                emptyDesc = "Não há medicamentos que combinem esse tipo de tratamento e formato.";
+            } else if (!"all".equals(this.medUnitFilter)) {
+                emptyTitle = "Nenhum medicamento neste formato";
+                emptyDesc = "Você ainda não cadastrou medicamentos com o formato selecionado.";
+            } else if ("temporary".equals(this.medFilter)) {
+                emptyTitle = "Nenhum medicamento temporário";
+                emptyDesc = "Você não possui tratamentos com data de fim programada.";
+            } else if ("sos".equals(this.medFilter)) {
+                emptyTitle = "Nenhum medicamento SOS";
+                emptyDesc = "Você não possui medicamentos para uso eventual cadastrados.";
+            } else {
+                emptyTitle = "Nenhum medicamento contínuo";
+                emptyDesc = "Você não possui medicamentos de uso contínuo.";
+            }
+
             LinearLayout emptyCard = new LinearLayout(this);
             emptyCard.setOrientation(1);
             emptyCard.setGravity(17);
             emptyCard.setBackground(shape(this.cSurface, 22, this.cBorder, 1));
-            emptyCard.setPadding(dp(28), dp(44), dp(28), dp(44));
+            emptyCard.setPadding(dp(28), dp(38), dp(28), dp(38));
             LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
-            ecLp.topMargin = dp(8);
+            ecLp.topMargin = dp(4);
             emptyCard.setLayoutParams(ecLp);
 
             TextView eIcon = new TextView(this);
             eIcon.setText(emptyIcon);
-            eIcon.setTextSize(sp(46.0f));
+            eIcon.setTextSize(sp(44.0f));
             eIcon.setGravity(17);
-            eIcon.setPadding(0, 0, 0, dp(12));
+            eIcon.setPadding(0, 0, 0, dp(10));
             emptyCard.addView(eIcon);
 
             TextView eTitle = new TextView(this);
             eTitle.setText(emptyTitle);
             eTitle.setTextColor(this.cTextMain);
-            eTitle.setTextSize(sp(18.0f));
+            eTitle.setTextSize(sp(17.5f));
             eTitle.setTypeface(null, 1);
             eTitle.setGravity(17);
-            eTitle.setPadding(0, 0, 0, dp(8));
+            eTitle.setPadding(0, 0, 0, dp(6));
             emptyCard.addView(eTitle);
 
             TextView eDesc = new TextView(this);
             eDesc.setText(emptyDesc);
             eDesc.setTextColor(this.cTextMuted);
-            eDesc.setTextSize(sp(14.0f));
+            eDesc.setTextSize(sp(13.5f));
             eDesc.setGravity(17);
-            eDesc.setPadding(0, 0, 0, dp(22));
+            eDesc.setPadding(0, 0, 0, dp(20));
             emptyCard.addView(eDesc);
+
+            if (hasActiveFilter && !allActiveIndices.isEmpty()) {
+                TextView btnShowAll = new TextView(this);
+                btnShowAll.setText("📋 Ver todos os medicamentos (" + allActiveIndices.size() + ")");
+                btnShowAll.setTextColor(this.cPrimary);
+                btnShowAll.setTextSize(sp(14.0f));
+                btnShowAll.setTypeface(null, 1);
+                btnShowAll.setGravity(17);
+                btnShowAll.setBackground(shape(Color.argb(28, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 12, this.cPrimary, 1));
+                btnShowAll.setPadding(dp(22), dp(12), dp(22), dp(12));
+                LinearLayout.LayoutParams saLp = new LinearLayout.LayoutParams(-2, -2);
+                saLp.bottomMargin = dp(10);
+                btnShowAll.setLayoutParams(saLp);
+                btnShowAll.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        MainActivity.this.medFilter = "all";
+                        MainActivity.this.medUnitFilter = "all";
+                        MainActivity.this.render();
+                    }
+                });
+                emptyCard.addView(btnShowAll);
+            }
 
             TextView eBtn = new TextView(this);
             eBtn.setText("+ Adicionar medicamento");
             eBtn.setTextColor(-1);
-            eBtn.setTextSize(sp(15.0f));
+            eBtn.setTextSize(sp(14.5f));
             eBtn.setTypeface(null, 1);
             eBtn.setGravity(17);
             eBtn.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
-            eBtn.setPadding(dp(26), dp(14), dp(26), dp(14));
+            eBtn.setPadding(dp(24), dp(13), dp(24), dp(13));
             eBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -4725,6 +5073,11 @@ public class MainActivity extends Activity {
                 medColor = Color.parseColor(med.optString("cor", "#3B82F6"));
             } catch (Exception ignored) {}
 
+            String unitStr = optCleanString(med, "unidade", optCleanString(med, "forma", "comprimido"));
+            String doseStr = optCleanString(med, "dosagem", "");
+            String unitIcon = getMedUnitIcon(unitStr);
+            String unitShortLabel = getMedUnitShortLabel(unitStr);
+
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(0);
             card.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
@@ -4747,9 +5100,9 @@ public class MainActivity extends Activity {
             colorBar.setLayoutParams(cbLp);
             card.addView(colorBar);
 
-            // Pill icon box
+            // Dynamic Format Icon Box (💊 / 💨 / 💧 / 🧪 / 💉)
             TextView pillIcon = new TextView(this);
-            pillIcon.setText("💊");
+            pillIcon.setText(unitIcon);
             pillIcon.setTextSize(sp(22.0f));
             pillIcon.setGravity(17);
             pillIcon.setBackground(shape(Color.argb(35, Color.red(medColor), Color.green(medColor), Color.blue(medColor)), 14, medColor, 1));
@@ -4782,11 +5135,12 @@ public class MainActivity extends Activity {
             mName.setEllipsize(TextUtils.TruncateAt.END);
             titleCol.addView(mName);
 
+            // Badges row: [🔄 Contínuo] [💊 Comprimido / 💨 Spray]
             LinearLayout subBadgeRow = new LinearLayout(this);
             subBadgeRow.setOrientation(0);
             subBadgeRow.setGravity(16);
             LinearLayout.LayoutParams sbrLp = new LinearLayout.LayoutParams(-1, -2);
-            sbrLp.topMargin = dp(5);
+            sbrLp.topMargin = dp(6);
             subBadgeRow.setLayoutParams(sbrLp);
 
             TextView tBadge = new TextView(this);
@@ -4799,20 +5153,20 @@ public class MainActivity extends Activity {
             tBadge.setBackground(shape(Color.argb(35, Color.red(tbColor), Color.green(tbColor), Color.blue(tbColor)), 10, 0, 0));
             tBadge.setPadding(dp(8), dp(2), dp(8), dp(2));
             LinearLayout.LayoutParams tbLp = new LinearLayout.LayoutParams(-2, -2);
-            tbLp.rightMargin = dp(8);
+            tbLp.rightMargin = dp(6);
             tBadge.setLayoutParams(tbLp);
             subBadgeRow.addView(tBadge);
 
-            String unitStr = optCleanString(med, "unidade", optCleanString(med, "forma", "comprimido"));
-            String doseStr = optCleanString(med, "dosagem", "");
-            TextView doseSub = new TextView(this);
-            doseSub.setText((doseStr.isEmpty() ? "" : doseStr + " · ") + unitStr);
-            doseSub.setTextColor(this.cTextMuted);
-            doseSub.setTextSize(sp(13.0f));
-            doseSub.setSingleLine(true);
-            doseSub.setEllipsize(TextUtils.TruncateAt.END);
-            doseSub.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-            subBadgeRow.addView(doseSub);
+            TextView uBadge = new TextView(this);
+            uBadge.setText(unitIcon + " " + unitShortLabel);
+            int ubColor = this.isDarkMode ? Color.parseColor("#38BDF8") : Color.parseColor("#0284C7");
+            uBadge.setTextColor(ubColor);
+            uBadge.setTextSize(sp(10.5f));
+            uBadge.setTypeface(null, 1);
+            uBadge.setSingleLine(true);
+            uBadge.setBackground(shape(Color.argb(30, Color.red(ubColor), Color.green(ubColor), Color.blue(ubColor)), 10, 0, 0));
+            uBadge.setPadding(dp(8), dp(2), dp(8), dp(2));
+            subBadgeRow.addView(uBadge);
 
             titleCol.addView(subBadgeRow);
             topRow.addView(titleCol);
@@ -4849,12 +5203,20 @@ public class MainActivity extends Activity {
             topRow.addView(delBtn);
             col.addView(topRow);
 
+            // Full-width Dosage + Unit line (never truncated!)
+            TextView doseSub = new TextView(this);
+            doseSub.setText(doseStr.isEmpty() ? ("Formato: " + unitStr) : ("Dosagem: " + doseStr + " · " + unitStr));
+            doseSub.setTextColor(this.cTextMuted);
+            doseSub.setTextSize(sp(13.0f));
+            doseSub.setPadding(0, dp(6), 0, 0);
+            col.addView(doseSub);
+
             JSONArray hrsCard = med.optJSONArray("horarios");
             String scheduleText;
             if (isSOS) {
                 scheduleText = "⏰ Uso conforme necessidade";
             } else if (hrsCard != null && hrsCard.length() > 0) {
-                String joinedHrs = joinArray(hrsCard).trim();
+                String joinedHrs = joinArray(hrsCard).trim().replace(",", ", ").replace(",  ", ", ");
                 scheduleText = (hrsCard.length() > 1 ? "⏰ Horários: " : "⏰ Horário: ") + (joinedHrs.isEmpty() || "null".equalsIgnoreCase(joinedHrs) ? "Não preenchido" : joinedHrs);
             } else {
                 scheduleText = "⏰ Horário: Não preenchido";
@@ -4863,7 +5225,7 @@ public class MainActivity extends Activity {
             schedTv.setText(scheduleText);
             schedTv.setTextColor(this.cTextMuted);
             schedTv.setTextSize(sp(12.5f));
-            schedTv.setPadding(0, dp(6), 0, 0);
+            schedTv.setPadding(0, dp(4), 0, 0);
             col.addView(schedTv);
 
             String obs = optCleanString(med, "observacoes", optCleanString(med, "instrucoes", ""));
@@ -4897,7 +5259,7 @@ public class MainActivity extends Activity {
             int qty = getMedStock(med);
             int stColor = qty <= 5 ? this.cDanger : (qty <= 10 ? this.cWarning : this.cSuccess);
             TextView stockPill = new TextView(this);
-            stockPill.setText("📦 " + qty + " " + unitStr + (qty == 1 ? "" : "s"));
+            stockPill.setText("📦 " + qty + " " + formatMedUnitPlural(qty, unitStr));
             stockPill.setTextColor(stColor);
             stockPill.setTextSize(sp(12.0f));
             stockPill.setTypeface(null, 1);
@@ -5110,7 +5472,7 @@ public class MainActivity extends Activity {
         int stock = getMedStock(med);
         String unit = optCleanString(med, "unidade", optCleanString(med, "forma", "comprimido"));
         TextView stTv = new TextView(this);
-        stTv.setText("📦 Estoque disponível: " + stock + " " + unit + "s");
+        stTv.setText("📦 Estoque disponível: " + stock + " " + formatMedUnitPlural(stock, unit));
         stTv.setTextColor(stock <= 5 ? this.cDanger : (stock <= 10 ? this.cWarning : this.cSuccess));
         stTv.setTextSize(sp(14.0f));
         stTv.setTypeface(null, 1);
@@ -5343,7 +5705,16 @@ public class MainActivity extends Activity {
         {"CARDIOVASCULAR / ANTICOAGULANTES", "Clopidogrel 75mg", "Clopidogrel", "75mg", "Comprimido", "comprimido", "EMS", "GEN"},
         {"CARDIOVASCULAR / ANTICOAGULANTES", "Marevan 5mg", "Varfarina Sódica", "5mg", "Comprimido", "comprimido", "Sanofi", "REF"},
 
-        {"RESPIRATÓRIO / ALERGIA", "Aerolin Spray", "Sulfato de Salbutamol", "100mcg/dose", "Aerossol", "dose", "GSK", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Aerolin Spray", "Sulfato de Salbutamol", "100mcg/jato", "Aerossol", "spray", "GSK", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Budesonida Spray Nasal 50mcg", "Budesonida", "50mcg/jato", "Spray Nasal", "spray", "EMS", "GEN"},
+        {"RESPIRATÓRIO / ALERGIA", "Busonid Aquoso Nasal 50mcg", "Budesonida", "50mcg/jato", "Spray Nasal", "spray", "Aché", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Avamys Spray Nasal", "Furoato de Fluticasona", "27,5mcg/jato", "Spray Nasal", "spray", "GSK", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Nasonex Spray Nasal", "Furoato de Mometasona", "50mcg/jato", "Spray Nasal", "spray", "Organon", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Mometasona Spray Nasal 50mcg", "Furoato de Mometasona", "50mcg/jato", "Spray Nasal", "spray", "Eurofarma", "GEN"},
+        {"RESPIRATÓRIO / ALERGIA", "Sorine Spray Nasal", "Cloreto de Sódio 0,9%", "9mg/ml", "Spray Nasal", "spray", "Aché", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Maresis Spray Nasal", "Cloreto de Sódio 0,9%", "9mg/ml", "Spray Nasal", "spray", "Farmoquímica", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Rinosoro Spray Nasal", "Cloreto de Sódio 0,9%", "9mg/ml", "Spray Nasal", "spray", "Hypera", "REF"},
+        {"RESPIRATÓRIO / ALERGIA", "Neosoro Spray Nasal", "Cloridrato de Nafazolina", "0,5mg/ml", "Spray Nasal", "spray", "Neo Química", "SIM"},
         {"RESPIRATÓRIO / ALERGIA", "Loratadina 10mg", "Loratadina", "10mg", "Comprimido", "comprimido", "EMS", "GEN"},
         {"RESPIRATÓRIO / ALERGIA", "Prednisona 20mg", "Prednisona", "20mg", "Comprimido", "comprimido", "EMS", "GEN"}
     };
@@ -6259,10 +6630,38 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams usLp = new LinearLayout.LayoutParams(-1, -2);
         usLp.bottomMargin = dp(8);
         tvUnitSelect.setLayoutParams(usLp);
+
+        final TextView tvSprayTip = new TextView(this);
+        tvSprayTip.setText("💡 Como preencher Spray Nasal:\n• Dosagem: coloque a quantidade por aplicação (ex: \"1 jato em cada narina\" ou \"50mcg\").\n• Qtd. Disponível: coloque o total de jatos/doses do frasco (geralmente 60 ou 120 jatos na caixa) ou quantas aplicações restam.");
+        tvSprayTip.setTextColor(this.cPrimary);
+        tvSprayTip.setTextSize(sp(12.0f));
+        tvSprayTip.setBackground(shape(Color.argb(25, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 12, this.cPrimary, 1));
+        tvSprayTip.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(-1, -2);
+        stLp.bottomMargin = dp(10);
+        tvSprayTip.setLayoutParams(stLp);
+
+        final Runnable updateSprayGuidance = new Runnable() {
+            @Override
+            public void run() {
+                String uLower = unitVal[0] != null ? unitVal[0].toLowerCase(Locale.ROOT) : "";
+                boolean isSprayUnit = uLower.contains("spray") || uLower.contains("jato") || uLower.contains("inala");
+                tvSprayTip.setVisibility(isSprayUnit ? View.VISIBLE : View.GONE);
+                if (isSprayUnit) {
+                    doseIn.setHint("Ex: 1 jato em cada narina / 50mcg");
+                    stockIn.setHint("Ex: 120 (jatos no frasco)");
+                } else {
+                    doseIn.setHint("Ex: 500mg");
+                    stockIn.setHint("30");
+                }
+            }
+        };
+        updateSprayGuidance.run();
+
         tvUnitSelect.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                final String[] units = {"comprimido", "cápsula", "ml", "gotas", "sachê", "unidade", "dose", "g"};
+                final String[] units = {"comprimido", "cápsula", "spray", "jato (spray)", "ml", "gotas", "sachê", "aplicação", "inalação", "ampola", "unidade", "dose", "g"};
                 int curU = 0;
                 for (int uIdx = 0; uIdx < units.length; uIdx++) {
                     if (units[uIdx].equalsIgnoreCase(unitVal[0])) {
@@ -6275,11 +6674,13 @@ public class MainActivity extends Activity {
                     public void onClick(DialogInterface d, int which) {
                         unitVal[0] = units[which];
                         tvUnitSelect.setText(unitVal[0] + "  ⌄");
+                        updateSprayGuidance.run();
                     }
                 });
             }
         });
         body.addView(tvUnitSelect);
+        body.addView(tvSprayTip);
 
         body.addView(createFormLabel("FABRICANTE"));
         final EditText manufIn = createInput("Fabricante", initManuf);
@@ -6589,7 +6990,12 @@ public class MainActivity extends Activity {
                     } else {
                         MainActivity.this.meds.put(mObj);
                     }
-                    MainActivity.this.medFilter = normT;
+                    if (!"all".equals(MainActivity.this.medFilter) && !normT.equals(MainActivity.this.medFilter)) {
+                        MainActivity.this.medFilter = "all";
+                    }
+                    if (!"all".equals(MainActivity.this.medUnitFilter) && !getMedUnitCategory(mObj).equals(MainActivity.this.medUnitFilter)) {
+                        MainActivity.this.medUnitFilter = "all";
+                    }
                     saveAll();
                     dialog.dismiss();
                     render();

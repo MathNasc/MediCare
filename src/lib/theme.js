@@ -11,7 +11,7 @@ export const PILL_COLORS = [
   '#f97316','#f59e0b','#22c55e','#14b8a6','#06b6d4','#6366f1',
 ];
 
-export const UNITS = ['comprimido','cápsula','ml','gotas','sachê','unidade'];
+export const UNITS = ['comprimido','cápsula','spray','jato (spray)','ml','gotas','sachê','aplicação','inalação','ampola','unidade','dose','g'];
 export const WEEK_S = ['D','S','T','Q','Q','S','S'];
 export const WEEK   = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 export const DEF_HOURS = ['08:00','14:00','20:00'];

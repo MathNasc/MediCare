@@ -72,7 +72,7 @@ fun MedModalWizard(
         mutableStateOf(existingMed?.diasSemana ?: listOf(0, 1, 2, 3, 4, 5, 6))
     }
 
-    val units = listOf("comprimido", "cápsula", "ml", "gotas", "sachê", "unidade")
+    val units = listOf("comprimido", "cápsula", "spray", "jato (spray)", "ml", "gotas", "sachê", "aplicação", "inalação", "ampola", "unidade", "dose", "g")
     val dayNames = listOf("D", "S", "T", "Q", "Q", "S", "S")
 
     Dialog(onDismissRequest = onDismiss) {

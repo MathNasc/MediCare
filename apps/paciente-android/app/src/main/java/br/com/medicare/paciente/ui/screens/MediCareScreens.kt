@@ -322,7 +322,8 @@ fun PatientMedsScreen(
     onRecordStockMovement: (Medication, String, Int, Double?, String?, String?, String?, String?) -> Unit
 ) {
     val tokens = LocalMediCareTokens.current
-    var activeTab by remember { mutableStateOf("continuous") }
+    var activeTab by remember { mutableStateOf("all") }
+    var activeUnitFilter by remember { mutableStateOf("all") }
 
     var showWizardModal by remember { mutableStateOf(false) }
     var editingMed by remember { mutableStateOf<Medication?>(null) }
@@ -347,20 +348,44 @@ fun PatientMedsScreen(
         }
     }
 
+    fun normalizeUnitCat(unit: String): String {
+        val raw = unit.lowercase(Locale.ROOT).trim()
+        return when {
+            raw.contains("spray") || raw.contains("jato") || raw.contains("inala") || raw.contains("aerossol") -> "spray"
+            raw.contains("comprimido") || raw == "cp" || raw.contains("dragea") || raw.contains("drágea") -> "comprimido"
+            raw.contains("capsula") || raw.contains("cápsula") -> "capsula"
+            raw.contains("gota") -> "gotas"
+            raw == "ml" || raw.contains("xarope") || raw.contains("soluc") || raw.contains("soluç") -> "ml"
+            else -> "outros"
+        }
+    }
+
+    val allActiveMeds = remember(state.medications) {
+        state.medications.filter { it.ativo }
+    }
     val continuousMeds = remember(state.medications) {
         state.medications.filter { it.ativo && (it.treatmentType == "continuous" || it.treatmentType.isBlank()) }
     }
     val temporaryMeds = remember(state.medications) {
-        state.medications.filter { it.treatmentType == "temporary" }
+        state.medications.filter { it.ativo && it.treatmentType == "temporary" }
     }
     val sosMeds = remember(state.medications) {
         state.medications.filter { it.ativo && it.treatmentType == "sos" }
     }
 
-    val currentList = when (activeTab) {
+    val typeMatchedList = when (activeTab) {
+        "continuous" -> continuousMeds
         "temporary" -> temporaryMeds
         "sos" -> sosMeds
-        else -> continuousMeds
+        else -> allActiveMeds
+    }
+
+    val currentList = remember(typeMatchedList, activeUnitFilter) {
+        if (activeUnitFilter == "all") {
+            typeMatchedList
+        } else {
+            typeMatchedList.filter { normalizeUnitCat(it.unidade) == activeUnitFilter }
+        }
     }
 
     Column(
@@ -384,7 +409,7 @@ fun PatientMedsScreen(
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "${state.medications.count { it.ativo }} medicamento(s) ativo(s)",
+                    text = "${allActiveMeds.size} medicamento(s) ativo(s)",
                     color = tokens.muted,
                     fontSize = 13.sp
                 )
@@ -401,32 +426,31 @@ fun PatientMedsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // 3 Abas: Contínuos / Temporários / SOS
+        // Filtro 1: Por Tipo de Tratamento (Todos / Contínuo / Temporário / SOS)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(tokens.bg1)
-                .border(1.dp, tokens.bdr, RoundedCornerShape(14.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             listOf(
-                Triple("continuous", "💊 Contínuos", continuousMeds.size),
-                Triple("temporary", "📅 Temporários", temporaryMeds.size),
-                Triple("sos", "🚨 SOS", sosMeds.size)
+                Triple("all", "📋 Todos", allActiveMeds.size),
+                Triple("continuous", "🔄 Contínuo", continuousMeds.size),
+                Triple("temporary", "📅 Temporário", temporaryMeds.size),
+                Triple("sos", "🆘 SOS", sosMeds.size)
             ).forEach { (id, label, count) ->
                 val sel = activeTab == id
-                Column(
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (sel) MediCareColors.Blue else Color.Transparent)
-                        .clickable { activeTab = id }
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (sel) MediCareColors.Blue else tokens.bg1)
+                        .border(1.dp, if (sel) MediCareColors.Blue else tokens.bdr, RoundedCornerShape(12.dp))
+                        .clickable { activeTab = if (sel && id != "all") "all" else id }
+                        .padding(horizontal = 13.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = label,
@@ -436,9 +460,46 @@ fun PatientMedsScreen(
                     )
                     Text(
                         text = "$count",
-                        color = if (sel) Color.White.copy(alpha = 0.85f) else tokens.sub,
+                        color = if (sel) Color.White.copy(alpha = 0.9f) else tokens.sub,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Filtro 2: Por Formato / Unidade (Todos / Comprimido / Spray / Cápsula / Gotas / mL)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                Pair("all", "✨ Todos"),
+                Pair("comprimido", "💊 Comprimido"),
+                Pair("spray", "💨 Spray"),
+                Pair("capsula", "💊 Cápsula"),
+                Pair("gotas", "💧 Gotas"),
+                Pair("ml", "🧪 mL / Líquido")
+            ).forEach { (uId, uLabel) ->
+                val sel = activeUnitFilter == uId
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (sel) MediCareColors.Blue.copy(alpha = 0.18f) else tokens.bg1)
+                        .border(1.dp, if (sel) MediCareColors.Blue else tokens.bdr, RoundedCornerShape(10.dp))
+                        .clickable { activeUnitFilter = if (sel && uId != "all") "all" else uId }
+                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = uLabel,
+                        color = if (sel) MediCareColors.Blue else tokens.muted,
+                        fontSize = 11.5.sp,
+                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium
                     )
                 }
             }
@@ -456,10 +517,10 @@ fun PatientMedsScreen(
                     .padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("💊", fontSize = 40.sp)
+                Text(if (activeUnitFilter == "spray") "💨" else "💊", fontSize = 40.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Nenhum medicamento nesta categoria", color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text("Toque em \"＋ Novo\" para adicionar.", color = tokens.muted, fontSize = 13.sp)
+                Text("Nenhum medicamento encontrado neste filtro", color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("Toque em \"＋ Novo\" para adicionar ou limpe os filtros.", color = tokens.muted, fontSize = 13.sp)
             }
         } else {
             val todayIso = LocalDate.now().toString()
