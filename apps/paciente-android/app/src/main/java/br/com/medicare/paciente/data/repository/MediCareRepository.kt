@@ -319,7 +319,7 @@ class MediCareRepository @Inject constructor(
 
         val medEntity = dao.getMedicationById(medId)
         if (medEntity != null) {
-            val newQty = max(0, medEntity.quantidade - 1)
+            val newQty = medEntity.quantidade - 1
             dao.upsertMedication(medEntity.copy(quantidade = newQty, pendingSync = true))
         }
 
@@ -330,7 +330,7 @@ class MediCareRepository @Inject constructor(
             val synced = runCatching {
                 remoteApi.insertDoseHistory(domainRecord)
                 if (medEntity != null) {
-                    remoteApi.updateMedication("eq.$medId", mapOf("quantidade" to max(0, medEntity.quantidade - 1)))
+                    remoteApi.updateMedication("eq.$medId", mapOf("quantidade" to (medEntity.quantidade - 1)))
                 }
                 dao.upsertDoseHistory(entity.copy(pendingSync = false))
                 true
@@ -401,7 +401,7 @@ class MediCareRepository @Inject constructor(
         )
         dao.upsertDoseHistory(entity)
 
-        val newQty = max(0, med.quantidade - quantityUsed)
+        val newQty = med.quantidade - quantityUsed
         dao.upsertMedication(MedicationEntity.fromDomain(med.copy(quantidade = newQty), pendingSync = true, json = json))
 
         if (isRemoteConfigured) {

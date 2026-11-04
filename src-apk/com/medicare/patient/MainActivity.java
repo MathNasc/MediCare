@@ -1429,6 +1429,129 @@ public class MainActivity extends Activity {
         return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
     }
 
+    private Locale getDeviceLocale() {
+        try {
+            if (Build.VERSION.SDK_INT >= 24) {
+                android.os.LocaleList locales = getResources().getConfiguration().getLocales();
+                if (locales != null && !locales.isEmpty() && locales.get(0) != null) {
+                    return locales.get(0);
+                }
+            }
+            Locale cfgLoc = getResources().getConfiguration().locale;
+            if (cfgLoc != null) {
+                return cfgLoc;
+            }
+        } catch (Exception ignored) {}
+        Locale def = Locale.getDefault();
+        return def != null ? def : new Locale("pt", "BR");
+    }
+
+    private String getDeviceDatePattern() {
+        try {
+            Locale loc = getDeviceLocale();
+            java.text.DateFormat df = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT, loc);
+            if (df instanceof SimpleDateFormat) {
+                String pat = ((SimpleDateFormat) df).toPattern();
+                if (pat != null && !pat.trim().isEmpty()) {
+                    pat = pat.replaceAll("y+", "yyyy").replaceAll("M+", "MM").replaceAll("d+", "dd");
+                    return pat;
+                }
+            }
+        } catch (Exception ignored) {}
+        return "dd/MM/yyyy";
+    }
+
+    private String getDeviceDateHint() {
+        String pat = getDeviceDatePattern();
+        Locale loc = getDeviceLocale();
+        String lang = loc != null && loc.getLanguage() != null ? loc.getLanguage().toLowerCase(Locale.ROOT) : "pt";
+        if (lang.startsWith("pt") || lang.startsWith("es")) {
+            return pat.replace("yyyy", "AAAA").replace("MM", "MM").replace("dd", "DD");
+        }
+        return pat.toUpperCase(Locale.ROOT);
+    }
+
+    private String formatYmdForDeviceLocale(int year, int month1Based, int day) {
+        try {
+            Calendar cal = Calendar.getInstance();
+            cal.set(Calendar.YEAR, year);
+            cal.set(Calendar.MONTH, Math.max(0, Math.min(11, month1Based - 1)));
+            cal.set(Calendar.DAY_OF_MONTH, day);
+            cal.set(Calendar.HOUR_OF_DAY, 12);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            return new SimpleDateFormat(getDeviceDatePattern(), getDeviceLocale()).format(cal.getTime());
+        } catch (Exception e) {
+            return String.format(Locale.US, "%02d/%02d/%04d", day, month1Based, year);
+        }
+    }
+
+    private String formatDateForDeviceLocale(String rawDate) {
+        if (rawDate == null) return "";
+        String s = rawDate.trim();
+        if (s.isEmpty() || "null".equalsIgnoreCase(s)) return "";
+        try {
+            String datePart = s;
+            if (datePart.length() >= 10 && datePart.charAt(4) == '-' && datePart.charAt(7) == '-') {
+                datePart = datePart.substring(0, 10);
+                String[] p = datePart.split("-");
+                int yr = Integer.parseInt(p[0]);
+                int mo = Integer.parseInt(p[1]);
+                int dy = Integer.parseInt(p[2]);
+                return formatYmdForDeviceLocale(yr, mo, dy);
+            }
+            SimpleDateFormat devFmt = new SimpleDateFormat(getDeviceDatePattern(), getDeviceLocale());
+            devFmt.setLenient(false);
+            Date parsed = devFmt.parse(s);
+            if (parsed != null) {
+                return devFmt.format(parsed);
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (s.matches("^\\d{2}/\\d{2}/\\d{4}$")) {
+                String[] p = s.split("/");
+                int first = Integer.parseInt(p[0]);
+                int second = Integer.parseInt(p[1]);
+                int yr = Integer.parseInt(p[2]);
+                boolean monthFirst = getDeviceDatePattern().startsWith("M") && first <= 12 && second <= 31;
+                int dy = monthFirst ? second : first;
+                int mo = monthFirst ? first : second;
+                return formatYmdForDeviceLocale(yr, mo, dy);
+            }
+        } catch (Exception ignored) {}
+        return s;
+    }
+
+    private String parseDateInputToIso(String inputDate, String fallbackIso) {
+        if (inputDate == null) return fallbackIso != null ? fallbackIso : "";
+        String s = inputDate.trim();
+        if (s.isEmpty()) return fallbackIso != null ? fallbackIso : "";
+        if (s.length() >= 10 && s.charAt(4) == '-' && s.charAt(7) == '-') {
+            return s.substring(0, 10);
+        }
+        try {
+            SimpleDateFormat devFmt = new SimpleDateFormat(getDeviceDatePattern(), getDeviceLocale());
+            devFmt.setLenient(false);
+            Date parsed = devFmt.parse(s);
+            if (parsed != null) {
+                return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(parsed);
+            }
+        } catch (Exception ignored) {}
+        String[] fallbackPatterns = new String[]{"dd/MM/yyyy", "MM/dd/yyyy", "dd-MM-yyyy", "yyyy/MM/dd", "dd.MM.yyyy"};
+        for (int i = 0; i < fallbackPatterns.length; i++) {
+            try {
+                SimpleDateFormat fmt = new SimpleDateFormat(fallbackPatterns[i], Locale.US);
+                fmt.setLenient(false);
+                Date parsed = fmt.parse(s);
+                if (parsed != null) {
+                    return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(parsed);
+                }
+            } catch (Exception ignored) {}
+        }
+        return fallbackIso != null && !fallbackIso.isEmpty() ? fallbackIso : s;
+    }
+
     private float getFontScaleFactor() {
         float base = "xlarge".equals(this.fontScaleMode) ? 1.24f : ("large".equals(this.fontScaleMode) ? 1.12f : 1.0f);
         if (this.isAccessibilityMode && base < 1.15f) {
@@ -2148,7 +2271,7 @@ public class MainActivity extends Activity {
             final EditText nomeInput = createInput("Nome Completo", this.profile.optString("nome", ""));
             container.addView(nomeInput);
 
-            final EditText dobInput = createInput("Data de Nascimento (Ex: 15/08/1965)", this.profile.optString("data_nascimento", ""));
+            final EditText dobInput = createInput("Data de Nascimento (Ex: " + formatYmdForDeviceLocale(1965, 8, 15) + ")", formatDateForDeviceLocale(this.profile.optString("data_nascimento", "")));
             container.addView(dobInput);
 
             final EditText sangueInput = createInput("Tipo Sanguíneo (Ex: O+, A+, B+)", this.profile.optString("tipo_sanguineo", ""));
@@ -2182,7 +2305,13 @@ public class MainActivity extends Activity {
                     String d = dobInput.getText().toString().trim();
                     String s = sangueInput.getText().toString().trim();
                     if (!n.isEmpty()) try { MainActivity.this.profile.put("nome", n); } catch (Exception ignored) {}
-                    if (!d.isEmpty()) try { MainActivity.this.profile.put("data_nascimento", d); } catch (Exception ignored) {}
+                    if (!d.isEmpty()) {
+                        try {
+                            String isoDob = parseDateInputToIso(d, d);
+                            MainActivity.this.profile.put("data_nascimento", isoDob);
+                            MainActivity.this.profile.put("dob", isoDob);
+                        } catch (Exception ignored) {}
+                    }
                     if (!s.isEmpty()) try { MainActivity.this.profile.put("tipo_sanguineo", s); } catch (Exception ignored) {}
                     MainActivity.this.saveAll();
                     onboardingStep = 2;
@@ -2950,7 +3079,7 @@ public class MainActivity extends Activity {
     private void setMedStock(JSONObject med, int newQty) {
         if (med == null) return;
         try {
-            int val = Math.max(0, newQty);
+            int val = newQty;
             med.put("quantidade", val);
             med.put("estoque_atual", val);
             med.put("_local_unsynced", true);
@@ -3122,7 +3251,7 @@ public class MainActivity extends Activity {
         medSummary.setLayoutParams(msLp);
 
         TextView tvMedSummary = new TextView(this);
-        tvMedSummary.setText("💊 " + med.optString("nome", "Medicamento") + " (" + med.optString("dosagem", "") + ") • ⏰ " + normHora + " (" + normDate + ")");
+        tvMedSummary.setText("💊 " + med.optString("nome", "Medicamento") + " (" + med.optString("dosagem", "") + ") • ⏰ " + normHora + " (" + formatDateForDeviceLocale(normDate) + ")");
         tvMedSummary.setTextColor(this.cTextMain);
         tvMedSummary.setTextSize(sp(13.5f));
         tvMedSummary.setTypeface(null, 1);
@@ -3214,13 +3343,22 @@ public class MainActivity extends Activity {
         btnSend.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String typedReason = reasonInput.getText().toString().trim();
+                final String typedReason = reasonInput.getText().toString().trim();
                 if (typedReason.isEmpty()) {
                     Toast.makeText(MainActivity.this, "Por favor, informe o motivo para enviar ao cuidador.", 0).show();
                     return;
                 }
                 dialog.dismiss();
-                submitCaregiverDoseRequest(med, normDate, normHora, normTarget, typedReason, 1);
+                if (!isUndo) {
+                    confirmWithZeroStockCheck(med, 1, new Runnable() {
+                        @Override
+                        public void run() {
+                            submitCaregiverDoseRequest(med, normDate, normHora, normTarget, typedReason, 1);
+                        }
+                    });
+                } else {
+                    submitCaregiverDoseRequest(med, normDate, normHora, normTarget, typedReason, 1);
+                }
             }
         });
         btnRow.addView(btnSend);
@@ -3313,7 +3451,7 @@ public class MainActivity extends Activity {
 
             int currentStock = getMedStock(med);
             if ("tomado".equals(newStatus) && !"tomado".equals(prevStatus)) {
-                int nextStock = Math.max(0, currentStock - 1);
+                int nextStock = currentStock - 1;
                 setMedStock(med, nextStock);
                 this.stockMovements.put(new JSONObject()
                     .put("id", "sm-" + System.currentTimeMillis())
@@ -3376,6 +3514,33 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
     }
 
+    private void confirmWithZeroStockCheck(final JSONObject med, final int qtyToConsume, final Runnable onProceed) {
+        if (med == null) {
+            if (onProceed != null) onProceed.run();
+            return;
+        }
+        final int curStock = getMedStock(med);
+        final int useQty = Math.max(1, qtyToConsume);
+        final int resultingStock = curStock - useQty;
+        if (curStock <= 0 || resultingStock < 0) {
+            String medName = med.optString("nome", "este medicamento");
+            String unitStr = optCleanString(med, "unidade", optCleanString(med, "forma", "unidade"));
+            String dlgTitle = "⚠️ Estoque zerado";
+            String dlgMsg = (curStock <= 0
+                ? "O estoque de " + medName + " está zerado (" + curStock + " " + unitStr + (Math.abs(curStock) == 1 ? "" : "s") + ")."
+                : "O estoque atual de " + medName + " (" + curStock + ") é menor que a quantidade informada (" + useQty + ").")
+                + "\n\nTem certeza que deseja seguir mesmo assim?\nO estoque ficará negativado em " + resultingStock + " para que, caso precise desfazer a dosagem, ele retorne para " + curStock + ".";
+            showStyledConfirmDialog(dlgTitle, dlgMsg, "Sim, seguir", "Cancelar", this.cDanger, new Runnable() {
+                @Override
+                public void run() {
+                    if (onProceed != null) onProceed.run();
+                }
+            });
+            return;
+        }
+        if (onProceed != null) onProceed.run();
+    }
+
     private void handleDoseConfirmWithWarning(final JSONObject med, final String dateStr, final String horaStr, final boolean isSnooze) {
         try {
             if (isSnooze) {
@@ -3424,14 +3589,29 @@ public class MainActivity extends Activity {
                 showStyledConfirmDialog(dlgTitle, dlgMsg, "Sim, confirmar", "Cancelar", this.cSuccess, new Runnable() {
                     @Override
                     public void run() {
-                        registerDose(med, dateStr, horaStr, "tomado");
+                        confirmWithZeroStockCheck(med, 1, new Runnable() {
+                            @Override
+                            public void run() {
+                                registerDose(med, dateStr, horaStr, "tomado");
+                            }
+                        });
                     }
                 });
                 return;
             }
-            registerDose(med, dateStr, horaStr, "tomado");
+            confirmWithZeroStockCheck(med, 1, new Runnable() {
+                @Override
+                public void run() {
+                    registerDose(med, dateStr, horaStr, "tomado");
+                }
+            });
         } catch (Exception e) {
-            registerDose(med, dateStr, horaStr, "tomado");
+            confirmWithZeroStockCheck(med, 1, new Runnable() {
+                @Override
+                public void run() {
+                    registerDose(med, dateStr, horaStr, "tomado");
+                }
+            });
         }
     }
 
@@ -3440,7 +3620,9 @@ public class MainActivity extends Activity {
             showCaregiverDoseRequestDialog(med, dateStr, horaStr, "pendente");
             return;
         }
-        String msg = "A dose de " + med.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque.";
+        int curSt = getMedStock(med);
+        int restoredSt = curSt + 1;
+        String msg = "A dose de " + med.optString("nome") + " às " + horaStr + " voltará a ficar pendente e 1 unidade será devolvida ao estoque (saldo passará de " + curSt + " para " + restoredSt + ").";
         showStyledConfirmDialog("↩ Desfazer confirmação?", msg, "Desfazer", "Cancelar", this.cWarning, new Runnable() {
             @Override
             public void run() {
@@ -3461,10 +3643,15 @@ public class MainActivity extends Activity {
 
     private String getFormattedTodayHeader() {
         try {
-            SimpleDateFormat sdf = new SimpleDateFormat("EEEE, d 'de' MMMM", new Locale("pt", "BR"));
-            return sdf.format(new Date());
+            Locale loc = getDeviceLocale();
+            String lang = loc.getLanguage() != null ? loc.getLanguage().toLowerCase(Locale.ROOT) : "pt";
+            if (lang.startsWith("pt")) {
+                SimpleDateFormat sdf = new SimpleDateFormat("EEEE, d 'de' MMMM", loc);
+                return sdf.format(new Date());
+            }
+            return java.text.DateFormat.getDateInstance(java.text.DateFormat.FULL, loc).format(new Date());
         } catch (Exception e) {
-            return todayIso();
+            return formatDateForDeviceLocale(todayIso());
         }
     }
 
@@ -4418,7 +4605,7 @@ public class MainActivity extends Activity {
             if (isTemp) {
                 int durDays = med.optInt("duration_days", 7);
                 TextView tempInfo = new TextView(this);
-                tempInfo.setText("📅 Tratamento por " + durDays + " dias · Início: " + optCleanString(med, "start_date", today));
+                tempInfo.setText("📅 Tratamento por " + durDays + " dias · Início: " + formatDateForDeviceLocale(optCleanString(med, "start_date", today)));
                 tempInfo.setTextColor(this.cWarning);
                 tempInfo.setTextSize(sp(11.5f));
                 tempInfo.setPadding(0, dp(6), 0, 0);
@@ -4556,60 +4743,67 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    String h = timeInput.getText().toString().trim();
-                    if (h.isEmpty()) h = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
-                    String mot = reasonInput.getText().toString().trim();
-                    int qUsed = Integer.parseInt(qtyInput.getText().toString().trim().isEmpty() ? "1" : qtyInput.getText().toString().trim());
-                    String today = todayIso();
-                    if (isPatientProfileRole()) {
-                        String sosReason = mot.isEmpty() ? "Uso SOS solicitado pelo paciente" : ("Uso SOS: " + mot);
-                        submitCaregiverDoseRequest(med, today, h, "tomado", sosReason, qUsed);
-                        return;
-                    }
-                    JSONObject log = new JSONObject();
-                    log.put("id", "sos-" + System.currentTimeMillis());
-                    log.put("med_id", med.optString("id"));
-                    log.put("med_nome", med.optString("nome") + " " + med.optString("dosagem"));
-                    log.put("data", today);
-                    log.put("created_at", today + "T" + h + ":00.000Z");
-                    log.put("horario", h);
-                    log.put("hora", h);
-                    log.put("status", "confirmed");
-                    log.put("motivo", mot);
-                    log.put("quantidade_usada", qUsed);
-                    MainActivity.this.doseLogs.put(log);
+                    String rawH = timeInput.getText().toString().trim();
+                    final String h = rawH.isEmpty() ? new SimpleDateFormat("HH:mm", Locale.US).format(new Date()) : rawH;
+                    final String mot = reasonInput.getText().toString().trim();
+                    final int qUsed = Math.max(1, Integer.parseInt(qtyInput.getText().toString().trim().isEmpty() ? "1" : qtyInput.getText().toString().trim()));
+                    final String today = todayIso();
+                    confirmWithZeroStockCheck(med, qUsed, new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                if (isPatientProfileRole()) {
+                                    String sosReason = mot.isEmpty() ? "Uso SOS solicitado pelo paciente" : ("Uso SOS: " + mot);
+                                    submitCaregiverDoseRequest(med, today, h, "tomado", sosReason, qUsed);
+                                    return;
+                                }
+                                JSONObject log = new JSONObject();
+                                log.put("id", "sos-" + System.currentTimeMillis());
+                                log.put("med_id", med.optString("id"));
+                                log.put("med_nome", med.optString("nome") + " " + med.optString("dosagem"));
+                                log.put("data", today);
+                                log.put("created_at", today + "T" + h + ":00.000Z");
+                                log.put("horario", h);
+                                log.put("hora", h);
+                                log.put("status", "confirmed");
+                                log.put("motivo", mot);
+                                log.put("quantidade_usada", qUsed);
+                                MainActivity.this.doseLogs.put(log);
 
-                    int curSt = getMedStock(med);
-                    int nextSt = Math.max(0, curSt - qUsed);
-                    setMedStock(med, nextSt);
-                    String sosReason = mot.isEmpty() ? "Uso SOS" : "Uso SOS: " + mot;
-                    MainActivity.this.stockMovements.put(new JSONObject()
-                        .put("id", "sm-" + System.currentTimeMillis())
-                        .put("med_id", med.optString("id"))
-                        .put("medication_id", med.optString("id"))
-                        .put("med_nome", med.optString("nome"))
-                        .put("med_name", med.optString("nome"))
-                        .put("tipo", "saida")
-                        .put("movement_type", "consumption")
-                        .put("qtd", qUsed)
-                        .put("quantity_change", -qUsed)
-                        .put("quantity_changed", -qUsed)
-                        .put("quantity_delta", -qUsed)
-                        .put("delta", -qUsed)
-                        .put("previous_quantity", curSt)
-                        .put("quantity_before", curSt)
-                        .put("new_quantity", nextSt)
-                        .put("quantity_after", nextSt)
-                        .put("date", today)
-                        .put("time", h)
-                        .put("hora", h)
-                        .put("data", today + " " + h)
-                        .put("created_at", today + "T" + h + ":00.000Z")
-                        .put("motivo", sosReason)
-                        .put("notes", sosReason));
-                    saveAll();
-                    render();
-                    Toast.makeText(MainActivity.this, "✓ Uso SOS de " + med.optString("nome") + " registrado!", 0).show();
+                                int curSt = getMedStock(med);
+                                int nextSt = curSt - qUsed;
+                                setMedStock(med, nextSt);
+                                String sosReason = mot.isEmpty() ? "Uso SOS" : "Uso SOS: " + mot;
+                                MainActivity.this.stockMovements.put(new JSONObject()
+                                    .put("id", "sm-" + System.currentTimeMillis())
+                                    .put("med_id", med.optString("id"))
+                                    .put("medication_id", med.optString("id"))
+                                    .put("med_nome", med.optString("nome"))
+                                    .put("med_name", med.optString("nome"))
+                                    .put("tipo", "saida")
+                                    .put("movement_type", "consumption")
+                                    .put("qtd", qUsed)
+                                    .put("quantity_change", -qUsed)
+                                    .put("quantity_changed", -qUsed)
+                                    .put("quantity_delta", -qUsed)
+                                    .put("delta", -qUsed)
+                                    .put("previous_quantity", curSt)
+                                    .put("quantity_before", curSt)
+                                    .put("new_quantity", nextSt)
+                                    .put("quantity_after", nextSt)
+                                    .put("date", today)
+                                    .put("time", h)
+                                    .put("hora", h)
+                                    .put("data", today + " " + h)
+                                    .put("created_at", today + "T" + h + ":00.000Z")
+                                    .put("motivo", sosReason)
+                                    .put("notes", sosReason));
+                                saveAll();
+                                render();
+                                Toast.makeText(MainActivity.this, "✓ Uso SOS de " + med.optString("nome") + " registrado!", 0).show();
+                            } catch (Exception ignored) {}
+                        }
+                    });
                 } catch (Exception ignored) {}
             }
         });
@@ -4682,7 +4876,7 @@ public class MainActivity extends Activity {
                 if ("pendente".equals(st)) continue;
                 TextView row = new TextView(this);
                 boolean ok = "tomado".equals(st);
-                row.setText((ok ? "✓ " : "✕ ") + extractDoseLogDate(log) + " às " + extractDoseLogTime(log));
+                row.setText((ok ? "✓ " : "✕ ") + formatDateForDeviceLocale(extractDoseLogDate(log)) + " às " + extractDoseLogTime(log));
                 row.setTextColor(ok ? this.cSuccess : this.cDanger);
                 row.setTextSize(sp(12.5f));
                 row.setPadding(0, dp(3), 0, dp(3));
@@ -5571,7 +5765,7 @@ public class MainActivity extends Activity {
     private void showMedFormStepDialog(final JSONObject jSONObject, final int i, final String[] catalogItem, final String initialTreatmentType) {
         final AlertDialog dialog = new AlertDialog.Builder(this).create();
         final boolean isEditing = (jSONObject != null);
-        final int prevStock = isEditing ? getMedStock(jSONObject) : -1;
+        final int prevStock = isEditing ? getMedStock(jSONObject) : Integer.MIN_VALUE;
         final String[] currentTreatType = {initialTreatmentType != null ? initialTreatmentType : "continuous"};
 
         LinearLayout root = new LinearLayout(this);
@@ -5773,7 +5967,7 @@ public class MainActivity extends Activity {
         stockCol.setLayoutParams(scLp);
         stockCol.addView(createFormLabel("QTD. DISPONÍVEL"));
         final EditText stockIn = createInput("30", String.valueOf(isEditing ? getMedStock(jSONObject) : 30));
-        stockIn.setInputType(2);
+        stockIn.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED);
         stockCol.addView(stockIn);
         doseStockRow.addView(stockCol);
         body.addView(doseStockRow);
@@ -6124,7 +6318,7 @@ public class MainActivity extends Activity {
                     saveAll();
                     dialog.dismiss();
                     render();
-                    if (isEditing && prevStock >= 0 && prevStock != newStock) {
+                    if (isEditing && prevStock != Integer.MIN_VALUE && prevStock != newStock) {
                         showStockMovementModal(mObj, prevStock, newStock);
                     }
                 } catch (Exception ignored) {}
@@ -6248,7 +6442,7 @@ public class MainActivity extends Activity {
                     if (nObj != null && (nObj.optString("text", "").toLowerCase(Locale.ROOT).contains(q) || nObj.optString("category", "").toLowerCase(Locale.ROOT).contains(q))) {
                         matchCount++;
                         final String dStr = nObj.optString("date", todayIso());
-                        resCard.addView(buildSearchResultItem("📝", nObj.optString("text"), dStr + " · Nota", dStr));
+                        resCard.addView(buildSearchResultItem("📝", nObj.optString("text"), formatDateForDeviceLocale(dStr) + " · Nota", dStr));
                     }
                 }
                 for (int i = 0; i < this.events.length(); i++) {
@@ -6259,7 +6453,7 @@ public class MainActivity extends Activity {
                         if (title.toLowerCase(Locale.ROOT).contains(q) || notes.toLowerCase(Locale.ROOT).contains(q)) {
                             matchCount++;
                             final String dStr = ev.optString("date", ev.optString("data", todayIso()));
-                            resCard.addView(buildSearchResultItem("📅", title, dStr + " · Consulta / Evento", dStr));
+                            resCard.addView(buildSearchResultItem("📅", title, formatDateForDeviceLocale(dStr) + " · Consulta / Evento", dStr));
                         }
                     }
                 }
@@ -6271,7 +6465,7 @@ public class MainActivity extends Activity {
                         if (label.toLowerCase(Locale.ROOT).contains(q) || mot.toLowerCase(Locale.ROOT).contains(q)) {
                             matchCount++;
                             final String dStr = getStockMovementDate(sm);
-                            resCard.addView(buildSearchResultItem("📦", label.replace("📦 ", ""), dStr + " · Estoque", dStr));
+                            resCard.addView(buildSearchResultItem("📦", label.replace("📦 ", ""), formatDateForDeviceLocale(dStr) + " · Estoque", dStr));
                         }
                     }
                 }
@@ -7046,8 +7240,8 @@ public class MainActivity extends Activity {
                                 int d = getStockMovementDelta(sm);
                                 sm.put("new_quantity", curSt);
                                 sm.put("quantity_after", curSt);
-                                sm.put("previous_quantity", Math.max(0, curSt - d));
-                                sm.put("quantity_before", Math.max(0, curSt - d));
+                                sm.put("previous_quantity", curSt - d);
+                                sm.put("quantity_before", curSt - d);
                             }
                             changed = true;
                             break;
@@ -7162,7 +7356,7 @@ public class MainActivity extends Activity {
         dateCol.addView(tvSub);
 
         TextView tvDate = new TextView(this);
-        tvDate.setText(dateStr);
+        tvDate.setText(formatDateForDeviceLocale(dateStr));
         tvDate.setTextColor(this.cTextMain);
         tvDate.setTextSize(sp(19.0f));
         tvDate.setTypeface(null, 1);
@@ -7284,8 +7478,13 @@ public class MainActivity extends Activity {
                             if (isPatientProfileRole()) {
                                 showCaregiverDoseRequestDialog(m, dateStr, hStr, "tomado");
                             } else {
-                                registerDose(m, dateStr, hStr, "tomado");
-                                showDayPanelDialog(dateStr);
+                                confirmWithZeroStockCheck(m, 1, new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        registerDose(m, dateStr, hStr, "tomado");
+                                        showDayPanelDialog(dateStr);
+                                    }
+                                });
                             }
                         }
                     });
@@ -7557,7 +7756,8 @@ public class MainActivity extends Activity {
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(1);
 
-        final EditText inDate = createInput("Data (AAAA-MM-DD)", existing != null ? existing.optString("date", defaultDate) : defaultDate);
+        String initNoteDateIso = existing != null ? existing.optString("date", defaultDate) : defaultDate;
+        final EditText inDate = createInput("Data (" + getDeviceDateHint() + ")", formatDateForDeviceLocale(initNoteDateIso));
         final EditText inCat = createInput("Categoria (Sintoma, Dúvida médica, Efeito colateral, Geral)", existing != null ? existing.optString("category", "Geral") : "Sintoma");
         final EditText inText = createInput("Anotação * (Ex: Tontura leve pela manhã)", existing != null ? existing.optString("text", "") : "");
 
@@ -7577,8 +7777,8 @@ public class MainActivity extends Activity {
                     try {
                         String txt = inText.getText().toString().trim();
                         if (txt.isEmpty()) return;
-                        String dt = inDate.getText().toString().trim();
-                        if (dt.isEmpty()) dt = defaultDate;
+                        String dtRaw = inDate.getText().toString().trim();
+                        String dt = dtRaw.isEmpty() ? defaultDate : parseDateInputToIso(dtRaw, defaultDate);
                         JSONObject obj = existing != null ? existing : new JSONObject();
                         if (existing == null) obj.put("id", "note-" + System.currentTimeMillis());
                         obj.put("date", dt);
@@ -7604,9 +7804,10 @@ public class MainActivity extends Activity {
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(1);
 
+        String initEvDateIso = existing != null ? existing.optString("date", existing.optString("data", defaultDate)) : defaultDate;
         final EditText inType = createInput("Tipo (Consulta médica, Exame, Retorno, Receita, Lembrete)", existing != null ? existing.optString("type", "Consulta médica") : "Consulta médica");
         final EditText inTitle = createInput("Título * (Ex: Cardiologista Dr. Silva)", existing != null ? existing.optString("title", existing.optString("titulo", "")) : "");
-        final EditText inDate = createInput("Data (AAAA-MM-DD)", existing != null ? existing.optString("date", existing.optString("data", defaultDate)) : defaultDate);
+        final EditText inDate = createInput("Data (" + getDeviceDateHint() + ")", formatDateForDeviceLocale(initEvDateIso));
         final EditText inTime = createInput("Horário (Ex: 14:00)", existing != null ? existing.optString("time", existing.optString("hora", "09:00")) : "09:00");
         final EditText inLoc = createInput("Local / Profissional (opcional)", existing != null ? existing.optString("location", existing.optString("local", "")) : "");
         final EditText inNotes = createInput("Observações (Ex: Levar exames anteriores)", existing != null ? existing.optString("notes", existing.optString("notas", "")) : "");
@@ -7631,8 +7832,8 @@ public class MainActivity extends Activity {
                     try {
                         String title = inTitle.getText().toString().trim();
                         if (title.isEmpty()) return;
-                        String dt = inDate.getText().toString().trim();
-                        if (dt.isEmpty()) dt = defaultDate;
+                        String dtRaw = inDate.getText().toString().trim();
+                        String dt = dtRaw.isEmpty() ? defaultDate : parseDateInputToIso(dtRaw, defaultDate);
                         String tm = inTime.getText().toString().trim();
                         String loc = inLoc.getText().toString().trim();
                         String nts = inNotes.getText().toString().trim();
@@ -8659,12 +8860,12 @@ public class MainActivity extends Activity {
     private int calculateProfileAge(String dob) {
         if (dob == null || dob.trim().isEmpty()) return 0;
         try {
-            String s = dob.trim();
+            String iso = parseDateInputToIso(dob.trim(), dob.trim());
             int year = 0;
-            if (s.contains("-")) {
-                year = Integer.parseInt(s.split("-")[0]);
-            } else if (s.contains("/")) {
-                String[] parts = s.split("/");
+            if (iso.contains("-")) {
+                year = Integer.parseInt(iso.split("-")[0]);
+            } else if (iso.contains("/")) {
+                String[] parts = iso.split("/");
                 year = Integer.parseInt(parts[parts.length - 1]);
             }
             if (year > 1900) {
@@ -9656,13 +9857,9 @@ public class MainActivity extends Activity {
         dobBox.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
         dobBox.setPadding(dp(14), dp(4), dp(12), dp(4));
 
-        String rawDob = this.profile.optString("data_nascimento", this.profile.optString("dob", ""));
-        if (rawDob.matches("\\d{4}-\\d{2}-\\d{2}")) {
-            String[] p = rawDob.split("-");
-            rawDob = p[2] + "/" + p[1] + "/" + p[0];
-        }
+        String rawDob = formatDateForDeviceLocale(this.profile.optString("data_nascimento", this.profile.optString("dob", "")));
         final EditText inDob = new EditText(this);
-        inDob.setHint("DD/MM/AAAA");
+        inDob.setHint(getDeviceDateHint());
         inDob.setHintTextColor(this.cTextLight);
         inDob.setText(rawDob);
         inDob.setTextColor(this.cTextMain);
@@ -9683,19 +9880,18 @@ public class MainActivity extends Activity {
                 int yr = 1980, mo = 0, dy = 1;
                 String cur = inDob.getText().toString().trim();
                 try {
-                    if (cur.contains("/")) {
-                        String[] parts = cur.split("/");
-                        if (parts.length == 3) {
-                            dy = Integer.parseInt(parts[0]);
-                            mo = Integer.parseInt(parts[1]) - 1;
-                            yr = Integer.parseInt(parts[2]);
-                        }
+                    String isoCur = parseDateInputToIso(cur, "");
+                    if (isoCur.length() == 10 && isoCur.charAt(4) == '-' && isoCur.charAt(7) == '-') {
+                        String[] parts = isoCur.split("-");
+                        yr = Integer.parseInt(parts[0]);
+                        mo = Integer.parseInt(parts[1]) - 1;
+                        dy = Integer.parseInt(parts[2]);
                     }
                 } catch (Exception ignored) {}
                 new DatePickerDialog(MainActivity.this, new DatePickerDialog.OnDateSetListener() {
                     @Override
                     public void onDateSet(DatePicker view, int year, int month, int dayOfMonth) {
-                        inDob.setText(String.format(Locale.ROOT, "%02d/%02d/%04d", dayOfMonth, month + 1, year));
+                        inDob.setText(formatYmdForDeviceLocale(year, month + 1, dayOfMonth));
                     }
                 }, yr, mo, dy).show();
             }
@@ -9872,7 +10068,8 @@ public class MainActivity extends Activity {
                 try {
                     String nomeVal = inNome.getText().toString().trim();
                     String socialVal = inSocial.getText().toString().trim();
-                    String dobVal = inDob.getText().toString().trim();
+                    String dobRawVal = inDob.getText().toString().trim();
+                    String dobVal = dobRawVal.isEmpty() ? "" : parseDateInputToIso(dobRawVal, dobRawVal);
                     String genderVal = genderValues[selectedGenderIdx[0]];
                     String cpfVal = inCpf.getText().toString().trim();
                     String telVal = inTel.getText().toString().trim();
@@ -11497,10 +11694,7 @@ public class MainActivity extends Activity {
                 metaRow.addView(tvTypeBadge);
 
                 String rawDate = getStockMovementDate(sm);
-                String formattedDate = rawDate;
-                if (rawDate.length() == 10 && rawDate.charAt(4) == '-' && rawDate.charAt(7) == '-') {
-                    formattedDate = rawDate.substring(8, 10) + "/" + rawDate.substring(5, 7) + "/" + rawDate.substring(0, 4);
-                }
+                String formattedDate = formatDateForDeviceLocale(rawDate);
                 String rawTime = getStockMovementTime(sm);
                 TextView tvDateTime = new TextView(this);
                 tvDateTime.setText("  •  " + (formattedDate.isEmpty() ? "--" : formattedDate) + (rawTime.isEmpty() ? "" : " às " + rawTime));
@@ -11510,9 +11704,9 @@ public class MainActivity extends Activity {
                 itemCard.addView(metaRow);
 
                 // Third Row: Balance change (Anterior -> Novo)
-                int prevQ = sm.optInt("previous_quantity", sm.optInt("quantity_before", -1));
-                int newQ = sm.optInt("new_quantity", sm.optInt("quantity_after", -1));
-                if (prevQ >= 0 && newQ >= 0) {
+                int prevQ = sm.optInt("previous_quantity", sm.optInt("quantity_before", Integer.MIN_VALUE));
+                int newQ = sm.optInt("new_quantity", sm.optInt("quantity_after", Integer.MIN_VALUE));
+                if (prevQ != Integer.MIN_VALUE && newQ != Integer.MIN_VALUE) {
                     TextView tvBalance = new TextView(this);
                     tvBalance.setText("Saldo auditado: " + prevQ + " → " + newQ + " unidades");
                     tvBalance.setTextColor(this.cTextMain);
@@ -11608,7 +11802,7 @@ public class MainActivity extends Activity {
         layout.addView(tvCur);
 
         final EditText etNewStock = createInput("Novo saldo real em mãos", String.valueOf(curStock));
-        etNewStock.setInputType(InputType.TYPE_CLASS_NUMBER);
+        etNewStock.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED);
         layout.addView(etNewStock);
 
         final EditText etReason = createInput("Motivo do ajuste / auditoria", "Conferência física de estoque");
@@ -11619,7 +11813,7 @@ public class MainActivity extends Activity {
             public void run() {
                 try {
                     int newQty = Integer.parseInt(etNewStock.getText().toString().trim());
-                    if (newQty >= 0 && newQty != curStock) {
+                    if (newQty != curStock) {
                         int diff = newQty - curStock;
                         String today = todayIso();
                         String hm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
@@ -12423,11 +12617,9 @@ public class MainActivity extends Activity {
                 syncProfile.remove("social_name");
             }
             String rawDob = this.profile.optString("data_nascimento", this.profile.optString("dob", "")).trim();
-            if (rawDob.matches("^\\d{2}/\\d{2}/\\d{4}$")) {
-                String[] parts = rawDob.split("/");
-                syncProfile.put("dob", parts[2] + "-" + parts[1] + "-" + parts[0]);
-            } else if (rawDob.matches("^\\d{4}-\\d{2}-\\d{2}.*")) {
-                syncProfile.put("dob", rawDob.substring(0, 10));
+            String isoDob = parseDateInputToIso(rawDob, "");
+            if (isoDob.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+                syncProfile.put("dob", isoDob);
             } else {
                 syncProfile.remove("dob");
             }
@@ -12529,7 +12721,7 @@ public class MainActivity extends Activity {
                     if (dl != null) dl.remove("_local_unsynced");
                 }
             }
-            final String format = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(new Date());
+            final String format = new SimpleDateFormat(getDeviceDatePattern() + " HH:mm", getDeviceLocale()).format(new Date());
             runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda8
                 @Override // java.lang.Runnable
                 public final void run() {
@@ -12562,7 +12754,7 @@ public class MainActivity extends Activity {
                     if (!MainActivity.this.isLoggedIn) return;
                     boolean changed = MainActivity.this.pullAndMergeFromBackendSync();
                     if (changed) {
-                        final String format = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(new Date());
+                        final String format = new SimpleDateFormat(MainActivity.this.getDeviceDatePattern() + " HH:mm", MainActivity.this.getDeviceLocale()).format(new Date());
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {

@@ -628,7 +628,7 @@ async function handleRpcCall(client, fnName, args, userId) {
             );
             await client
               .query(
-                `UPDATE medicamentos SET quantidade = GREATEST(0, quantidade - 1), updated_at = NOW() WHERE id::text = $1::text`,
+                `UPDATE medicamentos SET quantidade = quantidade - 1, updated_at = NOW() WHERE id::text = $1::text`,
                 [String(reqRow.med_id)]
               )
               .catch(() => {});
@@ -680,7 +680,7 @@ async function handleRpcCall(client, fnName, args, userId) {
       await client.query('BEGIN');
       try {
         await client.query(`UPDATE medicamentos SET quantidade = $1, updated_at = NOW() WHERE id = $2`, [
-          Math.max(0, Math.round(qtyAfter)),
+          Math.round(qtyAfter),
           med.id,
         ]);
 

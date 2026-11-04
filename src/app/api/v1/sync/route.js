@@ -482,7 +482,7 @@ export async function POST(request) {
           m.dosagem || '1 dose',
           m.unidade || 'comprimido',
           m.cor || '#3b82f6',
-          Math.max(0, Math.round(Number(m.quantidade ?? m.estoque_atual ?? 30) || 0)),
+          Math.round(Number(m.quantidade ?? m.estoque_atual ?? 30) || 0),
           isHorariosArray ? horariosArr : JSON.stringify(horariosArr),
           m.observacoes || m.instrucoes || null,
           m.ativo !== false,
@@ -740,7 +740,7 @@ export async function POST(request) {
       const qBefore = parsePgNumeric(sm.quantity_before ?? sm.previous_quantity) ?? 0;
       const qChanged =
         parsePgNumeric(sm.quantity_changed ?? sm.quantity_delta ?? sm.quantity_change ?? sm.delta ?? sm.qtd) ?? 0;
-      const qAfter = parsePgNumeric(sm.quantity_after ?? sm.new_quantity) ?? Math.max(0, qBefore + qChanged);
+      const qAfter = parsePgNumeric(sm.quantity_after ?? sm.new_quantity) ?? (qBefore + qChanged);
 
       await client.query(
         `INSERT INTO stock_movements (
