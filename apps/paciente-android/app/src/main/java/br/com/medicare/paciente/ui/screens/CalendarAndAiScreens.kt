@@ -769,64 +769,65 @@ private fun DayPanelDialog(
                 if (filter == "all" || filter == "meds") {
                     Text("💊 Doses do dia", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
-                    activeScheduledMeds.forEach { med ->
-                        med.horarios.forEach { hora ->
-                            val rec = dayHist.firstOrNull { it.medId == med.id && it.hora == hora }
-                            val confirmed = rec != null
-                            val doseKey = "${dateIso}_${med.id}_$hora"
-                            val obsText = state.doseObservations.firstOrNull { it.doseKey == doseKey }?.content
+                    val sortedScheduledSlots = activeScheduledMeds
+                        .flatMap { med -> med.horarios.map { hora -> med to hora } }
+                        .sortedWith(compareBy({ it.second }, { it.first.nome.lowercase() }))
+                    sortedScheduledSlots.forEach { (med, hora) ->
+                        val rec = dayHist.firstOrNull { it.medId == med.id && it.hora == hora }
+                        val confirmed = rec != null
+                        val doseKey = "${dateIso}_${med.id}_$hora"
+                        val obsText = state.doseObservations.firstOrNull { it.doseKey == doseKey }?.content
 
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 8.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(tokens.bg2)
-                                    .padding(12.dp)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(tokens.bg2)
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("${med.nome} (${med.dosagem})", color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                        Text("Horário: $hora", color = tokens.sub, fontSize = 12.sp)
-                                        if (rec != null) {
-                                            CaregiverBadge(rec)
-                                        }
-                                    }
-                                    if (confirmed) {
-                                        Text(
-                                            text = if (rec?.isRetroactive == true) "✓ Retroativa" else "✓ Tomada",
-                                            color = MediCareColors.Green,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.ExtraBold
-                                        )
-                                    } else {
-                                        Text(
-                                            text = "🕐 Confirmar retroativamente",
-                                            color = MediCareColors.Amber,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable { onRequestRetroactive(med, hora) }
-                                        )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("${med.nome} (${med.dosagem})", color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Horário: $hora", color = tokens.sub, fontSize = 12.sp)
+                                    if (rec != null) {
+                                        CaregiverBadge(rec)
                                     }
                                 }
-                                if (!obsText.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("💬 $obsText", color = MediCareColors.Blue, fontSize = 12.sp)
+                                if (confirmed) {
+                                    Text(
+                                        text = if (rec?.isRetroactive == true) "✓ Retroativa" else "✓ Tomada",
+                                        color = MediCareColors.Green,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                } else {
+                                    Text(
+                                        text = "🕐 Confirmar retroativamente",
+                                        color = MediCareColors.Amber,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable { onRequestRetroactive(med, hora) }
+                                    )
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = if (obsText.isNullOrBlank()) "+ Adicionar observação" else "✏️ Editar observação",
-                                    color = tokens.muted,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.clickable {
-                                        onRequestDoseObs(doseKey, "${med.nome} às $hora", obsText ?: "")
-                                    }
-                                )
                             }
+                            if (!obsText.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("💬 $obsText", color = MediCareColors.Blue, fontSize = 12.sp)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (obsText.isNullOrBlank()) "+ Adicionar observação" else "✏️ Editar observação",
+                                color = tokens.muted,
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable {
+                                    onRequestDoseObs(doseKey, "${med.nome} às $hora", obsText ?: "")
+                                }
+                            )
                         }
                     }
 

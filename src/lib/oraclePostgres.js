@@ -43,6 +43,7 @@ export const VERSIONED_MIGRATIONS = [
       `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS manufacturer text`,
       `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS fabricante text`,
       `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS aviso_estoque int DEFAULT 5`,
+      `ALTER TABLE public.medicamentos ADD COLUMN IF NOT EXISTS important_for_emergency boolean DEFAULT false`,
       `ALTER TABLE public.medicamentos DROP CONSTRAINT IF EXISTS medicamentos_quantidade_check`,
       `ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS dose_date date`,
       `ALTER TABLE public.historico_doses ADD COLUMN IF NOT EXISTS administered_at timestamptz`,

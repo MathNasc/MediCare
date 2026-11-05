@@ -487,12 +487,18 @@ export async function POST(request) {
           ? Math.round(Number(rawMedQty))
           : 30;
 
+      const hasImportantFlag =
+        m.important_for_emergency !== undefined || m.importantForEmergency !== undefined;
+      const importantForEmergency = hasImportantFlag
+        ? Boolean(m.important_for_emergency ?? m.importantForEmergency)
+        : null;
+
       const medUpsertSql = `INSERT INTO medicamentos (
            id, user_id, nome, principio_ativo, active_ingredient, fabricante, manufacturer,
            dosagem, unidade, cor, quantidade, horarios, observacoes, ativo, status,
-           treatment_type, start_date, end_date, treatment_days, updated_at
+           treatment_type, start_date, end_date, treatment_days, important_for_emergency, updated_at
          )
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,${isHorariosArray ? '$12::text[]' : '$12::jsonb'},$13,$14,$15,$16,$17,$18,$19,NOW())
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,${isHorariosArray ? '$12::text[]' : '$12::jsonb'},$13,$14,$15,$16,$17,$18,$19,COALESCE($20, false),NOW())
          ON CONFLICT (id) DO UPDATE SET
            nome = EXCLUDED.nome,
            principio_ativo = COALESCE(EXCLUDED.principio_ativo, medicamentos.principio_ativo),
@@ -511,6 +517,7 @@ export async function POST(request) {
            start_date = EXCLUDED.start_date,
            end_date = EXCLUDED.end_date,
            treatment_days = EXCLUDED.treatment_days,
+           important_for_emergency = COALESCE($20, medicamentos.important_for_emergency, false),
            updated_at = NOW()`;
 
       const medUpsertParams = [
@@ -533,6 +540,7 @@ export async function POST(request) {
         parsePgDate(m.start_date || m.startDate || m.data_inicio),
         parsePgDate(m.end_date || m.endDate || m.data_fim),
         parsePgNumeric(m.treatment_days ?? m.treatmentDays ?? m.duracao_dias),
+        importantForEmergency,
       ];
 
       await client.query('SAVEPOINT sp_med_upsert');

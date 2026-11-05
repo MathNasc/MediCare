@@ -3568,6 +3568,127 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
     }
 
+    private boolean isMedImportantForEmergency(JSONObject med) {
+        if (med == null) return false;
+        JSONObject live = findLiveMed(med);
+        JSONObject ref = live != null ? live : med;
+        if (ref.has("_local_important_for_emergency") && !ref.isNull("_local_important_for_emergency")) {
+            return ref.optBoolean("_local_important_for_emergency", false);
+        }
+        try {
+            String mapJson = this.prefs != null ? this.prefs.getString("important_meds_map", "") : "";
+            JSONObject impMap = (!mapJson.isEmpty())
+                    ? new JSONObject(mapJson)
+                    : (this.profile != null ? this.profile.optJSONObject("important_meds_map") : null);
+            if (impMap != null) {
+                String id = ref.optString("id", "").trim();
+                if (!id.isEmpty() && impMap.has(id)) return impMap.optBoolean(id, false);
+                String det = !id.isEmpty() ? toDeterministicServerUuid(id, "med") : "";
+                if (!det.isEmpty() && impMap.has(det)) return impMap.optBoolean(det, false);
+                String nameKey = "name:" + optCleanString(ref, "nome", "").toLowerCase(Locale.ROOT);
+                if (impMap.has(nameKey)) return impMap.optBoolean(nameKey, false);
+            }
+        } catch (Exception ignored) {}
+        if (ref.has("important_for_emergency") && !ref.isNull("important_for_emergency")) {
+            return ref.optBoolean("important_for_emergency", false);
+        }
+        return false;
+    }
+
+    private void setMedImportantForEmergency(JSONObject med, boolean isImp) {
+        if (med == null) return;
+        try {
+            long nowMs = System.currentTimeMillis();
+            this.localMutationVersion++;
+            this.hasUnsyncedLocalChanges = true;
+            med.put("important_for_emergency", isImp);
+            med.put("_local_important_for_emergency", isImp);
+            med.put("_local_important_updated_ms", nowMs);
+            med.put("_local_unsynced", true);
+
+            String targetId = med.optString("id", "").trim();
+            String targetDet = !targetId.isEmpty() ? toDeterministicServerUuid(targetId, "med") : "";
+            String targetName = optCleanString(med, "nome", "").toLowerCase(Locale.ROOT);
+            String targetDose = optCleanString(med, "dosagem", "").toLowerCase(Locale.ROOT);
+
+            if (this.meds != null) {
+                for (int i = 0; i < this.meds.length(); i++) {
+                    JSONObject m = this.meds.optJSONObject(i);
+                    if (m == null) continue;
+                    boolean match = (m == med);
+                    if (!match) {
+                        String mId = m.optString("id", "").trim();
+                        if (!targetId.isEmpty() && !mId.isEmpty()) {
+                            String mDet = toDeterministicServerUuid(mId, "med");
+                            if (targetId.equalsIgnoreCase(mId) || (!targetDet.isEmpty() && (targetDet.equalsIgnoreCase(mId) || targetDet.equalsIgnoreCase(mDet)))) {
+                                match = true;
+                            }
+                        }
+                        if (!match && !targetName.isEmpty()) {
+                            String mName = optCleanString(m, "nome", "").toLowerCase(Locale.ROOT);
+                            String mDose = optCleanString(m, "dosagem", "").toLowerCase(Locale.ROOT);
+                            if (targetName.equals(mName) && targetDose.equals(mDose)) {
+                                match = true;
+                            }
+                        }
+                    }
+                    if (match) {
+                        m.put("important_for_emergency", isImp);
+                        m.put("_local_important_for_emergency", isImp);
+                        m.put("_local_important_updated_ms", nowMs);
+                        m.put("_local_unsynced", true);
+                    }
+                }
+            }
+
+            String mapJson = this.prefs != null ? this.prefs.getString("important_meds_map", "") : "";
+            JSONObject impMap = (!mapJson.isEmpty()) ? new JSONObject(mapJson) : new JSONObject();
+            if (!targetId.isEmpty()) impMap.put(targetId, isImp);
+            if (!targetDet.isEmpty()) impMap.put(targetDet, isImp);
+            if (!targetName.isEmpty()) impMap.put("name:" + targetName, isImp);
+            if (this.prefs != null) {
+                this.prefs.edit().putString("important_meds_map", impMap.toString()).apply();
+            }
+            if (this.profile != null) {
+                this.profile.put("important_meds_map", impMap);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private TextView createCustomCheckBoxBadge(boolean isChecked) {
+        TextView badge = new TextView(this);
+        badge.setText(isChecked ? "✓" : "");
+        badge.setTextColor(Color.WHITE);
+        badge.setTextSize(sp(14.5f));
+        badge.setTypeface(null, 1);
+        badge.setGravity(17);
+        int uncheckedBg = this.isHighContrast ? Color.parseColor("#111111") : this.cSurface;
+        int uncheckedBorder = this.isHighContrast ? Color.WHITE : (this.isDarkMode ? Color.parseColor("#64748B") : this.cTextMuted);
+        badge.setBackground(shape(
+                isChecked ? this.cPrimary : uncheckedBg,
+                8,
+                isChecked ? this.cPrimary : uncheckedBorder,
+                2
+        ));
+        badge.setLayoutParams(new LinearLayout.LayoutParams(dp(28), dp(28)));
+        return badge;
+    }
+
+    private int parseTimeMinutesForSort(String hm) {
+        if (hm == null) return 9999;
+        String clean = hm.trim();
+        if (clean.length() >= 5 && clean.charAt(2) == ':') {
+            clean = clean.substring(0, 5);
+        }
+        try {
+            String[] parts = clean.split(":");
+            if (parts.length >= 2) {
+                return Integer.parseInt(parts[0].trim()) * 60 + Integer.parseInt(parts[1].trim());
+            }
+        } catch (Exception ignored) {}
+        return 9999;
+    }
+
     private String getMedType(JSONObject med) {
         if (med == null) return "continuous";
         String t = med.optString("treatment_type", med.optString("tipo_uso", "continuous")).toLowerCase(Locale.ROOT);
@@ -7057,7 +7178,7 @@ public class MainActivity extends Activity {
         emergCheck.setText("  Mostrar no Cartão de Emergência");
         emergCheck.setTextColor(this.cTextMain);
         emergCheck.setTextSize(sp(13.5f));
-        emergCheck.setChecked(isEditing && jSONObject.optBoolean("important_for_emergency", false));
+        emergCheck.setChecked(isEditing && isMedImportantForEmergency(jSONObject));
         emergCheck.setPadding(0, dp(6), 0, dp(10));
         body.addView(emergCheck);
 
@@ -7324,8 +7445,20 @@ public class MainActivity extends Activity {
 
                     JSONArray hrsArr = new JSONArray();
                     if (!"sos".equals(normT)) {
+                        ArrayList<String> sortedSched = new ArrayList<>();
                         for (String hStr : scheduleList) {
-                            if (!hStr.trim().isEmpty()) hrsArr.put(hStr.trim());
+                            if (hStr != null && !hStr.trim().isEmpty()) {
+                                sortedSched.add(hStr.trim());
+                            }
+                        }
+                        Collections.sort(sortedSched, new Comparator<String>() {
+                            @Override
+                            public int compare(String a, String b) {
+                                return Integer.compare(parseTimeMinutesForSort(a), parseTimeMinutesForSort(b));
+                            }
+                        });
+                        for (String hStr : sortedSched) {
+                            hrsArr.put(hStr);
                         }
                         if (hrsArr.length() == 0) hrsArr.put("08:00");
                     }
@@ -7353,6 +7486,7 @@ public class MainActivity extends Activity {
                     } else {
                         MainActivity.this.meds.put(mObj);
                     }
+                    setMedImportantForEmergency(mObj, emergCheck.isChecked());
                     if (!"all".equals(MainActivity.this.medFilter) && !normT.equals(MainActivity.this.medFilter)) {
                         MainActivity.this.medFilter = "all";
                     }
@@ -7483,13 +7617,20 @@ public class MainActivity extends Activity {
                 rcLp.bottomMargin = dp(14);
                 resCard.setLayoutParams(rcLp);
 
-                int matchCount = 0;
+                ArrayList<JSONObject> searchMatches = new ArrayList<>();
                 for (int i = 0; i < this.calNotesList.length(); i++) {
                     final JSONObject nObj = this.calNotesList.optJSONObject(i);
                     if (nObj != null && (nObj.optString("text", "").toLowerCase(Locale.ROOT).contains(q) || nObj.optString("category", "").toLowerCase(Locale.ROOT).contains(q))) {
-                        matchCount++;
-                        final String dStr = nObj.optString("date", todayIso());
-                        resCard.addView(buildSearchResultItem("📝", nObj.optString("text"), formatDateForDeviceLocale(dStr) + " · Nota", dStr));
+                        try {
+                            String dStr = nObj.optString("date", todayIso());
+                            JSONObject sr = new JSONObject();
+                            sr.put("icon", "📝");
+                            sr.put("title", nObj.optString("text"));
+                            sr.put("sub", formatDateForDeviceLocale(dStr) + " · Nota");
+                            sr.put("date", dStr);
+                            sr.put("time", "00:00");
+                            searchMatches.add(sr);
+                        } catch (Exception ignored) {}
                     }
                 }
                 for (int i = 0; i < this.events.length(); i++) {
@@ -7498,9 +7639,18 @@ public class MainActivity extends Activity {
                         String title = ev.optString("title", ev.optString("titulo", ""));
                         String notes = ev.optString("notes", ev.optString("notas", ""));
                         if (title.toLowerCase(Locale.ROOT).contains(q) || notes.toLowerCase(Locale.ROOT).contains(q)) {
-                            matchCount++;
-                            final String dStr = ev.optString("date", ev.optString("data", todayIso()));
-                            resCard.addView(buildSearchResultItem("📅", title, formatDateForDeviceLocale(dStr) + " · Consulta / Evento", dStr));
+                            try {
+                                String dStr = ev.optString("date", ev.optString("data", todayIso()));
+                                if (dStr.length() >= 10) dStr = dStr.substring(0, 10);
+                                String tm = optCleanString(ev, "time", optCleanString(ev, "hora", "00:00"));
+                                JSONObject sr = new JSONObject();
+                                sr.put("icon", "📅");
+                                sr.put("title", title);
+                                sr.put("sub", formatDateForDeviceLocale(dStr) + " · Consulta / Evento");
+                                sr.put("date", dStr);
+                                sr.put("time", tm);
+                                searchMatches.add(sr);
+                            } catch (Exception ignored) {}
                         }
                     }
                 }
@@ -7510,9 +7660,17 @@ public class MainActivity extends Activity {
                         String label = formatStockMovementCardText(sm);
                         String mot = sm.optString("motivo", "");
                         if (label.toLowerCase(Locale.ROOT).contains(q) || mot.toLowerCase(Locale.ROOT).contains(q)) {
-                            matchCount++;
-                            final String dStr = getStockMovementDate(sm);
-                            resCard.addView(buildSearchResultItem("📦", label.replace("📦 ", ""), formatDateForDeviceLocale(dStr) + " · Estoque", dStr));
+                            try {
+                                String dStr = getStockMovementDate(sm);
+                                String tm = getStockMovementTime(sm);
+                                JSONObject sr = new JSONObject();
+                                sr.put("icon", "📦");
+                                sr.put("title", label.replace("📦 ", ""));
+                                sr.put("sub", formatDateForDeviceLocale(dStr) + " · Estoque");
+                                sr.put("date", dStr);
+                                sr.put("time", tm.isEmpty() ? "00:00" : tm);
+                                searchMatches.add(sr);
+                            } catch (Exception ignored) {}
                         }
                     }
                 }
@@ -7527,26 +7685,48 @@ public class MainActivity extends Activity {
                         if (mTitle.toLowerCase(Locale.ROOT).contains(q)
                                 || mot.toLowerCase(Locale.ROOT).contains(q)
                                 || "sos".contains(q)) {
-                            matchCount++;
-                            final String dStr = extractDoseLogDate(dl);
-                            String hStr = extractDoseLogTime(dl);
-                            resCard.addView(buildSearchResultItem(
-                                "🆘",
-                                "Uso SOS: " + mTitle + (hStr.isEmpty() ? "" : " às " + hStr),
-                                formatDateForDeviceLocale(dStr) + (mot.isEmpty() ? " · Uso SOS" : " · " + mot),
-                                dStr.isEmpty() ? todayIso() : dStr
-                            ));
+                            try {
+                                String dStr = extractDoseLogDate(dl);
+                                if (dStr.isEmpty()) dStr = todayIso();
+                                String hStr = extractDoseLogTime(dl);
+                                JSONObject sr = new JSONObject();
+                                sr.put("icon", "🆘");
+                                sr.put("title", "Uso SOS: " + mTitle + (hStr.isEmpty() ? "" : " às " + hStr));
+                                sr.put("sub", formatDateForDeviceLocale(dStr) + (mot.isEmpty() ? " · Uso SOS" : " · " + mot));
+                                sr.put("date", dStr);
+                                sr.put("time", hStr.isEmpty() ? "00:00" : hStr);
+                                searchMatches.add(sr);
+                            } catch (Exception ignored) {}
                         }
                     }
                 }
                 for (int i = 0; i < this.meds.length(); i++) {
                     final JSONObject m = this.meds.optJSONObject(i);
                     if (m != null && m.optString("nome", "").toLowerCase(Locale.ROOT).contains(q)) {
-                        matchCount++;
-                        resCard.addView(buildSearchResultItem("💊", m.optString("nome") + " " + m.optString("dosagem"), "Medicamento cadastrado", todayIso()));
+                        try {
+                            JSONObject sr = new JSONObject();
+                            sr.put("icon", "💊");
+                            sr.put("title", m.optString("nome") + " " + m.optString("dosagem"));
+                            sr.put("sub", "Medicamento cadastrado");
+                            sr.put("date", todayIso());
+                            sr.put("time", "23:59");
+                            searchMatches.add(sr);
+                        } catch (Exception ignored) {}
                     }
                 }
-                if (matchCount == 0) {
+                Collections.sort(searchMatches, new Comparator<JSONObject>() {
+                    @Override
+                    public int compare(JSONObject a, JSONObject b) {
+                        int cmpDate = b.optString("date", "").compareTo(a.optString("date", ""));
+                        if (cmpDate != 0) return cmpDate;
+                        return Integer.compare(parseTimeMinutesForSort(b.optString("time", "")), parseTimeMinutesForSort(a.optString("time", "")));
+                    }
+                });
+                for (int i = 0; i < searchMatches.size(); i++) {
+                    JSONObject sr = searchMatches.get(i);
+                    resCard.addView(buildSearchResultItem(sr.optString("icon"), sr.optString("title"), sr.optString("sub"), sr.optString("date", todayIso())));
+                }
+                if (searchMatches.isEmpty()) {
                     TextView tvNoRes = new TextView(this);
                     tvNoRes.setText("Nenhum resultado para \"" + this.calSearchQuery + "\"");
                     tvNoRes.setTextColor(this.cTextMuted);
@@ -8524,16 +8704,75 @@ public class MainActivity extends Activity {
         tvDosesHdr.setPadding(0, 0, 0, dp(8));
         root.addView(tvDosesHdr);
 
-        int doseItems = 0;
+        // Collect all scheduled doses and taken SOS doses on dateStr and sort chronologically
+        ArrayList<JSONObject> dayDoseEntries = new ArrayList<>();
         for (int i = 0; i < this.meds.length(); i++) {
             final JSONObject m = this.meds.optJSONObject(i);
             if (m == null || !m.optBoolean("ativo", true) || "sos".equals(getMedType(m))) continue;
             JSONArray hrs = m.optJSONArray("horarios");
             if (hrs == null) continue;
-            final String mId = m.optString("id");
             for (int h = 0; h < hrs.length(); h++) {
-                final String hStr = hrs.optString(h);
-                doseItems++;
+                String hStr = hrs.optString(h, "").trim();
+                if (hStr.isEmpty()) continue;
+                try {
+                    JSONObject entry = new JSONObject();
+                    entry.put("is_sos", false);
+                    entry.put("hora", hStr);
+                    entry.put("med", m);
+                    entry.put("med_name", optCleanString(m, "nome", ""));
+                    dayDoseEntries.add(entry);
+                } catch (Exception ignored) {}
+            }
+        }
+        if (this.doseLogs != null) {
+            for (int i = 0; i < this.doseLogs.length(); i++) {
+                final JSONObject sosLog = this.doseLogs.optJSONObject(i);
+                if (sosLog == null || !isSosDoseLog(sosLog) || !dateStr.equals(extractDoseLogDate(sosLog))) {
+                    continue;
+                }
+                try {
+                    JSONObject sosMed = findMedForDoseLog(sosLog);
+                    String hStr = extractDoseLogTime(sosLog);
+                    if (hStr.isEmpty() || "SOS".equalsIgnoreCase(hStr)) hStr = "SOS";
+                    String medName = sosMed != null
+                            ? optCleanString(sosMed, "nome", "Medicamento SOS")
+                            : optCleanString(sosLog, "med_nome", "Medicamento SOS");
+                    JSONObject entry = new JSONObject();
+                    entry.put("is_sos", true);
+                    entry.put("hora", hStr);
+                    entry.put("med", sosMed);
+                    entry.put("sos_log", sosLog);
+                    entry.put("med_name", medName);
+                    dayDoseEntries.add(entry);
+                } catch (Exception ignored) {}
+            }
+        }
+
+        Collections.sort(dayDoseEntries, new Comparator<JSONObject>() {
+            @Override
+            public int compare(JSONObject a, JSONObject b) {
+                int minsA = parseTimeMinutesForSort(a.optString("hora", ""));
+                int minsB = parseTimeMinutesForSort(b.optString("hora", ""));
+                if (minsA != minsB) {
+                    return Integer.compare(minsA, minsB);
+                }
+                boolean sosA = a.optBoolean("is_sos", false);
+                boolean sosB = b.optBoolean("is_sos", false);
+                if (sosA != sosB) {
+                    return sosA ? 1 : -1;
+                }
+                return a.optString("med_name", "").compareToIgnoreCase(b.optString("med_name", ""));
+            }
+        });
+
+        int doseItems = dayDoseEntries.size();
+        for (int idx = 0; idx < dayDoseEntries.size(); idx++) {
+            JSONObject entry = dayDoseEntries.get(idx);
+            final String hStr = entry.optString("hora", "");
+            if (!entry.optBoolean("is_sos", false)) {
+                final JSONObject m = entry.optJSONObject("med");
+                if (m == null) continue;
+                final String mId = m.optString("id");
                 String st = getDoseStatus(mId, dateStr, hStr);
                 boolean isTaken = "tomado".equals(st);
 
@@ -8605,18 +8844,10 @@ public class MainActivity extends Activity {
                     dCard.addView(btnUndoCal);
                 }
                 root.addView(dCard);
-            }
-        }
-
-        // Render SOS doses taken on dateStr
-        if (this.doseLogs != null) {
-            for (int i = 0; i < this.doseLogs.length(); i++) {
-                final JSONObject sosLog = this.doseLogs.optJSONObject(i);
-                if (sosLog == null || !isSosDoseLog(sosLog) || !dateStr.equals(extractDoseLogDate(sosLog))) {
-                    continue;
-                }
-                doseItems++;
-                final JSONObject sosMed = findMedForDoseLog(sosLog);
+            } else {
+                final JSONObject sosLog = entry.optJSONObject("sos_log");
+                if (sosLog == null) continue;
+                final JSONObject sosMed = entry.optJSONObject("med");
                 String medTitle;
                 if (sosMed != null) {
                     String dStr = optCleanString(sosMed, "dosagem", "");
@@ -8624,12 +8855,10 @@ public class MainActivity extends Activity {
                 } else {
                     medTitle = optCleanString(sosLog, "med_nome", "Medicamento SOS");
                 }
-                String hStr = extractDoseLogTime(sosLog);
-                if (hStr.isEmpty() || "SOS".equalsIgnoreCase(hStr)) hStr = "SOS";
                 int qUsed = Math.max(1, sosLog.optInt("quantidade_usada", 1));
                 String unitLabel = sosMed != null
                         ? formatMedUnitPlural(qUsed, optCleanString(sosMed, "unidade", optCleanString(sosMed, "forma", "unid.")))
-                        : (qUsed == 1 ? "unid." : "unid.");
+                        : "unid.";
 
                 LinearLayout dCard = new LinearLayout(this);
                 dCard.setOrientation(1);
@@ -8801,7 +9030,7 @@ public class MainActivity extends Activity {
             root.addView(tvEmptyN);
         }
 
-        // Events section (Strictly Consultations & Health Events, decoupled from Stock)
+        // Events section (Strictly Consultations & Health Events, decoupled from Stock, sorted chronologically)
         TextView tvEvHdr = new TextView(this);
         tvEvHdr.setText("📅 CONSULTAS & EVENTOS");
         tvEvHdr.setTextColor(this.cTextLight);
@@ -8810,54 +9039,70 @@ public class MainActivity extends Activity {
         tvEvHdr.setPadding(0, dp(6), 0, dp(8));
         root.addView(tvEvHdr);
 
-        int evItems = 0;
+        ArrayList<Integer> dayEventIndices = new ArrayList<>();
         for (int i = 0; i < this.events.length(); i++) {
-            final int eIdx = i;
-            final JSONObject ev = this.events.optJSONObject(i);
+            JSONObject ev = this.events.optJSONObject(i);
             if (ev != null && !isStockEvent(ev)) {
                 String evDate = optCleanString(ev, "date", optCleanString(ev, "data", ""));
                 if (evDate.length() >= 10) evDate = evDate.substring(0, 10);
                 if (dateStr.equals(evDate)) {
-                    evItems++;
-                    LinearLayout eCard = new LinearLayout(this);
-                    eCard.setOrientation(0);
-                    eCard.setGravity(16);
-                    eCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
-                    eCard.setPadding(dp(12), dp(10), dp(12), dp(10));
-                    LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
-                    ecLp.bottomMargin = dp(8);
-                    eCard.setLayoutParams(ecLp);
-
-                    TextView tvET = new TextView(this);
-                    String t = optCleanString(ev, "title", optCleanString(ev, "titulo", "Evento"));
-                    String tm = optCleanString(ev, "time", optCleanString(ev, "hora", ""));
-                    if (tm.length() >= 5 && tm.charAt(2) == ':') tm = tm.substring(0, 5);
-                    String loc = optCleanString(ev, "location", optCleanString(ev, "local", ""));
-                    tvET.setText("📅 " + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
-                    tvET.setTextColor(this.cTextMain);
-                    tvET.setTextSize(sp(13.0f));
-                    tvET.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-                    eCard.addView(tvET);
-
-                    TextView btnDelE = new TextView(this);
-                    btnDelE.setText("🗑");
-                    btnDelE.setPadding(dp(8), dp(4), dp(4), dp(4));
-                    btnDelE.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            String delId = ev.optString("id", "");
-                            MainActivity.this.events.remove(eIdx);
-                            deleteRemoteRecord("health_events", delId, "evt");
-                            saveAll();
-                            render();
-                            dlg.dismiss();
-                            showDayPanelDialog(dateStr);
-                        }
-                    });
-                    eCard.addView(btnDelE);
-                    root.addView(eCard);
+                    dayEventIndices.add(i);
                 }
             }
+        }
+        Collections.sort(dayEventIndices, new Comparator<Integer>() {
+            @Override
+            public int compare(Integer idxA, Integer idxB) {
+                JSONObject evA = MainActivity.this.events.optJSONObject(idxA);
+                JSONObject evB = MainActivity.this.events.optJSONObject(idxB);
+                String tmA = evA != null ? optCleanString(evA, "time", optCleanString(evA, "hora", "")) : "";
+                String tmB = evB != null ? optCleanString(evB, "time", optCleanString(evB, "hora", "")) : "";
+                return Integer.compare(parseTimeMinutesForSort(tmA), parseTimeMinutesForSort(tmB));
+            }
+        });
+
+        int evItems = dayEventIndices.size();
+        for (int k = 0; k < dayEventIndices.size(); k++) {
+            final int eIdx = dayEventIndices.get(k);
+            final JSONObject ev = this.events.optJSONObject(eIdx);
+            if (ev == null) continue;
+            LinearLayout eCard = new LinearLayout(this);
+            eCard.setOrientation(0);
+            eCard.setGravity(16);
+            eCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+            eCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+            LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
+            ecLp.bottomMargin = dp(8);
+            eCard.setLayoutParams(ecLp);
+
+            TextView tvET = new TextView(this);
+            String t = optCleanString(ev, "title", optCleanString(ev, "titulo", "Evento"));
+            String tm = optCleanString(ev, "time", optCleanString(ev, "hora", ""));
+            if (tm.length() >= 5 && tm.charAt(2) == ':') tm = tm.substring(0, 5);
+            String loc = optCleanString(ev, "location", optCleanString(ev, "local", ""));
+            tvET.setText("📅 " + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
+            tvET.setTextColor(this.cTextMain);
+            tvET.setTextSize(sp(13.0f));
+            tvET.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            eCard.addView(tvET);
+
+            TextView btnDelE = new TextView(this);
+            btnDelE.setText("🗑");
+            btnDelE.setPadding(dp(8), dp(4), dp(4), dp(4));
+            btnDelE.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String delId = ev.optString("id", "");
+                    MainActivity.this.events.remove(eIdx);
+                    deleteRemoteRecord("health_events", delId, "evt");
+                    saveAll();
+                    render();
+                    dlg.dismiss();
+                    showDayPanelDialog(dateStr);
+                }
+            });
+            eCard.addView(btnDelE);
+            root.addView(eCard);
         }
         if (evItems == 0) {
             TextView tvEmptyE = new TextView(this);
@@ -8868,7 +9113,7 @@ public class MainActivity extends Activity {
             root.addView(tvEmptyE);
         }
 
-        // Dedicated Stock Section (exclusively for stock replenishments and adjustments)
+        // Dedicated Stock Section (sorted chronologically)
         TextView tvStockHdr = new TextView(this);
         tvStockHdr.setText("📦 ESTOQUE");
         tvStockHdr.setTextColor(this.cTextLight);
@@ -8877,46 +9122,62 @@ public class MainActivity extends Activity {
         tvStockHdr.setPadding(0, dp(6), 0, dp(8));
         root.addView(tvStockHdr);
 
-        int stockItems = 0;
+        ArrayList<Integer> dayStockIndices = new ArrayList<>();
         for (int i = 0; i < this.stockMovements.length(); i++) {
-            final int sIdx = i;
-            final JSONObject sm = this.stockMovements.optJSONObject(i);
+            JSONObject sm = this.stockMovements.optJSONObject(i);
             if (sm != null && isCalendarStockMovement(sm) && dateStr.equals(getStockMovementDate(sm))) {
-                stockItems++;
-                LinearLayout sCard = new LinearLayout(this);
-                sCard.setOrientation(0);
-                sCard.setGravity(16);
-                sCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
-                sCard.setPadding(dp(12), dp(10), dp(12), dp(10));
-                LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(-1, -2);
-                scLp.bottomMargin = dp(8);
-                sCard.setLayoutParams(scLp);
-
-                TextView tvST = new TextView(this);
-                tvST.setText(formatStockMovementCardText(sm));
-                tvST.setTextColor(this.cTextMain);
-                tvST.setTextSize(sp(13.0f));
-                tvST.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
-                sCard.addView(tvST);
-
-                TextView btnDelS = new TextView(this);
-                btnDelS.setText("🗑");
-                btnDelS.setPadding(dp(8), dp(4), dp(4), dp(4));
-                btnDelS.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        String delId = sm.optString("id", "");
-                        MainActivity.this.stockMovements.remove(sIdx);
-                        deleteRemoteRecord("stock_movements", delId, "stk");
-                        saveAll();
-                        render();
-                        dlg.dismiss();
-                        showDayPanelDialog(dateStr);
-                    }
-                });
-                sCard.addView(btnDelS);
-                root.addView(sCard);
+                dayStockIndices.add(i);
             }
+        }
+        Collections.sort(dayStockIndices, new Comparator<Integer>() {
+            @Override
+            public int compare(Integer idxA, Integer idxB) {
+                JSONObject smA = MainActivity.this.stockMovements.optJSONObject(idxA);
+                JSONObject smB = MainActivity.this.stockMovements.optJSONObject(idxB);
+                String tmA = getStockMovementTime(smA);
+                String tmB = getStockMovementTime(smB);
+                return Integer.compare(parseTimeMinutesForSort(tmA), parseTimeMinutesForSort(tmB));
+            }
+        });
+
+        int stockItems = dayStockIndices.size();
+        for (int k = 0; k < dayStockIndices.size(); k++) {
+            final int sIdx = dayStockIndices.get(k);
+            final JSONObject sm = this.stockMovements.optJSONObject(sIdx);
+            if (sm == null) continue;
+            LinearLayout sCard = new LinearLayout(this);
+            sCard.setOrientation(0);
+            sCard.setGravity(16);
+            sCard.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+            sCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+            LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(-1, -2);
+            scLp.bottomMargin = dp(8);
+            sCard.setLayoutParams(scLp);
+
+            TextView tvST = new TextView(this);
+            tvST.setText(formatStockMovementCardText(sm));
+            tvST.setTextColor(this.cTextMain);
+            tvST.setTextSize(sp(13.0f));
+            tvST.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            sCard.addView(tvST);
+
+            TextView btnDelS = new TextView(this);
+            btnDelS.setText("🗑");
+            btnDelS.setPadding(dp(8), dp(4), dp(4), dp(4));
+            btnDelS.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String delId = sm.optString("id", "");
+                    MainActivity.this.stockMovements.remove(sIdx);
+                    deleteRemoteRecord("stock_movements", delId, "stk");
+                    saveAll();
+                    render();
+                    dlg.dismiss();
+                    showDayPanelDialog(dateStr);
+                }
+            });
+            sCard.addView(btnDelS);
+            root.addView(sCard);
         }
         if (stockItems == 0) {
             TextView tvEmptyS = new TextView(this);
@@ -10332,10 +10593,7 @@ public class MainActivity extends Activity {
 
             row.addView(col);
 
-            final CheckBox cb = new CheckBox(this);
-            cb.setChecked(isChecked);
-            cb.setClickable(false);
-            row.addView(cb);
+            row.addView(createCustomCheckBoxBadge(isChecked));
 
             row.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -10414,7 +10672,7 @@ public class MainActivity extends Activity {
         tvSub.setText("Selecione quais dos seus medicamentos cadastrados devem aparecer no seu Cartão de Emergência.");
         tvSub.setTextColor(this.cTextMuted);
         tvSub.setTextSize(sp(13.0f));
-        tvSub.setPadding(0, 0, 0, dp(16));
+        tvSub.setPadding(0, 0, 0, dp(12));
         card.addView(tvSub);
 
         if (this.meds.length() == 0) {
@@ -10426,15 +10684,69 @@ public class MainActivity extends Activity {
             tvEmpty.setPadding(0, dp(20), 0, dp(20));
             card.addView(tvEmpty);
         } else {
+            int selectedCount = 0;
+            for (int i = 0; i < this.meds.length(); i++) {
+                JSONObject m = this.meds.optJSONObject(i);
+                if (m != null && isMedImportantForEmergency(m)) {
+                    selectedCount++;
+                }
+            }
+
+            LinearLayout bulkRow = new LinearLayout(this);
+            bulkRow.setOrientation(0);
+            bulkRow.setGravity(16);
+            LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(-1, -2);
+            brLp.bottomMargin = dp(12);
+            bulkRow.setLayoutParams(brLp);
+
+            TextView tvCountInfo = new TextView(this);
+            tvCountInfo.setText(selectedCount + " de " + this.meds.length() + " selecionado(s)");
+            tvCountInfo.setTextColor(this.cTextMuted);
+            tvCountInfo.setTextSize(sp(12.0f));
+            tvCountInfo.setTypeface(null, 1);
+            tvCountInfo.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            bulkRow.addView(tvCountInfo);
+
+            final boolean allSelected = (selectedCount == this.meds.length());
+            TextView btnToggleAll = new TextView(this);
+            btnToggleAll.setText(allSelected ? "Desmarcar todos" : "Selecionar todos");
+            btnToggleAll.setTextColor(this.cPrimary);
+            btnToggleAll.setTextSize(sp(12.0f));
+            btnToggleAll.setTypeface(null, 1);
+            btnToggleAll.setBackground(shape(Color.argb(24, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 99, Color.argb(80, Color.red(this.cPrimary), Color.green(this.cPrimary), Color.blue(this.cPrimary)), 1));
+            btnToggleAll.setPadding(dp(12), dp(6), dp(12), dp(6));
+            btnToggleAll.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    synchronized (MainActivity.this.syncNetworkLock) {
+                        for (int j = 0; j < MainActivity.this.meds.length(); j++) {
+                            JSONObject medObj = MainActivity.this.meds.optJSONObject(j);
+                            if (medObj != null) {
+                                setMedImportantForEmergency(medObj, !allSelected);
+                            }
+                        }
+                        saveAll();
+                        render();
+                    }
+                }
+            });
+            bulkRow.addView(btnToggleAll);
+            card.addView(bulkRow);
+
             for (int i = 0; i < this.meds.length(); i++) {
                 final JSONObject m = this.meds.optJSONObject(i);
                 if (m == null) continue;
-                final boolean isImp = m.optBoolean("important_for_emergency", true);
+                final boolean isImp = isMedImportantForEmergency(m);
 
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(0);
                 row.setGravity(16);
-                row.setBackground(shape(isImp ? Color.parseColor("#143B82F6") : this.cBgMain, 14, isImp ? this.cPrimary : this.cBorder, 1));
+                row.setBackground(shape(
+                        isImp ? Color.parseColor("#1F3B82F6") : this.cBgMain,
+                        14,
+                        isImp ? this.cPrimary : (this.isHighContrast ? Color.WHITE : this.cBorder),
+                        isImp ? 2 : 1
+                ));
                 row.setPadding(dp(14), dp(14), dp(14), dp(14));
                 LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(-1, -2);
                 if (i < this.meds.length() - 1) rLp.bottomMargin = dp(10);
@@ -10463,26 +10775,32 @@ public class MainActivity extends Activity {
                 col.addView(tvMName);
 
                 TextView tvMDose = new TextView(this);
-                tvMDose.setText(m.optString("dosagem") + " " + m.optString("unidade", "comprimido(s)"));
-                tvMDose.setTextColor(this.cTextMuted);
-                tvMDose.setTextSize(sp(13.0f));
+                tvMDose.setText(m.optString("dosagem") + " " + m.optString("unidade", "comprimido(s)")
+                        + (isImp ? " • ✓ No Cartão de Emergência" : ""));
+                tvMDose.setTextColor(isImp ? this.cPrimary : this.cTextMuted);
+                tvMDose.setTextSize(sp(12.5f));
                 col.addView(tvMDose);
 
                 row.addView(col);
 
-                CheckBox cb = new CheckBox(this);
-                cb.setChecked(isImp);
-                cb.setClickable(false);
-                row.addView(cb);
+                row.addView(createCustomCheckBoxBadge(isImp));
 
                 row.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        try {
-                            m.put("important_for_emergency", !isImp);
-                            saveAll();
-                            render();
-                        } catch (Exception ignored) {}
+                        synchronized (MainActivity.this.syncNetworkLock) {
+                            try {
+                                JSONObject liveMed = findLiveMed(m);
+                                boolean currentVal = isMedImportantForEmergency(liveMed != null ? liveMed : m);
+                                boolean nextVal = !currentVal;
+                                if (liveMed != null) {
+                                    setMedImportantForEmergency(liveMed, nextVal);
+                                }
+                                setMedImportantForEmergency(m, nextVal);
+                                saveAll();
+                                render();
+                            } catch (Exception ignored) {}
+                        }
                     }
                 });
                 card.addView(row);
@@ -11668,7 +11986,7 @@ public class MainActivity extends Activity {
 
             for (int i = 0; i < this.meds.length(); i++) {
                 JSONObject m = this.meds.optJSONObject(i);
-                if (m == null || !m.optBoolean("important_for_emergency", true)) continue;
+                if (m == null || !isMedImportantForEmergency(m)) continue;
                 LinearLayout mRow = new LinearLayout(this);
                 mRow.setOrientation(0);
                 mRow.setGravity(16);
@@ -13396,11 +13714,21 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            JSONArray cleanHorarios = new JSONArray();
+            ArrayList<String> sortedHorariosList = new ArrayList<>();
             for (int i = 0; i < horariosArr.length(); i++) {
                 String h = horariosArr.optString(i, "").trim();
                 if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
-                if (!h.isEmpty()) cleanHorarios.put(h);
+                if (!h.isEmpty()) sortedHorariosList.add(h);
+            }
+            Collections.sort(sortedHorariosList, new Comparator<String>() {
+                @Override
+                public int compare(String a, String b) {
+                    return Integer.compare(parseTimeMinutesForSort(a), parseTimeMinutesForSort(b));
+                }
+            });
+            JSONArray cleanHorarios = new JSONArray();
+            for (String h : sortedHorariosList) {
+                cleanHorarios.put(h);
             }
             String tType = optCleanString(m, "treatment_type", optCleanString(m, "tipo_uso", "continuous")).toLowerCase(Locale.ROOT);
             if ("temporario".equals(tType) || "temporary".equals(tType)) {
@@ -13445,6 +13773,9 @@ public class MainActivity extends Activity {
             String cor = optCleanString(m, "cor", "#3B82F6");
             if (cor.isEmpty()) cor = "#3B82F6";
             m.put("cor", cor);
+            boolean impFlag = isMedImportantForEmergency(m);
+            m.put("important_for_emergency", impFlag);
+            m.put("_local_important_for_emergency", impFlag);
             return m;
         } catch (Exception e) {
             return rm;
@@ -13513,6 +13844,11 @@ public class MainActivity extends Activity {
                                 rm.put("_local_stock_updated_ms", localStockUpdatedMs);
                             } else {
                                 rm.put("_local_stock_val", remoteStock);
+                            }
+                            if (lm.has("_local_important_for_emergency") && !lm.isNull("_local_important_for_emergency")) {
+                                boolean localImp = lm.optBoolean("_local_important_for_emergency", false);
+                                rm.put("important_for_emergency", localImp);
+                                rm.put("_local_important_for_emergency", localImp);
                             }
                             Iterator<String> keys = lm.keys();
                             while (keys.hasNext()) {
