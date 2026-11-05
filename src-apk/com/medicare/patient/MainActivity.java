@@ -3207,6 +3207,56 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    private String getDoseActualTakenTime(String medId, String dateStr, String scheduledHora) {
+        String normDate = dateStr != null && dateStr.length() >= 10 ? dateStr.substring(0, 10) : (dateStr != null ? dateStr : "");
+        String normHora = scheduledHora != null && scheduledHora.length() >= 5 && scheduledHora.charAt(2) == ':'
+                ? scheduledHora.substring(0, 5)
+                : (scheduledHora != null ? scheduledHora.trim() : "");
+        JSONObject log = getDoseLogObject(medId, normDate, normHora);
+        if (log != null) {
+            String horaReal = optCleanString(log, "hora_real", optCleanString(log, "horario_real", "")).trim();
+            if (horaReal.length() >= 5 && horaReal.charAt(2) == ':') {
+                return horaReal.substring(0, 5);
+            }
+            String[] tsFields = {"administered_at", "taken_at", "confirmed_at", "created_at"};
+            for (int f = 0; f < tsFields.length; f++) {
+                String rawTs = optCleanString(log, tsFields[f], "").trim();
+                if (rawTs.isEmpty()) continue;
+                if (rawTs.contains("T00:00:00") || rawTs.endsWith(" 00:00:00")) continue;
+                String[] localDt = parseUtcTimestampToLocalDateAndTime(rawTs);
+                if (localDt != null && !localDt[1].isEmpty()) {
+                    return localDt[1];
+                }
+            }
+        }
+        if (this.stockMovements != null && medId != null && !medId.isEmpty()) {
+            String expectedToken = "(" + normHora + ")";
+            for (int i = this.stockMovements.length() - 1; i >= 0; i--) {
+                JSONObject sm = this.stockMovements.optJSONObject(i);
+                if (sm == null) continue;
+                String smMedId = optCleanString(sm, "med_id", optCleanString(sm, "medication_id", ""));
+                if (!medId.equals(smMedId) && !toDeterministicServerUuid(medId, "med").equalsIgnoreCase(toDeterministicServerUuid(smMedId, "med"))) {
+                    continue;
+                }
+                String smTipo = optCleanString(sm, "tipo", optCleanString(sm, "movement_type", "")).toLowerCase(Locale.ROOT);
+                if (!smTipo.contains("saida") && !smTipo.contains("consumption") && sm.optInt("quantity_delta", sm.optInt("delta", 0)) >= 0) {
+                    continue;
+                }
+                String motivo = optCleanString(sm, "motivo", optCleanString(sm, "notes", ""));
+                if (!normHora.isEmpty() && motivo.contains(expectedToken)) {
+                    String smDate = getStockMovementDate(sm);
+                    if (normDate.isEmpty() || normDate.equals(smDate)) {
+                        String smTime = getStockMovementTime(sm);
+                        if (smTime != null && smTime.length() >= 5 && smTime.charAt(2) == ':') {
+                            return smTime.substring(0, 5);
+                        }
+                    }
+                }
+            }
+        }
+        return normHora;
+    }
+
     private JSONObject findMedForDoseLog(JSONObject log) {
         if (log == null || this.meds == null) return null;
         String logMedId = optCleanString(log, "med_id", optCleanString(log, "medication_id", optCleanString(log, "medId", "")));
@@ -4100,6 +4150,7 @@ public class MainActivity extends Activity {
             logEntry.put("data", normDate);
             logEntry.put("dose_date", normDate);
             logEntry.put("created_at", utcNow);
+            logEntry.put("administered_at", utcNow);
             logEntry.put("_utc_created_at", true);
             logEntry.put("horario", normHora);
             logEntry.put("hora", normHora);
@@ -8715,9 +8766,13 @@ public class MainActivity extends Activity {
                 String hStr = hrs.optString(h, "").trim();
                 if (hStr.isEmpty()) continue;
                 try {
+                    String mId = m.optString("id");
+                    boolean isTaken = "tomado".equals(getDoseStatus(mId, dateStr, hStr));
+                    String displayHora = isTaken ? getDoseActualTakenTime(mId, dateStr, hStr) : hStr;
                     JSONObject entry = new JSONObject();
                     entry.put("is_sos", false);
-                    entry.put("hora", hStr);
+                    entry.put("hora", displayHora);
+                    entry.put("scheduled_hora", hStr);
                     entry.put("med", m);
                     entry.put("med_name", optCleanString(m, "nome", ""));
                     dayDoseEntries.add(entry);
@@ -8769,12 +8824,14 @@ public class MainActivity extends Activity {
         for (int idx = 0; idx < dayDoseEntries.size(); idx++) {
             JSONObject entry = dayDoseEntries.get(idx);
             final String hStr = entry.optString("hora", "");
+            final String scheduledHora = entry.optString("scheduled_hora", hStr);
             if (!entry.optBoolean("is_sos", false)) {
                 final JSONObject m = entry.optJSONObject("med");
                 if (m == null) continue;
                 final String mId = m.optString("id");
-                String st = getDoseStatus(mId, dateStr, hStr);
+                String st = getDoseStatus(mId, dateStr, scheduledHora);
                 boolean isTaken = "tomado".equals(st);
+                String shownTime = isTaken ? getDoseActualTakenTime(mId, dateStr, scheduledHora) : scheduledHora;
 
                 LinearLayout dCard = new LinearLayout(this);
                 dCard.setOrientation(1);
@@ -8785,13 +8842,13 @@ public class MainActivity extends Activity {
                 dCard.setLayoutParams(dcLp);
 
                 TextView tvM = new TextView(this);
-                tvM.setText((isTaken ? "✓ " : "⏰ ") + hStr + " — " + m.optString("nome") + " (" + m.optString("dosagem") + ")");
+                tvM.setText((isTaken ? "✓ " : "⏰ ") + shownTime + " — " + m.optString("nome") + " (" + m.optString("dosagem") + ")");
                 tvM.setTextColor(isTaken ? this.cSuccess : this.cTextMain);
                 tvM.setTextSize(sp(13.0f));
                 tvM.setTypeface(null, 1);
                 dCard.addView(tvM);
 
-                JSONObject calPendingReq = getPendingCaregiverRequest(mId, dateStr, hStr);
+                JSONObject calPendingReq = getPendingCaregiverRequest(mId, dateStr, scheduledHora);
                 if (calPendingReq != null) {
                     TextView tvCalPending = new TextView(this);
                     tvCalPending.setText("⏳ Aguardando cuidador • Motivo: " + calPendingReq.optString("reason", ""));
@@ -8814,12 +8871,12 @@ public class MainActivity extends Activity {
                         public void onClick(View v) {
                             dlg.dismiss();
                             if (isPatientProfileRole()) {
-                                showCaregiverDoseRequestDialog(m, dateStr, hStr, "tomado");
+                                showCaregiverDoseRequestDialog(m, dateStr, scheduledHora, "tomado");
                             } else {
                                 confirmWithZeroStockCheck(m, 1, new Runnable() {
                                     @Override
                                     public void run() {
-                                        registerDose(m, dateStr, hStr, "tomado");
+                                        registerDose(m, dateStr, scheduledHora, "tomado");
                                         showDayPanelDialog(dateStr);
                                     }
                                 });
@@ -8838,7 +8895,7 @@ public class MainActivity extends Activity {
                         @Override
                         public void onClick(View v) {
                             dlg.dismiss();
-                            showUndoConfirmDialog(m, dateStr, hStr);
+                            showUndoConfirmDialog(m, dateStr, scheduledHora);
                         }
                     });
                     dCard.addView(btnUndoCal);
@@ -13894,6 +13951,7 @@ public class MainActivity extends Activity {
             JSONArray merged = new JSONArray();
             Set<String> seenKeys = new HashSet<>();
             Set<String> localUnsyncedSlots = new HashSet<>();
+            java.util.Map<String, String> localHoraRealBySlot = new java.util.HashMap<>();
 
             for (int l = 0; l < this.doseLogs.length(); l++) {
                 JSONObject ll = this.doseLogs.optJSONObject(l);
@@ -13902,6 +13960,15 @@ public class MainActivity extends Activity {
                 String d = extractDoseLogDate(ll);
                 String h = extractDoseLogTime(ll);
                 String st = normalizeDoseStatusLocal(ll.optString("status", "pendente"));
+                String hrReal = optCleanString(ll, "hora_real", optCleanString(ll, "horario_real", "")).trim();
+                if (!mId.isEmpty() && !d.isEmpty() && !h.isEmpty() && hrReal.length() >= 5 && hrReal.charAt(2) == ':') {
+                    String hr5 = hrReal.substring(0, 5);
+                    localHoraRealBySlot.put((mId + "|" + d + "|" + h).toLowerCase(Locale.ROOT), hr5);
+                    String detMed = toDeterministicServerUuid(mId, "med");
+                    if (!detMed.isEmpty()) {
+                        localHoraRealBySlot.put((detMed + "|" + d + "|" + h).toLowerCase(Locale.ROOT), hr5);
+                    }
+                }
                 if (ll.optBoolean("_local_unsynced", false) || this.hasUnsyncedLocalChanges || "pendente".equals(st)) {
                     if (!mId.isEmpty() && !d.isEmpty() && !h.isEmpty()) {
                         localUnsyncedSlots.add((mId + "|" + d + "|" + h).toLowerCase(Locale.ROOT));
@@ -13948,6 +14015,26 @@ public class MainActivity extends Activity {
                 String detSlotKey = rlIsSos
                         ? slotKey
                         : (toDeterministicServerUuid(mId, "med") + "|" + d + "|" + h).toLowerCase(Locale.ROOT);
+                if (!rlIsSos) {
+                    String existingHoraReal = optCleanString(rl, "hora_real", optCleanString(rl, "horario_real", "")).trim();
+                    if (existingHoraReal.length() < 5 || existingHoraReal.charAt(2) != ':') {
+                        String fromLocal = localHoraRealBySlot.get(slotKey);
+                        if (fromLocal == null || fromLocal.isEmpty()) {
+                            fromLocal = localHoraRealBySlot.get(detSlotKey);
+                        }
+                        if (fromLocal != null && !fromLocal.isEmpty()) {
+                            rl.put("hora_real", fromLocal);
+                        } else {
+                            String rawAdminTs = optCleanString(rl, "administered_at", optCleanString(rl, "created_at", "")).trim();
+                            if (!rawAdminTs.isEmpty() && !rawAdminTs.contains("T00:00:00") && !rawAdminTs.endsWith(" 00:00:00")) {
+                                String[] localDt = parseUtcTimestampToLocalDateAndTime(rawAdminTs);
+                                if (localDt != null && !localDt[1].isEmpty()) {
+                                    rl.put("hora_real", localDt[1]);
+                                }
+                            }
+                        }
+                    }
+                }
                 if (!rlIsSos && (localUnsyncedSlots.contains(slotKey) || localUnsyncedSlots.contains(detSlotKey))) {
                     continue;
                 }

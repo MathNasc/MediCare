@@ -769,10 +769,42 @@ private fun DayPanelDialog(
                 if (filter == "all" || filter == "meds") {
                     Text("💊 Doses do dia", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
+                    val resolveTakenTime: (DoseRecord?, String) -> String = { rec, scheduledHora ->
+                        if (rec == null) {
+                            scheduledHora
+                        } else {
+                            val rawTs = rec.createdAt.trim()
+                            val extracted = try {
+                                if (rawTs.contains("T") && !rawTs.contains("T00:00:00")) {
+                                    java.time.Instant.parse(if (rawTs.endsWith("Z")) rawTs else "${rawTs.take(19)}Z")
+                                        .atZone(java.time.ZoneId.systemDefault())
+                                        .toLocalTime()
+                                        .let { String.format("%02d:%02d", it.hour, it.minute) }
+                                } else if (rawTs.length >= 16 && rawTs[10] == ' ' && !rawTs.endsWith("00:00:00")) {
+                                    rawTs.substring(11, 16)
+                                } else {
+                                    ""
+                                }
+                            } catch (_: Exception) {
+                                if (rawTs.length >= 16 && (rawTs[10] == 'T' || rawTs[10] == ' ') && !rawTs.contains("00:00:00")) {
+                                    rawTs.substring(11, 16)
+                                } else {
+                                    ""
+                                }
+                            }
+                            if (extracted.length == 5 && extracted[2] == ':') extracted else scheduledHora
+                        }
+                    }
                     val sortedScheduledSlots = activeScheduledMeds
-                        .flatMap { med -> med.horarios.map { hora -> med to hora } }
-                        .sortedWith(compareBy({ it.second }, { it.first.nome.lowercase() }))
-                    sortedScheduledSlots.forEach { (med, hora) ->
+                        .flatMap { med ->
+                            med.horarios.map { scheduledHora ->
+                                val rec = dayHist.firstOrNull { it.medId == med.id && it.hora == scheduledHora }
+                                val displayHora = resolveTakenTime(rec, scheduledHora)
+                                Triple(med, scheduledHora, displayHora)
+                            }
+                        }
+                        .sortedWith(compareBy({ it.third }, { it.first.nome.lowercase() }))
+                    sortedScheduledSlots.forEach { (med, hora, displayHora) ->
                         val rec = dayHist.firstOrNull { it.medId == med.id && it.hora == hora }
                         val confirmed = rec != null
                         val doseKey = "${dateIso}_${med.id}_$hora"
@@ -793,7 +825,11 @@ private fun DayPanelDialog(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("${med.nome} (${med.dosagem})", color = tokens.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    Text("Horário: $hora", color = tokens.sub, fontSize = 12.sp)
+                                    Text(
+                                        text = if (confirmed) "Tomado às $displayHora" else "Horário: $hora",
+                                        color = if (confirmed) MediCareColors.Green else tokens.sub,
+                                        fontSize = 12.sp
+                                    )
                                     if (rec != null) {
                                         CaregiverBadge(rec)
                                     }
@@ -825,7 +861,7 @@ private fun DayPanelDialog(
                                 color = tokens.muted,
                                 fontSize = 11.sp,
                                 modifier = Modifier.clickable {
-                                    onRequestDoseObs(doseKey, "${med.nome} às $hora", obsText ?: "")
+                                    onRequestDoseObs(doseKey, "${med.nome} às $displayHora", obsText ?: "")
                                 }
                             )
                         }
