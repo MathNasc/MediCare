@@ -145,6 +145,13 @@ public class MainActivity extends Activity {
     private String calSearchQuery = "";
     private String aiSubView = "main";
     private boolean isAiLoading = false;
+    private ScrollView activeMainScrollView = null;
+    private ScrollView activeChatScrollView = null;
+    private int savedMainScrollY = 0;
+    private int savedChatScrollY = 0;
+    private String lastRenderedTabKey = "";
+    private boolean shouldScrollChatToBottom = true;
+    private String chatInputDraft = "";
     private String profileSubView = "main";
     private String selectedStockMedId = "";
     private String lastSyncTimestamp = "Sincronização automática ativa";
@@ -2146,8 +2153,46 @@ public class MainActivity extends Activity {
         }
     }
 
+    private ScrollView createStableScrollView() {
+        ScrollView sv = new ScrollView(this) {
+            @Override
+            protected int computeScrollDeltaToGetChildRectOnScreen(android.graphics.Rect rect) {
+                View focused = findFocus();
+                if (focused instanceof EditText && focused.isFocused()) {
+                    return super.computeScrollDeltaToGetChildRectOnScreen(rect);
+                }
+                return 0;
+            }
+
+            @Override
+            protected boolean onRequestFocusInDescendants(int direction, android.graphics.Rect previouslyFocusedRect) {
+                return false;
+            }
+        };
+        sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        return sv;
+    }
+
     private void render() {
         applyThemeColors();
+        String currentTabKey = this.activeTab + "|" + ("ai".equals(this.activeTab) ? this.aiSubView : ("profile".equals(this.activeTab) ? this.profileSubView : ""));
+        final boolean sameViewAsBefore = currentTabKey.equals(this.lastRenderedTabKey);
+        if (this.activeMainScrollView != null) {
+            this.savedMainScrollY = this.activeMainScrollView.getScrollY();
+        }
+        if (this.activeChatScrollView != null) {
+            this.savedChatScrollY = this.activeChatScrollView.getScrollY();
+        }
+        if (!sameViewAsBefore) {
+            this.savedMainScrollY = 0;
+            if ("ai|chat".equals(currentTabKey)) {
+                this.shouldScrollChatToBottom = true;
+            }
+        }
+        this.lastRenderedTabKey = currentTabKey;
+        this.activeMainScrollView = null;
+        this.activeChatScrollView = null;
+
         this.rootContainer.removeAllViews();
         this.rootContainer.setBackgroundColor(this.cBgMain);
         if (!this.isLoggedIn) {
@@ -2161,18 +2206,31 @@ public class MainActivity extends Activity {
         }
         LinearLayout linearLayout = new LinearLayout(this);
         linearLayout.setOrientation(1);
+        linearLayout.setFocusable(true);
+        linearLayout.setFocusableInTouchMode(true);
         linearLayout.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
         if ("ai".equals(this.activeTab) && "chat".equals(this.aiSubView)) {
             LinearLayout chatViewport = new LinearLayout(this);
             chatViewport.setOrientation(1);
+            chatViewport.setFocusable(true);
+            chatViewport.setFocusableInTouchMode(true);
             chatViewport.setPadding(dp(14), dp(16), dp(14), dp(10));
             chatViewport.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
             buildAiChatSubView(chatViewport);
             linearLayout.addView(chatViewport);
         } else {
-            ScrollView scrollView = new ScrollView(this);
+            final ScrollView scrollView = createStableScrollView();
             scrollView.setFillViewport(true);
             scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            this.activeMainScrollView = scrollView;
+            scrollView.getViewTreeObserver().addOnScrollChangedListener(new android.view.ViewTreeObserver.OnScrollChangedListener() {
+                @Override
+                public void onScrollChanged() {
+                    if (MainActivity.this.activeMainScrollView == scrollView) {
+                        MainActivity.this.savedMainScrollY = scrollView.getScrollY();
+                    }
+                }
+            });
             LinearLayout linearLayout2 = new LinearLayout(this);
             linearLayout2.setOrientation(1);
             linearLayout2.setPadding(dp(16), dp(22), dp(16), dp(32));
@@ -2189,6 +2247,15 @@ public class MainActivity extends Activity {
             }
             scrollView.addView(linearLayout2);
             linearLayout.addView(scrollView);
+            if (sameViewAsBefore && this.savedMainScrollY > 0) {
+                final int restoreY = this.savedMainScrollY;
+                scrollView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        scrollView.scrollTo(0, restoreY);
+                    }
+                });
+            }
         }
         View navBorder = new View(this);
         navBorder.setBackgroundColor(this.cBorder);
@@ -8716,7 +8783,7 @@ public class MainActivity extends Activity {
         topDiv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
         modalCard.addView(topDiv);
 
-        ScrollView sv = new ScrollView(this);
+        ScrollView sv = createStableScrollView();
         sv.setVerticalScrollBarEnabled(false);
         sv.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
 
@@ -9575,6 +9642,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 MainActivity.this.aiSubView = "chat";
+                MainActivity.this.shouldScrollChatToBottom = true;
                 render();
             }
         });
@@ -9819,7 +9887,10 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     MainActivity.this.aiMessages = new JSONArray();
-                    saveAll();
+                    MainActivity.this.chatInputDraft = "";
+                    MainActivity.this.savedChatScrollY = 0;
+                    MainActivity.this.shouldScrollChatToBottom = true;
+                    saveLocalStateOnly();
                     render();
                 }
             });
@@ -9831,17 +9902,27 @@ public class MainActivity extends Activity {
         // Main chat card filling all remaining vertical space (weight = 1.0f)
         LinearLayout chatCard = new LinearLayout(this);
         chatCard.setOrientation(1);
+        chatCard.setFocusable(true);
+        chatCard.setFocusableInTouchMode(true);
         chatCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
         chatCard.setPadding(dp(12), dp(12), dp(12), dp(12));
         chatCard.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
 
-        final ScrollView msgsScroll = new ScrollView(this);
-        msgsScroll.setFillViewport(true);
+        final ScrollView msgsScroll = createStableScrollView();
         msgsScroll.setVerticalScrollBarEnabled(false);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, 0, 1.0f);
         msgsScroll.setLayoutParams(scrollLp);
+        this.activeChatScrollView = msgsScroll;
+        msgsScroll.getViewTreeObserver().addOnScrollChangedListener(new android.view.ViewTreeObserver.OnScrollChangedListener() {
+            @Override
+            public void onScrollChanged() {
+                if (MainActivity.this.activeChatScrollView == msgsScroll) {
+                    MainActivity.this.savedChatScrollY = msgsScroll.getScrollY();
+                }
+            }
+        });
 
-        LinearLayout msgsLayout = new LinearLayout(this);
+        final LinearLayout msgsLayout = new LinearLayout(this);
         msgsLayout.setOrientation(1);
         msgsLayout.setPadding(dp(2), dp(4), dp(2), dp(6));
 
@@ -9933,10 +10014,25 @@ public class MainActivity extends Activity {
         msgsScroll.addView(msgsLayout);
         chatCard.addView(msgsScroll);
 
+        final boolean scrollToBottomNow = this.shouldScrollChatToBottom;
+        final int restoreChatY = Math.max(0, this.savedChatScrollY);
+        this.shouldScrollChatToBottom = false;
         msgsScroll.post(new Runnable() {
             @Override
             public void run() {
-                msgsScroll.fullScroll(View.FOCUS_DOWN);
+                if (scrollToBottomNow) {
+                    int targetY = Math.max(0, msgsLayout.getHeight() - msgsScroll.getHeight() + msgsScroll.getPaddingBottom());
+                    if (!MainActivity.this.isAiLoading && msgsLayout.getChildCount() > 1) {
+                        View lastChild = msgsLayout.getChildAt(msgsLayout.getChildCount() - 1);
+                        if (lastChild != null && lastChild.getHeight() > msgsScroll.getHeight() * 0.8f) {
+                            targetY = Math.max(0, lastChild.getTop() - dp(6));
+                        }
+                    }
+                    msgsScroll.scrollTo(0, targetY);
+                    MainActivity.this.savedChatScrollY = targetY;
+                } else {
+                    msgsScroll.scrollTo(0, restoreChatY);
+                }
             }
         });
 
@@ -9995,6 +10091,22 @@ public class MainActivity extends Activity {
         etInput.setTextSize(sp(14.0f));
         etInput.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
         etInput.setPadding(dp(14), dp(11), dp(14), dp(11));
+        if (this.chatInputDraft != null && !this.chatInputDraft.isEmpty()) {
+            etInput.setText(this.chatInputDraft);
+            etInput.setSelection(this.chatInputDraft.length());
+        }
+        etInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                MainActivity.this.chatInputDraft = s != null ? s.toString() : "";
+            }
+        });
         LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
         etLp.rightMargin = dp(8);
         etInput.setLayoutParams(etLp);
@@ -10023,8 +10135,10 @@ public class MainActivity extends Activity {
             userMsg.put("role", "user");
             userMsg.put("text", prompt);
             this.aiMessages.put(userMsg);
+            this.chatInputDraft = "";
             this.isAiLoading = true;
-            saveAll();
+            this.shouldScrollChatToBottom = true;
+            saveLocalStateOnly();
             render();
 
             queryAi(prompt);
@@ -10087,7 +10201,8 @@ public class MainActivity extends Activity {
                             aiMsg.put("role", "assistant");
                             aiMsg.put("text", reply);
                             MainActivity.this.aiMessages.put(aiMsg);
-                            saveAll();
+                            MainActivity.this.shouldScrollChatToBottom = true;
+                            saveLocalStateOnly();
                             render();
                         } catch (Exception ignored) {
                             MainActivity.this.isAiLoading = false;
@@ -14256,6 +14371,13 @@ public class MainActivity extends Activity {
                 }
             }
 
+            if ("stock_movements".equals(targetField)) {
+                String beforeStr = localArr != null ? localArr.toString() : "[]";
+                this.stockMovements = merged;
+                deduplicateStockMovements();
+                return !this.stockMovements.toString().equals(beforeStr);
+            }
+
             boolean isDiff = !merged.toString().equals(localArr.toString());
             if (isDiff) {
                 if ("events".equals(targetField)) this.events = merged;
@@ -14271,9 +14393,6 @@ public class MainActivity extends Activity {
                         }
                     }
                     this.calNotes = rebuiltNotes;
-                } else if ("stock_movements".equals(targetField)) {
-                    this.stockMovements = merged;
-                    deduplicateStockMovements();
                 } else if ("allergies".equals(targetField)) this.allergies = merged;
                 else if ("conditions".equals(targetField)) this.conditions = merged;
                 else if ("contacts".equals(targetField)) this.contacts = merged;
@@ -14639,7 +14758,9 @@ public class MainActivity extends Activity {
                         if (pulledChanges && MainActivity.this.localMutationVersion == syncVersionAtStart) {
                             MainActivity.this.saveLocalStateOnly();
                             MainActivity.this.scheduleAllMedicationAlarms();
-                            MainActivity.this.render();
+                            if (!("ai".equals(MainActivity.this.activeTab) && "chat".equals(MainActivity.this.aiSubView))) {
+                                MainActivity.this.render();
+                            }
                         }
                         MainActivity.this.m22xc335e10a(optBoolean, format, z);
                     }
@@ -14679,7 +14800,9 @@ public class MainActivity extends Activity {
                                     MainActivity.this.prefs.edit().putString("last_sync_timestamp", MainActivity.this.lastSyncTimestamp).apply();
                                     MainActivity.this.saveLocalStateOnly();
                                     MainActivity.this.scheduleAllMedicationAlarms();
-                                    MainActivity.this.render();
+                                    if (!("ai".equals(MainActivity.this.activeTab) && "chat".equals(MainActivity.this.aiSubView))) {
+                                        MainActivity.this.render();
+                                    }
                                 }
                             });
                         }
