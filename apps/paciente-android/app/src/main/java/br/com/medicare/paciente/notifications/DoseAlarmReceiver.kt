@@ -59,11 +59,13 @@ class DoseAlarmReceiver : BroadcastReceiver() {
 
                 when (intent.action) {
                     DoseAlarmScheduler.ACTION_TRIGGER_DOSE_ALARM -> {
-                        // 1. Verifica se o medicamento ainda está ativo e agenda a ocorrência do dia seguinte
+                        // 1. Verifica se o medicamento e o horário ainda existem e estão ativos
                         val med = repository.getMedicationById(medId)
-                        if (med != null && alarmScheduler.shouldScheduleMedication(med)) {
-                            alarmScheduler.scheduleNextOccurrence(med, hora)
+                        if (med == null || !alarmScheduler.shouldScheduleMedication(med) || !med.horarios.contains(hora)) {
+                            alarmScheduler.onDoseConfirmed(medId, hora)
+                            return@launch
                         }
+                        alarmScheduler.scheduleNextOccurrence(med, hora)
 
                         // 2. Prevenção de duplicidade: se a dose de hoje já foi confirmada, não notifica
                         val alreadyConfirmed = repository.isDoseConfirmedForToday(medId, hora, LocalDate.now())

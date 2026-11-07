@@ -308,58 +308,16 @@ public class MainActivity extends Activity {
 
     private void scheduleAllMedicationAlarms() {
         try {
-            AlarmManager am = (AlarmManager) getSystemService("alarm");
-            if (am == null || this.meds == null) return;
-            boolean enabled = this.isLoggedIn && areNotificationsFullyActive();
-            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-            if (Build.VERSION.SDK_INT >= 23) {
-                flags |= PendingIntent.FLAG_IMMUTABLE;
-            }
-            String today = todayIso();
-            for (int i = 0; i < this.meds.length(); i++) {
-                JSONObject med = this.meds.optJSONObject(i);
-                if (med == null) continue;
-                String medId = med.optString("id", "med_" + i);
-                String medName = med.optString("nome", "Medicamento");
-                String medDosage = med.optString("dosagem", "").trim();
-                String medUnit = med.optString("unidade", "").trim();
-                String doseLabel = medDosage.isEmpty() ? "" : (medUnit.isEmpty() ? medDosage : (medDosage + " " + medUnit));
-                String tType = med.optString("treatment_type", med.optString("tipo_uso", "continuous"));
-                String endDate = med.optString("end_date", med.optString("data_fim", "")).trim();
-                boolean notExpired = endDate.isEmpty() || endDate.length() < 10 || today.compareTo(endDate.substring(0, 10)) <= 0;
-                boolean medActive = med.optBoolean("ativo", true) && !"sos".equalsIgnoreCase(tType) && notExpired;
-                JSONArray horarios = med.optJSONArray("horarios");
-                if (horarios == null) continue;
-                for (int j = 0; j < horarios.length(); j++) {
-                    String hStr = horarios.optString(j, "").trim();
-                    if (!hStr.contains(":")) continue;
-                    int reqCode = Math.abs((medId + "_" + hStr).hashCode() % 400000) + 10000;
-                    Intent alarmIntent = new Intent(this, DoseAlarmReceiver.class);
-                    alarmIntent.setAction(DoseAlarmReceiver.ACTION_DOSE_ALARM);
-                    alarmIntent.putExtra("med_id", medId);
-                    alarmIntent.putExtra("med_name", medName);
-                    alarmIntent.putExtra("med_time", hStr);
-                    alarmIntent.putExtra("med_dose", doseLabel);
-                    alarmIntent.putExtra("is_snooze", false);
-                    PendingIntent pi = PendingIntent.getBroadcast(this, reqCode, alarmIntent, flags);
-                    if (!enabled || !medActive) {
-                        am.cancel(pi);
-                        continue;
-                    }
-                    String[] parts = hStr.split(":");
-                    int hour = Integer.parseInt(parts[0].trim());
-                    int minute = Integer.parseInt(parts[1].trim());
-                    Calendar target = Calendar.getInstance();
-                    target.set(Calendar.HOUR_OF_DAY, hour);
-                    target.set(Calendar.MINUTE, minute);
-                    target.set(Calendar.SECOND, 0);
-                    target.set(Calendar.MILLISECOND, 0);
-                    if (target.getTimeInMillis() <= System.currentTimeMillis()) {
-                        target.add(Calendar.DAY_OF_YEAR, 1);
-                    }
-                    DoseAlarmReceiver.scheduleAlarmClockSafe(this, am, target.getTimeInMillis(), pi);
+            if (this.prefs != null && this.meds != null) {
+                SharedPreferences.Editor ed = this.prefs.edit();
+                ed.putString("meds", this.meds.toString());
+                if (this.profile != null) {
+                    ed.putString("profile", this.profile.toString());
                 }
+                ed.putBoolean("is_logged_in", this.isLoggedIn);
+                ed.apply();
             }
+            DoseAlarmReceiver.scheduleAlarmsFromStorage(this);
         } catch (Exception ignored) {}
     }
 
@@ -5899,10 +5857,11 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 String delId = med != null ? med.optString("id", "") : "";
+                DoseAlarmReceiver.cancelAllAlarmsForMed(MainActivity.this, med);
                 MainActivity.this.meds.remove(index);
                 deleteRemoteRecord("medicamentos", delId, "med");
-                scheduleAllMedicationAlarms();
                 saveAll();
+                scheduleAllMedicationAlarms();
                 render();
                 Toast.makeText(MainActivity.this, "🗑 " + (med != null ? med.optString("nome") : "Medicamento") + " excluído", 0).show();
             }
@@ -7580,6 +7539,9 @@ public class MainActivity extends Activity {
                         }
                         if (hrsArr.length() == 0) hrsArr.put("08:00");
                     }
+                    if (isEditing && jSONObject != null) {
+                        DoseAlarmReceiver.cancelAllAlarmsForMed(MainActivity.this, jSONObject);
+                    }
                     mObj.put("horarios", hrsArr);
                     mObj.put("frequencia", hrsArr.length() + "x ao dia");
 
@@ -7612,6 +7574,7 @@ public class MainActivity extends Activity {
                         MainActivity.this.medUnitFilter = "all";
                     }
                     saveAll();
+                    scheduleAllMedicationAlarms();
                     dialog.dismiss();
                     render();
                     if (isEditing && prevStock != Integer.MIN_VALUE && prevStock != newStock) {
