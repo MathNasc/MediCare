@@ -41,8 +41,8 @@ object DoseCalculator {
         return when {
             d > 15 -> DoseStatus.SCHEDULED
             d > 0 -> DoseStatus.UPCOMING
-            d > -30 -> DoseStatus.PENDING
-            d > -120 -> DoseStatus.LATE
+            d > -60 -> DoseStatus.PENDING
+            d > -720 -> DoseStatus.LATE
             else -> DoseStatus.MISSED
         }
     }

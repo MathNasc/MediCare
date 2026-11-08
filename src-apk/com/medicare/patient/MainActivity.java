@@ -4161,7 +4161,11 @@ public class MainActivity extends Activity {
                 String[] p2 = nowTime.split(":");
                 int mSched = Integer.parseInt(p1[0]) * 60 + Integer.parseInt(p1[1]);
                 int mNow = Integer.parseInt(p2[0]) * 60 + Integer.parseInt(p2[1]);
-                if (mNow > mSched) atrasoMin = mNow - mSched;
+                if (!actionDate.equals(normDate) && normDate.compareTo(actionDate) < 0) {
+                    atrasoMin = (1440 - mSched) + mNow;
+                } else if (mNow > mSched) {
+                    atrasoMin = mNow - mSched;
+                }
             } catch (Exception ignored) {}
 
             String entryId = !preservedId.isEmpty()
@@ -4332,13 +4336,17 @@ public class MainActivity extends Activity {
             int schedMin = Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
             Calendar cal = Calendar.getInstance();
             int nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
-            int diffMin = schedMin - nowMin;
-            if (Math.abs(diffMin) > 60) {
-                int hrs = Math.abs(diffMin) / 60;
-                int mins = Math.abs(diffMin) % 60;
+            String todayStr = todayIso();
+            int diffMin = (dateStr != null && dateStr.compareTo(todayStr) < 0)
+                ? ((schedMin - 1440) - nowMin)
+                : (schedMin - nowMin);
+            // Warn only when confirming a future dose more than 60 min early; overdue doses confirm immediately
+            if (diffMin > 60) {
+                int hrs = diffMin / 60;
+                int mins = diffMin % 60;
                 String timeStr = (hrs > 0 ? hrs + "h " : "") + mins + "min";
-                String dlgTitle = diffMin > 0 ? "⏰ Confirmar adiantado?" : "⚠️ Confirmar com atraso?";
-                String dlgMsg = "Esta dose de " + med.optString("nome") + " (" + horaStr + ") está " + timeStr + (diffMin > 0 ? " adiantada" : " atrasada") + " em relação ao horário programado. Deseja confirmar mesmo assim?";
+                String dlgTitle = "⏰ Confirmar adiantado?";
+                String dlgMsg = "Esta dose de " + med.optString("nome") + " (" + horaStr + ") está " + timeStr + " adiantada em relação ao horário programado. Deseja confirmar mesmo assim?";
                 showStyledConfirmDialog(dlgTitle, dlgMsg, "Sim, confirmar", "Cancelar", this.cSuccess, new Runnable() {
                     @Override
                     public void run() {
@@ -4409,8 +4417,30 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String yesterdayIso() {
+        Calendar cal = Calendar.getInstance();
+        cal.add(Calendar.DAY_OF_YEAR, -1);
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.getTime());
+    }
+
+    private boolean wasMedActiveOnDate(JSONObject med, String dateStr) {
+        if (med == null || dateStr == null) return false;
+        String start = optCleanString(med, "start_date", "");
+        if (start.length() >= 10) {
+            String startIso = start.substring(0, 10);
+            if (startIso.compareTo(dateStr) > 0) return false;
+        }
+        String created = optCleanString(med, "created_at", "");
+        if (created.length() >= 10) {
+            String createdIso = created.substring(0, 10);
+            if (createdIso.compareTo(dateStr) > 0) return false;
+        }
+        return true;
+    }
+
     private void buildHomeTab(LinearLayout linearLayout) {
         final String today = todayIso();
+        final String yesterday = yesterdayIso();
         String nowHm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
         int nowMins = Calendar.getInstance().get(Calendar.HOUR_OF_DAY) * 60 + Calendar.getInstance().get(Calendar.MINUTE);
 
@@ -4436,7 +4466,7 @@ public class MainActivity extends Activity {
         greetBox.addView(greetTv);
         linearLayout.addView(greetBox);
 
-        // 2. Collect today's scheduled doses, taken SOS doses & critical stock
+        // 2. Collect today's scheduled doses, late-night unconfirmed doses from yesterday (up to 12h grace window), taken SOS doses & critical stock
         ensureSosDoseLogsFromStockMovements();
         StringBuilder criticalSb = new StringBuilder();
         int criticalCount = 0;
@@ -4455,6 +4485,35 @@ public class MainActivity extends Activity {
                 if (!"sos".equals(tType)) {
                     JSONArray horarios = med.optJSONArray("horarios");
                     if (horarios != null) {
+                        // 2a. Check yesterday's late-night unconfirmed doses within 12-hour (720 min) grace window across midnight
+                        if (wasMedActiveOnDate(med, yesterday)) {
+                            for (int j = 0; j < horarios.length(); j++) {
+                                String hYd = horarios.optString(j, "08:00");
+                                String rawYdSt = getDoseStatus(med.optString("id"), yesterday, hYd);
+                                if (!"tomado".equals(rawYdSt) && !"pulado".equals(rawYdSt)) {
+                                    int hYdMins = 480;
+                                    try {
+                                        String[] p = hYd.split(":");
+                                        hYdMins = Integer.parseInt(p[0]) * 60 + Integer.parseInt(p[1]);
+                                    } catch (Exception ignored) {}
+                                    int diffAcrossMidnight = (1440 - hYdMins) + nowMins;
+                                    if (diffAcrossMidnight > 0 && diffAcrossMidnight <= 720) {
+                                        try {
+                                            JSONObject ydItem = new JSONObject();
+                                            ydItem.put("med", med);
+                                            ydItem.put("hora", hYd);
+                                            ydItem.put("date", yesterday);
+                                            ydItem.put("is_yesterday", true);
+                                            ydItem.put("status", diffAcrossMidnight <= 60 ? "pending" : "late");
+                                            ydItem.put("is_sos", false);
+                                            doseItems.add(ydItem);
+                                        } catch (Exception ignored) {}
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2b. Today's scheduled doses (with extended 12-hour grace window before "missed")
                         for (int j = 0; j < horarios.length(); j++) {
                             String h = horarios.optString(j, "08:00");
                             String rawSt = getDoseStatus(med.optString("id"), today, h);
@@ -4470,8 +4529,8 @@ public class MainActivity extends Activity {
                                 uiSt = "missed";
                             } else {
                                 int diff = nowMins - hMins;
-                                if (diff > 120) uiSt = "missed";
-                                else if (diff > 15) uiSt = "late";
+                                if (diff > 720) uiSt = "missed";
+                                else if (diff > 60) uiSt = "late";
                                 else if (diff >= -15) uiSt = "pending";
                                 else if (diff >= -60) uiSt = "soon";
                                 else uiSt = "upcoming";
@@ -4480,6 +4539,8 @@ public class MainActivity extends Activity {
                                 JSONObject item = new JSONObject();
                                 item.put("med", med);
                                 item.put("hora", h);
+                                item.put("date", today);
+                                item.put("is_yesterday", false);
                                 item.put("status", uiSt);
                                 item.put("is_sos", false);
                                 doseItems.add(item);
@@ -4509,6 +4570,8 @@ public class MainActivity extends Activity {
                         JSONObject item = new JSONObject();
                         item.put("med", matchedMed);
                         item.put("hora", h);
+                        item.put("date", today);
+                        item.put("is_yesterday", false);
                         item.put("status", "confirmed");
                         item.put("is_sos", true);
                         item.put("sos_log", dl);
@@ -4521,6 +4584,11 @@ public class MainActivity extends Activity {
         Collections.sort(doseItems, new Comparator<JSONObject>() {
             @Override
             public int compare(JSONObject a, JSONObject b) {
+                boolean ydA = a.optBoolean("is_yesterday", false);
+                boolean ydB = b.optBoolean("is_yesterday", false);
+                if (ydA != ydB) {
+                    return ydA ? -1 : 1;
+                }
                 return a.optString("hora", "").compareTo(b.optString("hora", ""));
             }
         });
@@ -4616,14 +4684,50 @@ public class MainActivity extends Activity {
             linearLayout.addView(critBanner);
         }
 
-        // 4. NextDoseHero (if there is at least one dose today)
+        // 4. NextDoseHero (prioritize active/pending/overdue doses so forgotten doses stay available to register)
         JSONObject nextDose = null;
+        // Priority 1: Doses due right now ("pending")
         for (int i = 0; i < doseItems.size(); i++) {
             JSONObject d = doseItems.get(i);
-            String st = d.optString("status");
-            if ("late".equals(st) || "pending".equals(st) || "soon".equals(st) || "upcoming".equals(st)) {
+            if ("pending".equals(d.optString("status"))) {
                 nextDose = d;
                 break;
+            }
+        }
+        // Priority 2: Overdue unconfirmed doses ("late", including yesterday's late-night doses within 12h grace window)
+        if (nextDose == null) {
+            for (int i = 0; i < doseItems.size(); i++) {
+                JSONObject d = doseItems.get(i);
+                if ("late".equals(d.optString("status"))) {
+                    nextDose = d;
+                    break;
+                }
+            }
+        }
+        // Priority 3: Upcoming doses ("soon" or "upcoming")
+        if (nextDose == null) {
+            for (int i = 0; i < doseItems.size(); i++) {
+                JSONObject d = doseItems.get(i);
+                String st = d.optString("status");
+                if ("soon".equals(st) || "upcoming".equals(st)) {
+                    nextDose = d;
+                    break;
+                }
+            }
+        }
+        // Priority 4: Any unconfirmed "missed" dose of today (if not explicitly skipped)
+        if (nextDose == null) {
+            for (int i = 0; i < doseItems.size(); i++) {
+                JSONObject d = doseItems.get(i);
+                if ("missed".equals(d.optString("status"))) {
+                    JSONObject dm = d.optJSONObject("med");
+                    String dDt = d.optString("date", today);
+                    String rawSt = dm != null ? getDoseStatus(dm.optString("id"), dDt, d.optString("hora")) : "";
+                    if (!"pulado".equals(rawSt)) {
+                        nextDose = d;
+                        break;
+                    }
+                }
             }
         }
         if (nextDose == null && !doseItems.isEmpty()) {
@@ -4638,8 +4742,10 @@ public class MainActivity extends Activity {
         if (nextDose != null) {
             final JSONObject heroMed = nextDose.optJSONObject("med");
             final String heroHora = nextDose.optString("hora");
+            final String heroDate = nextDose.optString("date", today);
+            final boolean heroIsYesterday = nextDose.optBoolean("is_yesterday", false);
             String heroSt = nextDose.optString("status");
-            boolean isLate = "late".equals(heroSt);
+            boolean isLate = "late".equals(heroSt) || "missed".equals(heroSt);
             boolean isPend = "pending".equals(heroSt) || "soon".equals(heroSt);
             boolean isDone = "confirmed".equals(heroSt);
             int accent = isLate ? this.cDanger : (isPend ? this.cWarning : (isDone ? this.cSuccess : this.cPrimary));
@@ -4661,7 +4767,7 @@ public class MainActivity extends Activity {
             heroLeft.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
 
             TextView badge = new TextView(this);
-            badge.setText(isLate ? "🚨 Dose atrasada" : (isPend ? "⏰ Hora do remédio" : (isDone ? "✅ Concluído" : "🕐 Próxima dose")));
+            badge.setText(heroIsYesterday ? "🚨 Dose pendente de ontem" : (isLate ? "🚨 Dose atrasada" : (isPend ? "⏰ Hora do remédio" : (isDone ? "✅ Concluído" : "🕐 Próxima dose"))));
             badge.setTextColor(accent);
             badge.setTextSize(sp(11.0f));
             badge.setTypeface(null, 1);
@@ -4694,7 +4800,7 @@ public class MainActivity extends Activity {
             heroTop.addView(hTime);
             heroCard.addView(heroTop);
 
-            JSONObject heroPendingReq = getPendingCaregiverRequest(heroMed.optString("id"), today, heroHora);
+            JSONObject heroPendingReq = getPendingCaregiverRequest(heroMed.optString("id"), heroDate, heroHora);
             if (heroPendingReq != null) {
                 TextView tvReqBanner = new TextView(this);
                 tvReqBanner.setText("⏳ Aguardando validação do cuidador • Motivo: \"" + heroPendingReq.optString("reason", "") + "\"");
@@ -4725,7 +4831,7 @@ public class MainActivity extends Activity {
                 btnConfirm.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        handleDoseConfirmWithWarning(heroMed, today, heroHora, false);
+                        handleDoseConfirmWithWarning(heroMed, heroDate, heroHora, false);
                     }
                 });
                 heroCard.addView(btnConfirm);
@@ -4742,10 +4848,30 @@ public class MainActivity extends Activity {
                 btnSnooze.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        handleDoseConfirmWithWarning(heroMed, today, heroHora, true);
+                        handleDoseConfirmWithWarning(heroMed, heroDate, heroHora, true);
                     }
                 });
                 heroCard.addView(btnSnooze);
+
+                if (isLate || heroIsYesterday) {
+                    TextView btnSkipOverdue = new TextView(this);
+                    btnSkipOverdue.setText("⏭  Pular esta dose (ir para a próxima)");
+                    btnSkipOverdue.setTextColor(this.cTextLight);
+                    btnSkipOverdue.setTextSize(sp(12.0f));
+                    btnSkipOverdue.setTypeface(null, 1);
+                    btnSkipOverdue.setGravity(17);
+                    btnSkipOverdue.setPadding(dp(10), dp(8), dp(10), dp(4));
+                    LinearLayout.LayoutParams skLp = new LinearLayout.LayoutParams(-1, -2);
+                    skLp.topMargin = dp(4);
+                    btnSkipOverdue.setLayoutParams(skLp);
+                    btnSkipOverdue.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            registerDose(heroMed, heroDate, heroHora, "pulado");
+                        }
+                    });
+                    heroCard.addView(btnSkipOverdue);
+                }
             } else {
                 TextView btnHeroUndo = new TextView(this);
                 btnHeroUndo.setText(heroPendingReq != null ? "🔔  Atualizar pedido de desfazimento" : "↩  Desfazer confirmação");
@@ -4761,7 +4887,7 @@ public class MainActivity extends Activity {
                 btnHeroUndo.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        showUndoConfirmDialog(heroMed, today, heroHora);
+                        showUndoConfirmDialog(heroMed, heroDate, heroHora);
                     }
                 });
                 heroCard.addView(btnHeroUndo);
@@ -4769,13 +4895,16 @@ public class MainActivity extends Activity {
             linearLayout.addView(heroCard);
         }
 
-        // 5. DayProgress Card (matching Screenshot 1)
+        // 5. DayProgress Card (counting today's doses)
         int confCount = 0;
         int pendCount = 0;
         int missCount = 0;
-        int totCount = doseItems.size();
-        for (int i = 0; i < totCount; i++) {
-            String st = doseItems.get(i).optString("status");
+        int totCount = 0;
+        for (int i = 0; i < doseItems.size(); i++) {
+            JSONObject d = doseItems.get(i);
+            if (d.optBoolean("is_yesterday", false)) continue;
+            totCount++;
+            String st = d.optString("status");
             if ("confirmed".equals(st)) confCount++;
             else if ("missed".equals(st)) missCount++;
             else pendCount++;
@@ -4901,6 +5030,8 @@ public class MainActivity extends Activity {
                 final JSONObject dItem = doseItems.get(i);
                 final JSONObject dMed = dItem.optJSONObject("med");
                 final String dHora = dItem.optString("hora");
+                final String dDate = dItem.optString("date", today);
+                final boolean dIsYesterday = dItem.optBoolean("is_yesterday", false);
                 final boolean isSosItem = dItem.optBoolean("is_sos", false);
                 final JSONObject dSosLog = dItem.optJSONObject("sos_log");
                 String dStatus = dItem.optString("status");
@@ -4911,7 +5042,7 @@ public class MainActivity extends Activity {
                 boolean isSoonDose = "soon".equals(dStatus);
 
                 int stColor = isConfirmed ? this.cSuccess : ((isMissed || isLateDose) ? this.cDanger : ((isPendingDose || isSoonDose) ? this.cWarning : this.cTextLight));
-                String stLabel = isSosItem ? "🆘 Uso SOS • Tomado" : (isConfirmed ? "Tomado" : (isLateDose ? "Atrasado" : (isPendingDose ? "Agora" : (isMissed ? "Perdida" : (isSoonDose ? "Em breve" : "Agendado")))));
+                String stLabel = isSosItem ? "🆘 Uso SOS • Tomado" : (dIsYesterday ? "Ontem • Pendente" : (isConfirmed ? "Tomado" : (isLateDose ? "Atrasado" : (isPendingDose ? "Agora" : (isMissed ? "Perdida" : (isSoonDose ? "Em breve" : "Agendado"))))));
                 String stIcon = isConfirmed ? "✓" : (isMissed ? "✕" : (isLateDose ? "!" : (isPendingDose ? "●" : "○")));
 
                 LinearLayout row = new LinearLayout(this);
@@ -5012,7 +5143,7 @@ public class MainActivity extends Activity {
                         dInfo.addView(tvSosMot);
                     }
                 }
-                JSONObject tlPendingReq = getPendingCaregiverRequest(dMed.optString("id"), today, dHora);
+                JSONObject tlPendingReq = getPendingCaregiverRequest(dMed.optString("id"), dDate, dHora);
                 if (tlPendingReq != null) {
                     TextView tvTlReq = new TextView(this);
                     tvTlReq.setText("⏳ Aguardando cuidador (" + tlPendingReq.optString("reason", "") + ")");
@@ -5035,7 +5166,7 @@ public class MainActivity extends Activity {
                     actBtn.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View v) {
-                            handleDoseConfirmWithWarning(dMed, today, dHora, false);
+                            handleDoseConfirmWithWarning(dMed, dDate, dHora, false);
                         }
                     });
                     dTop.addView(actBtn);
@@ -5051,9 +5182,9 @@ public class MainActivity extends Activity {
                         @Override
                         public void onClick(View v) {
                             if (isSosItem && dSosLog != null) {
-                                showUndoSosConfirmDialog(dSosLog, today, null);
+                                showUndoSosConfirmDialog(dSosLog, dDate, null);
                             } else {
-                                showUndoConfirmDialog(dMed, today, dHora);
+                                showUndoConfirmDialog(dMed, dDate, dHora);
                             }
                         }
                     });
