@@ -277,28 +277,128 @@ fun MedModalWizard(
                 }
 
                 3 -> {
-                    // Seletor de Cor da Pílula (10 cores)
-                    Text("Cor de identificação", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    // Seletor de Cor do Medicamento (6 cores padrão + 7º botão com círculo RGB e campo #FFFFFF)
+                    var showCustomColorPicker by remember { mutableStateOf(false) }
+                    val presetHexes = remember { listOf("#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899") }
+                    val isCustomSelected = presetHexes.none { it.equals(cor, ignoreCase = true) }
+
+                    Text("COR DO MEDICAMENTO", color = tokens.sub, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
-                        MediCareColors.PillPalette.forEach { hex ->
+                        presetHexes.forEach { hex ->
                             val c = MediCareColors.parseHex(hex)
                             val isSelected = cor.equals(hex, ignoreCase = true)
                             Box(
                                 modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
+                                    .weight(1f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(c)
                                     .border(
                                         width = if (isSelected) 3.dp else 0.dp,
                                         color = if (isSelected) Color.White else Color.Transparent,
-                                        shape = CircleShape
+                                        shape = RoundedCornerShape(10.dp)
                                     )
                                     .clickable { cor = hex }
                             )
+                        }
+
+                        // 7º botão: Escolher cor (Círculo RGB + #FFFFFF)
+                        val customColor = MediCareColors.parseHex(cor)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isCustomSelected) Brush.linearGradient(listOf(customColor, customColor))
+                                    else Brush.sweepGradient(
+                                        listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)
+                                    )
+                                )
+                                .border(
+                                    width = if (isCustomSelected) 3.dp else 1.5.dp,
+                                    color = if (isCustomSelected) Color.White else tokens.border,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { showCustomColorPicker = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🎨", fontSize = 14.sp)
+                        }
+                    }
+
+                    if (showCustomColorPicker) {
+                        var hexDraft by remember(cor) { mutableStateOf(cor.uppercase()) }
+                        Dialog(onDismissRequest = { showCustomColorPicker = false }) {
+                            Surface(
+                                shape = RoundedCornerShape(22.dp),
+                                color = tokens.bg2,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Escolher cor (RGB / HEX)", color = tokens.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                        TextButton(onClick = { showCustomColorPicker = false }) {
+                                            Text("✕", color = tokens.sub, fontSize = 16.sp)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(180.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.sweepGradient(
+                                                    listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)
+                                                )
+                                            )
+                                            .border(2.dp, tokens.border, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(54.dp)
+                                                .clip(CircleShape)
+                                                .background(Color.White)
+                                                .border(2.dp, MediCareColors.Blue, CircleShape)
+                                                .clickable { hexDraft = "#FFFFFF" }
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    OutlinedTextField(
+                                        value = hexDraft,
+                                        onValueChange = { hexDraft = it.uppercase() },
+                                        label = { Text("Código da cor (ex: #FFFFFF)") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Button(
+                                        onClick = {
+                                            val clean = hexDraft.trim().removePrefix("#")
+                                            if (clean.length == 6 && clean.all { ch -> ch.isDigit() || ch in 'A'..'F' }) {
+                                                cor = "#$clean"
+                                            }
+                                            showCustomColorPicker = false
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Blue)
+                                    ) {
+                                        Text("✓ Confirmar cor", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
                     }
 

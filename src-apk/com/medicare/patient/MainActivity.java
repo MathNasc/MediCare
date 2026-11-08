@@ -18,9 +18,12 @@ import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.RadialGradient;
 import android.graphics.Shader;
+import android.graphics.SweepGradient;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.ExifInterface;
@@ -38,6 +41,7 @@ import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.Base64;
 import android.util.TypedValue;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.CheckBox;
 import android.widget.DatePicker;
@@ -7100,10 +7104,10 @@ public class MainActivity extends Activity {
         treatBanner.addView(btnChangeTreat);
         body.addView(treatBanner);
 
-        // Color swatches: COR DO MEDICAMENTO (7 responsive flex swatches so none are ever clipped)
+        // Color swatches: COR DO MEDICAMENTO (6 presets + 7th custom RGB/HEX color picker button)
         body.addView(createFormLabel("COR DO MEDICAMENTO"));
-        final String[] pillColors = {"#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899", "#06B6D4"};
-        final String[] selectedColor = {isEditing ? jSONObject.optString("cor", "#3B82F6") : "#3B82F6"};
+        final String[] pillColors = {"#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899"};
+        final String[] selectedColor = {normalizeHexColor(isEditing ? jSONObject.optString("cor", "#3B82F6") : "#3B82F6", "#3B82F6")};
         final LinearLayout colorRow = new LinearLayout(this);
         colorRow.setOrientation(0);
         LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(-1, -2);
@@ -7114,15 +7118,17 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 colorRow.removeAllViews();
+                boolean matchedPreset = false;
                 for (int cIdx = 0; cIdx < pillColors.length; cIdx++) {
                     final String cHex = pillColors[cIdx];
                     boolean isSel = cHex.equalsIgnoreCase(selectedColor[0]);
+                    if (isSel) {
+                        matchedPreset = true;
+                    }
                     View sw = new View(MainActivity.this);
                     sw.setBackground(shape(Color.parseColor(cHex), 10, isSel ? Color.WHITE : Color.TRANSPARENT, isSel ? 3 : 0));
                     LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(0, dp(36), 1.0f);
-                    if (cIdx < pillColors.length - 1) {
-                        swLp.rightMargin = dp(7);
-                    }
+                    swLp.rightMargin = dp(7);
                     sw.setLayoutParams(swLp);
                     sw.setOnClickListener(new View.OnClickListener() {
                         @Override
@@ -7133,6 +7139,88 @@ public class MainActivity extends Activity {
                     });
                     colorRow.addView(sw);
                 }
+
+                // 7th (last) button: Custom RGB Wheel + HEX (#FFFFFF) Picker
+                final boolean isCustomSelected = !matchedPreset;
+                final int customColorInt = parseColorSafe(selectedColor[0], Color.parseColor("#3B82F6"));
+                View customBtn = new View(MainActivity.this) {
+                    private final Paint pWheel = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    private final Paint pCenter = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    private final Paint pStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+                    @Override
+                    protected void onDraw(Canvas canvas) {
+                        super.onDraw(canvas);
+                        int w = getWidth();
+                        int h = getHeight();
+                        if (w <= 0 || h <= 0) return;
+                        float r = dp(10);
+                        android.graphics.RectF rect = new android.graphics.RectF(dp(2), dp(2), w - dp(2), h - dp(2));
+
+                        if (isCustomSelected) {
+                            pCenter.setStyle(Paint.Style.FILL);
+                            pCenter.setColor(customColorInt);
+                            canvas.drawRoundRect(rect, r, r, pCenter);
+
+                            // Selection border (use cyan/blue outer accent if color is very bright like #FFFFFF, plus white/dark contrast)
+                            double lum = (0.299 * Color.red(customColorInt) + 0.587 * Color.green(customColorInt) + 0.114 * Color.blue(customColorInt)) / 255.0;
+                            pStroke.setStyle(Paint.Style.STROKE);
+                            pStroke.setStrokeWidth(dp(3));
+                            pStroke.setColor(lum > 0.85 ? Color.parseColor("#38BDF8") : Color.WHITE);
+                            canvas.drawRoundRect(rect, r, r, pStroke);
+
+                            // Small RGB ring indicator in the center so user knows they can tap again to change custom color
+                            float cx = w / 2.0f;
+                            float cy = h / 2.0f;
+                            float ringR = Math.min(w, h) * 0.24f;
+                            int[] rainbow = {
+                                Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED
+                            };
+                            pWheel.setStyle(Paint.Style.STROKE);
+                            pWheel.setStrokeWidth(dp(3));
+                            pWheel.setShader(new SweepGradient(cx, cy, rainbow, null));
+                            canvas.drawCircle(cx, cy, ringR, pWheel);
+                        } else {
+                            // Unselected state: dark surface + vibrant RGB wheel icon in center
+                            pCenter.setStyle(Paint.Style.FILL);
+                            pCenter.setColor(Color.parseColor("#1E293B"));
+                            canvas.drawRoundRect(rect, r, r, pCenter);
+
+                            pStroke.setStyle(Paint.Style.STROKE);
+                            pStroke.setStrokeWidth(dp(2));
+                            pStroke.setColor(Color.parseColor("#475569"));
+                            canvas.drawRoundRect(rect, r, r, pStroke);
+
+                            float cx = w / 2.0f;
+                            float cy = h / 2.0f;
+                            float wheelR = Math.min(w, h) * 0.32f;
+                            int[] rainbow = {
+                                Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED
+                            };
+                            pWheel.setStyle(Paint.Style.FILL);
+                            pWheel.setShader(new SweepGradient(cx, cy, rainbow, null));
+                            canvas.drawCircle(cx, cy, wheelR, pWheel);
+
+                            Paint pWhiteCenter = new Paint(Paint.ANTI_ALIAS_FLAG);
+                            pWhiteCenter.setShader(new RadialGradient(cx, cy, wheelR, Color.WHITE, Color.TRANSPARENT, Shader.TileMode.CLAMP));
+                            canvas.drawCircle(cx, cy, wheelR, pWhiteCenter);
+
+                            pStroke.setStrokeWidth(dp(2));
+                            pStroke.setColor(Color.WHITE);
+                            canvas.drawCircle(cx, cy, wheelR, pStroke);
+                        }
+                    }
+                };
+                LinearLayout.LayoutParams customLp = new LinearLayout.LayoutParams(0, dp(36), 1.0f);
+                customBtn.setLayoutParams(customLp);
+                final Runnable selfRender = this;
+                customBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showCustomColorPickerDialog(selectedColor[0], selectedColor, selfRender);
+                    }
+                });
+                colorRow.addView(customBtn);
             }
         };
         renderColors.run();
@@ -7585,6 +7673,406 @@ public class MainActivity extends Activity {
         });
         footerBar.addView(btnSaveMed);
         root.addView(footerBar);
+
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    private int parseColorSafe(String hex, int fallback) {
+        if (hex == null) return fallback;
+        try {
+            return Color.parseColor(normalizeHexColor(hex, null));
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private String normalizeHexColor(String raw, String fallback) {
+        if (raw == null) return fallback;
+        String clean = raw.trim().toUpperCase(Locale.US);
+        if (clean.startsWith("#")) {
+            clean = clean.substring(1).trim();
+        }
+        if (clean.length() == 3) {
+            char r = clean.charAt(0);
+            char g = clean.charAt(1);
+            char b = clean.charAt(2);
+            clean = "" + r + r + g + g + b + b;
+        }
+        if (clean.length() == 6 && clean.matches("[0-9A-F]{6}")) {
+            return "#" + clean;
+        }
+        return fallback;
+    }
+
+    private void showCustomColorPickerDialog(String initialHex, final String[] targetColorHolder, final Runnable onColorApplied) {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        int initColor = parseColorSafe(initialHex, Color.parseColor("#3B82F6"));
+        final float[] hsv = new float[3];
+        Color.colorToHSV(initColor, hsv);
+        final boolean[] updatingTextProgrammatically = {false};
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 22, this.cBorder, 1));
+        root.setPadding(dp(18), dp(16), dp(18), dp(16));
+
+        // Header
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        LinearLayout.LayoutParams hdrLp = new LinearLayout.LayoutParams(-1, -2);
+        hdrLp.bottomMargin = dp(12);
+        hdr.setLayoutParams(hdrLp);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Escolher cor (RGB / HEX)");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(17.0f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hdr.addView(tvTitle);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(15.0f));
+        btnClose.setTypeface(null, 1);
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 17, 0, 0));
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        TextView tvHint = new TextView(this);
+        tvHint.setText("Toque ou arraste no círculo RGB (centro = #FFFFFF) ou digite o código abaixo:");
+        tvHint.setTextColor(this.cTextMuted);
+        tvHint.setTextSize(sp(12.0f));
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
+        hintLp.bottomMargin = dp(12);
+        tvHint.setLayoutParams(hintLp);
+        root.addView(tvHint);
+
+        final View[] wheelHolder = new View[1];
+        final View[] valBarHolder = new View[1];
+        final View previewBox = new View(this);
+        final EditText hexInput = createInput("#FFFFFF", String.format(Locale.US, "#%06X", (0xFFFFFF & initColor)));
+        final TextView tvRgbVal = new TextView(this);
+
+        final Runnable syncUiFromHsv = new Runnable() {
+            @Override
+            public void run() {
+                int c = Color.HSVToColor(hsv);
+                String hexStr = String.format(Locale.US, "#%06X", (0xFFFFFF & c));
+                double lum = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)) / 255.0;
+                previewBox.setBackground(shape(c, 12, lum > 0.85 ? Color.parseColor("#38BDF8") : Color.WHITE, 2));
+                tvRgbVal.setText(String.format(Locale.US, "RGB(%d, %d, %d)", Color.red(c), Color.green(c), Color.blue(c)));
+                if (wheelHolder[0] != null) wheelHolder[0].invalidate();
+                if (valBarHolder[0] != null) valBarHolder[0].invalidate();
+
+                updatingTextProgrammatically[0] = true;
+                String currentText = hexInput.getText().toString().trim();
+                String normCurrent = normalizeHexColor(currentText, "");
+                if (!hexStr.equalsIgnoreCase(normCurrent)) {
+                    hexInput.setText(hexStr);
+                    hexInput.setSelection(hexInput.getText().length());
+                }
+                updatingTextProgrammatically[0] = false;
+            }
+        };
+
+        // Interactive RGB Color Wheel View
+        LinearLayout wheelWrap = new LinearLayout(this);
+        wheelWrap.setOrientation(1);
+        wheelWrap.setGravity(17);
+        LinearLayout.LayoutParams wwLp = new LinearLayout.LayoutParams(-1, -2);
+        wwLp.bottomMargin = dp(12);
+        wheelWrap.setLayoutParams(wwLp);
+
+        View rgbWheelView = new View(this) {
+            private final Paint pHue = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint pSat = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint pVal = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint pBorder = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint pThumbFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint pThumbStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+            @Override
+            protected void onDraw(Canvas canvas) {
+                super.onDraw(canvas);
+                int w = getWidth();
+                int h = getHeight();
+                if (w <= 0 || h <= 0) return;
+                float cx = w / 2.0f;
+                float cy = h / 2.0f;
+                float radius = Math.min(w, h) / 2.0f - dp(10);
+                if (radius <= 0) return;
+
+                int[] hueColors = {
+                    Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED
+                };
+                pHue.setStyle(Paint.Style.FILL);
+                pHue.setShader(new SweepGradient(cx, cy, hueColors, null));
+                canvas.drawCircle(cx, cy, radius, pHue);
+
+                pSat.setStyle(Paint.Style.FILL);
+                pSat.setShader(new RadialGradient(cx, cy, radius, Color.WHITE, Color.TRANSPARENT, Shader.TileMode.CLAMP));
+                canvas.drawCircle(cx, cy, radius, pSat);
+
+                int darkAlpha = Math.round((1.0f - hsv[2]) * 255.0f);
+                if (darkAlpha > 0) {
+                    pVal.setStyle(Paint.Style.FILL);
+                    pVal.setColor(Color.argb(Math.min(255, Math.max(0, darkAlpha)), 0, 0, 0));
+                    canvas.drawCircle(cx, cy, radius, pVal);
+                }
+
+                pBorder.setStyle(Paint.Style.STROKE);
+                pBorder.setStrokeWidth(dp(2));
+                pBorder.setColor(Color.parseColor("#475569"));
+                canvas.drawCircle(cx, cy, radius, pBorder);
+
+                // Thumb position from hsv[0] (angle in degrees) and hsv[1] (saturation 0..1)
+                double rad = Math.toRadians(hsv[0]);
+                float dist = hsv[1] * radius;
+                float tx = cx + (float) (Math.cos(rad) * dist);
+                float ty = cy + (float) (Math.sin(rad) * dist);
+
+                int curCol = Color.HSVToColor(hsv);
+                pThumbFill.setStyle(Paint.Style.FILL);
+                pThumbFill.setColor(curCol);
+                canvas.drawCircle(tx, ty, dp(11), pThumbFill);
+
+                pThumbStroke.setStyle(Paint.Style.STROKE);
+                pThumbStroke.setStrokeWidth(dp(3));
+                pThumbStroke.setColor(Color.WHITE);
+                canvas.drawCircle(tx, ty, dp(11), pThumbStroke);
+
+                pThumbStroke.setStrokeWidth(dp(2));
+                pThumbStroke.setColor(Color.parseColor("#0F172A"));
+                canvas.drawCircle(tx, ty, dp(13), pThumbStroke);
+            }
+
+            @Override
+            public boolean onTouchEvent(MotionEvent event) {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
+                    if (getParent() != null) {
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    float cx = getWidth() / 2.0f;
+                    float cy = getHeight() / 2.0f;
+                    float radius = Math.min(getWidth(), getHeight()) / 2.0f - dp(10);
+                    if (radius > 0) {
+                        float dx = event.getX() - cx;
+                        float dy = event.getY() - cy;
+                        float dist = (float) Math.sqrt(dx * dx + dy * dy);
+                        float sat = Math.min(1.0f, Math.max(0.0f, dist / radius));
+                        float angle = (float) Math.toDegrees(Math.atan2(dy, dx));
+                        if (angle < 0) angle += 360.0f;
+                        hsv[0] = angle;
+                        hsv[1] = sat;
+                        syncUiFromHsv.run();
+                    }
+                    return true;
+                }
+                return super.onTouchEvent(event);
+            }
+        };
+        rgbWheelView.setLayoutParams(new LinearLayout.LayoutParams(dp(205), dp(205)));
+        wheelHolder[0] = rgbWheelView;
+        wheelWrap.addView(rgbWheelView);
+        root.addView(wheelWrap);
+
+        // Brightness / Luminosity Slider
+        TextView tvLumLabel = createFormLabel("BRILHO / LUMINOSIDADE");
+        root.addView(tvLumLabel);
+
+        View valBarView = new View(this) {
+            private final Paint pBar = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint pStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint pThumb = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+            @Override
+            protected void onDraw(Canvas canvas) {
+                super.onDraw(canvas);
+                int w = getWidth();
+                int h = getHeight();
+                if (w <= 0 || h <= 0) return;
+                float pad = dp(10);
+                float trackLeft = pad;
+                float trackRight = w - pad;
+                float trackTop = (h - dp(14)) / 2.0f;
+                float trackBottom = trackTop + dp(14);
+                android.graphics.RectF rect = new android.graphics.RectF(trackLeft, trackTop, trackRight, trackBottom);
+
+                int fullValColor = Color.HSVToColor(new float[]{hsv[0], hsv[1], 1.0f});
+                pBar.setStyle(Paint.Style.FILL);
+                pBar.setShader(new LinearGradient(trackLeft, 0, trackRight, 0, Color.BLACK, fullValColor, Shader.TileMode.CLAMP));
+                canvas.drawRoundRect(rect, dp(7), dp(7), pBar);
+
+                pStroke.setStyle(Paint.Style.STROKE);
+                pStroke.setStrokeWidth(dp(1));
+                pStroke.setColor(Color.parseColor("#475569"));
+                canvas.drawRoundRect(rect, dp(7), dp(7), pStroke);
+
+                float tx = trackLeft + hsv[2] * (trackRight - trackLeft);
+                float ty = h / 2.0f;
+                pThumb.setStyle(Paint.Style.FILL);
+                pThumb.setColor(Color.HSVToColor(hsv));
+                canvas.drawCircle(tx, ty, dp(9), pThumb);
+
+                pStroke.setStrokeWidth(dp(3));
+                pStroke.setColor(Color.WHITE);
+                canvas.drawCircle(tx, ty, dp(9), pStroke);
+            }
+
+            @Override
+            public boolean onTouchEvent(MotionEvent event) {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
+                    if (getParent() != null) {
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    float pad = dp(10);
+                    float trackW = getWidth() - 2 * pad;
+                    if (trackW > 0) {
+                        float v = (event.getX() - pad) / trackW;
+                        hsv[2] = Math.min(1.0f, Math.max(0.0f, v));
+                        syncUiFromHsv.run();
+                    }
+                    return true;
+                }
+                return super.onTouchEvent(event);
+            }
+        };
+        LinearLayout.LayoutParams vbLp = new LinearLayout.LayoutParams(-1, dp(30));
+        vbLp.bottomMargin = dp(12);
+        valBarView.setLayoutParams(vbLp);
+        valBarHolder[0] = valBarView;
+        root.addView(valBarView);
+
+        // Hex Input + Live Color Preview Row
+        LinearLayout hexHdrRow = new LinearLayout(this);
+        hexHdrRow.setOrientation(0);
+        hexHdrRow.setGravity(16);
+        TextView tvHexLbl = createFormLabel("CÓDIGO DA COR (EX: #FFFFFF)");
+        tvHexLbl.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hexHdrRow.addView(tvHexLbl);
+
+        tvRgbVal.setTextColor(this.cPrimary);
+        tvRgbVal.setTextSize(sp(11.0f));
+        tvRgbVal.setTypeface(null, 1);
+        tvRgbVal.setPadding(0, 0, 0, dp(6));
+        hexHdrRow.addView(tvRgbVal);
+        root.addView(hexHdrRow);
+
+        LinearLayout hexRow = new LinearLayout(this);
+        hexRow.setOrientation(0);
+        hexRow.setGravity(16);
+        LinearLayout.LayoutParams hrLp = new LinearLayout.LayoutParams(-1, -2);
+        hrLp.bottomMargin = dp(12);
+        hexRow.setLayoutParams(hrLp);
+
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(dp(46), dp(46));
+        pbLp.rightMargin = dp(10);
+        previewBox.setLayoutParams(pbLp);
+        hexRow.addView(previewBox);
+
+        LinearLayout.LayoutParams hiLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        hiLp.bottomMargin = 0;
+        hexInput.setLayoutParams(hiLp);
+        hexInput.setSingleLine(true);
+        hexInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        hexInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (updatingTextProgrammatically[0]) return;
+                String raw = s.toString().trim();
+                String clean = raw.startsWith("#") ? raw.substring(1).trim() : raw;
+                // Only auto-apply while typing when 6 valid hex digits are entered (so typing #FFF... towards #FFFFFF isn't interrupted at 3 chars)
+                if (clean.length() == 6 && clean.matches("[0-9A-Fa-f]{6}")) {
+                    try {
+                        int parsed = Color.parseColor("#" + clean);
+                        Color.colorToHSV(parsed, hsv);
+                        double lum = (0.299 * Color.red(parsed) + 0.587 * Color.green(parsed) + 0.114 * Color.blue(parsed)) / 255.0;
+                        previewBox.setBackground(shape(parsed, 12, lum > 0.85 ? Color.parseColor("#38BDF8") : Color.WHITE, 2));
+                        tvRgbVal.setText(String.format(Locale.US, "RGB(%d, %d, %d)", Color.red(parsed), Color.green(parsed), Color.blue(parsed)));
+                        if (wheelHolder[0] != null) wheelHolder[0].invalidate();
+                        if (valBarHolder[0] != null) valBarHolder[0].invalidate();
+                    } catch (Exception ignored) {}
+                }
+            }
+        });
+        hexRow.addView(hexInput);
+        root.addView(hexRow);
+
+        // Quick preset chips including #FFFFFF (Branco) and #06B6D4 (Ciano)
+        final String[] quickHexes = {"#FFFFFF", "#06B6D4", "#38BDF8", "#10B981", "#F43F5E", "#EAB308", "#94A3B8"};
+        LinearLayout quickRow = new LinearLayout(this);
+        quickRow.setOrientation(0);
+        LinearLayout.LayoutParams qrLp = new LinearLayout.LayoutParams(-1, -2);
+        qrLp.bottomMargin = dp(16);
+        quickRow.setLayoutParams(qrLp);
+        for (int qIdx = 0; qIdx < quickHexes.length; qIdx++) {
+            final String qHex = quickHexes[qIdx];
+            View qBtn = new View(this);
+            int qCol = Color.parseColor(qHex);
+            qBtn.setBackground(shape(qCol, 8, Color.parseColor("#475569"), 1));
+            LinearLayout.LayoutParams qLp = new LinearLayout.LayoutParams(0, dp(28), 1.0f);
+            if (qIdx < quickHexes.length - 1) qLp.rightMargin = dp(6);
+            qBtn.setLayoutParams(qLp);
+            qBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Color.colorToHSV(Color.parseColor(qHex), hsv);
+                    syncUiFromHsv.run();
+                }
+            });
+            quickRow.addView(qBtn);
+        }
+        root.addView(quickRow);
+
+        syncUiFromHsv.run();
+
+        // Confirm button
+        TextView btnConfirm = new TextView(this);
+        btnConfirm.setText("✓ Confirmar cor");
+        btnConfirm.setTextColor(Color.WHITE);
+        btnConfirm.setTextSize(sp(15.0f));
+        btnConfirm.setTypeface(null, 1);
+        btnConfirm.setGravity(17);
+        btnConfirm.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 14));
+        btnConfirm.setPadding(dp(16), dp(13), dp(16), dp(13));
+        btnConfirm.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String typed = hexInput.getText().toString().trim();
+                String finalHex = normalizeHexColor(typed, null);
+                if (finalHex == null) {
+                    int c = Color.HSVToColor(hsv);
+                    finalHex = String.format(Locale.US, "#%06X", (0xFFFFFF & c));
+                }
+                targetColorHolder[0] = finalHex;
+                if (onColorApplied != null) {
+                    onColorApplied.run();
+                }
+                dialog.dismiss();
+            }
+        });
+        root.addView(btnConfirm);
 
         dialog.setView(root);
         dialog.show();
