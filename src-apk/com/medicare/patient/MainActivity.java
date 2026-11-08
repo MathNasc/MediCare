@@ -8,8 +8,11 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.TimePickerDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -164,6 +167,13 @@ public class MainActivity extends Activity {
     private volatile long localMutationVersion = 0L;
     private final Object syncNetworkLock = new Object();
     private boolean isActivityResumed = false;
+    private long lastHandledNotifConfirmMs = 0L;
+    private final BroadcastReceiver notifActionUiReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            MainActivity.this.reloadIfUpdatedByNotification();
+        }
+    };
     private final Handler syncPollHandler = new Handler(Looper.getMainLooper());
     private final Runnable syncPollRunnable = new Runnable() {
         @Override
@@ -175,11 +185,48 @@ public class MainActivity extends Activity {
         }
     };
 
+    private void reloadIfUpdatedByNotification() {
+        try {
+            if (this.prefs == null) return;
+            long notifMs = this.prefs.getLong("notif_dose_confirmed_at_ms", 0L);
+            if (notifMs > this.lastHandledNotifConfirmMs) {
+                this.lastHandledNotifConfirmMs = notifMs;
+                this.meds = new JSONArray(this.prefs.getString("meds", "[]"));
+                this.doseLogs = new JSONArray(this.prefs.getString("dose_logs", "[]"));
+                this.stockMovements = new JSONArray(this.prefs.getString("stock_movements", "[]"));
+                sanitizeAllInMemoryData();
+                deduplicateStockMovements();
+                saveAll();
+                render();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void handleNotificationAutoActionIntent(Intent intent) {
+        try {
+            if (intent == null || !this.isLoggedIn) return;
+            String autoAction = intent.getStringExtra("notif_auto_action");
+            String medId = intent.getStringExtra("med_id");
+            String medTime = intent.getStringExtra("med_time");
+            if ("confirm".equals(autoAction) && medId != null && !medId.trim().isEmpty()) {
+                intent.removeExtra("notif_auto_action");
+                for (int i = 0; i < this.meds.length(); i++) {
+                    JSONObject m = this.meds.optJSONObject(i);
+                    if (m != null && medId.trim().equalsIgnoreCase(m.optString("id", "").trim())) {
+                        handleDoseConfirmWithWarning(m, todayIso(), medTime != null ? medTime : "08:00", false);
+                        break;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     @Override // android.app.Activity
     protected void onCreate(Bundle bundle) {
         super.onCreate(bundle);
         requestWindowFeature(1);
         this.prefs = getSharedPreferences("medicare_patient_store_v2", 0);
+        this.lastHandledNotifConfirmMs = this.prefs.getLong("notif_dose_confirmed_at_ms", 0L);
         this.selectedCalDate = todayIso();
         Calendar cal = Calendar.getInstance();
         this.calYear = cal.get(Calendar.YEAR);
@@ -191,13 +238,31 @@ public class MainActivity extends Activity {
         this.rootContainer = frameLayout;
         setContentView(frameLayout);
         render();
+        handleNotificationAutoActionIntent(getIntent());
         pullFromBackendIfEmptyOrUpdated();
+    }
+
+    @Override // android.app.Activity
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        reloadIfUpdatedByNotification();
+        handleNotificationAutoActionIntent(intent);
     }
 
     @Override // android.app.Activity
     protected void onResume() {
         super.onResume();
         this.isActivityResumed = true;
+        try {
+            IntentFilter filter = new IntentFilter(DoseAlarmReceiver.ACTION_REFRESH_UI);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(this.notifActionUiReceiver, filter, 4);
+            } else {
+                registerReceiver(this.notifActionUiReceiver, filter);
+            }
+        } catch (Exception ignored) {}
+        reloadIfUpdatedByNotification();
         this.syncPollHandler.removeCallbacks(this.syncPollRunnable);
         if (this.isLoggedIn) {
             ensureNotificationChannel();
@@ -210,6 +275,9 @@ public class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onPause() {
         this.isActivityResumed = false;
+        try {
+            unregisterReceiver(this.notifActionUiReceiver);
+        } catch (Exception ignored) {}
         this.syncPollHandler.removeCallbacks(this.syncPollRunnable);
         super.onPause();
     }
@@ -2242,6 +2310,8 @@ public class MainActivity extends Activity {
 
     private int getPendingDosesCountToday() {
         int count = 0;
+        int nowMins = Calendar.getInstance().get(Calendar.HOUR_OF_DAY) * 60 + Calendar.getInstance().get(Calendar.MINUTE);
+        String today = todayIso();
         for (int i = 0; i < this.meds.length(); i++) {
             JSONObject med = this.meds.optJSONObject(i);
             if (med != null && med.optBoolean("ativo", true)) {
@@ -2251,10 +2321,18 @@ public class MainActivity extends Activity {
                     JSONArray horarios = med.optJSONArray("horarios");
                     if (horarios != null) {
                         for (int j = 0; j < horarios.length(); j++) {
-                            String h = horarios.optString(j);
-                            String st = getDoseStatus(medId, todayIso(), h);
-                            if (!"tomado".equals(st) && !"tomada".equals(st) && !"confirmed".equals(st) && !"pulada".equals(st)) {
-                                count++;
+                            String h = horarios.optString(j, "08:00");
+                            String st = getDoseStatus(medId, today, h);
+                            if (!"tomado".equals(st) && !"tomada".equals(st) && !"confirmed".equals(st) && !"pulado".equals(st) && !"pulada".equals(st)) {
+                                int hMins = 480;
+                                try {
+                                    String[] p = h.split(":");
+                                    hMins = Integer.parseInt(p[0].trim()) * 60 + Integer.parseInt(p[1].trim());
+                                } catch (Exception ignored) {}
+                                // After 3 hours (180 minutes), dose is considered missed ("Perdida"), not pending
+                                if ((nowMins - hMins) <= 180) {
+                                    count++;
+                                }
                             }
                         }
                     }
@@ -4485,7 +4563,7 @@ public class MainActivity extends Activity {
                 if (!"sos".equals(tType)) {
                     JSONArray horarios = med.optJSONArray("horarios");
                     if (horarios != null) {
-                        // 2a. Check yesterday's late-night unconfirmed doses within 12-hour (720 min) grace window across midnight
+                        // 2a. Check yesterday's late-night unconfirmed doses within 3-hour (180 min) grace window across midnight
                         if (wasMedActiveOnDate(med, yesterday)) {
                             for (int j = 0; j < horarios.length(); j++) {
                                 String hYd = horarios.optString(j, "08:00");
@@ -4497,14 +4575,14 @@ public class MainActivity extends Activity {
                                         hYdMins = Integer.parseInt(p[0]) * 60 + Integer.parseInt(p[1]);
                                     } catch (Exception ignored) {}
                                     int diffAcrossMidnight = (1440 - hYdMins) + nowMins;
-                                    if (diffAcrossMidnight > 0 && diffAcrossMidnight <= 720) {
+                                    if (diffAcrossMidnight > 0 && diffAcrossMidnight <= 180) {
                                         try {
                                             JSONObject ydItem = new JSONObject();
                                             ydItem.put("med", med);
                                             ydItem.put("hora", hYd);
                                             ydItem.put("date", yesterday);
                                             ydItem.put("is_yesterday", true);
-                                            ydItem.put("status", diffAcrossMidnight <= 60 ? "pending" : "late");
+                                            ydItem.put("status", diffAcrossMidnight <= 30 ? "pending" : "late");
                                             ydItem.put("is_sos", false);
                                             doseItems.add(ydItem);
                                         } catch (Exception ignored) {}
@@ -4513,7 +4591,7 @@ public class MainActivity extends Activity {
                             }
                         }
 
-                        // 2b. Today's scheduled doses (with extended 12-hour grace window before "missed")
+                        // 2b. Today's scheduled doses (3-hour / 180-minute limit before becoming "missed" / Perdida)
                         for (int j = 0; j < horarios.length(); j++) {
                             String h = horarios.optString(j, "08:00");
                             String rawSt = getDoseStatus(med.optString("id"), today, h);
@@ -4529,11 +4607,18 @@ public class MainActivity extends Activity {
                                 uiSt = "missed";
                             } else {
                                 int diff = nowMins - hMins;
-                                if (diff > 720) uiSt = "missed";
-                                else if (diff > 60) uiSt = "late";
-                                else if (diff >= -15) uiSt = "pending";
-                                else if (diff >= -60) uiSt = "soon";
-                                else uiSt = "upcoming";
+                                if (diff > 180) {
+                                    uiSt = "missed";
+                                    DoseAlarmReceiver.cancelSnoozeForDose(this, med.optString("id"), h);
+                                } else if (diff > 30) {
+                                    uiSt = "late";
+                                } else if (diff >= -15) {
+                                    uiSt = "pending";
+                                } else if (diff >= -60) {
+                                    uiSt = "soon";
+                                } else {
+                                    uiSt = "upcoming";
+                                }
                             }
                             try {
                                 JSONObject item = new JSONObject();
@@ -4684,7 +4769,7 @@ public class MainActivity extends Activity {
             linearLayout.addView(critBanner);
         }
 
-        // 4. NextDoseHero (prioritize active/pending/overdue doses so forgotten doses stay available to register)
+        // 4. NextDoseHero (only doses within the 3h window or upcoming; >3h overdue becomes "missed" / Perdida and advances to the next dose)
         JSONObject nextDose = null;
         // Priority 1: Doses due right now ("pending")
         for (int i = 0; i < doseItems.size(); i++) {
@@ -4694,7 +4779,7 @@ public class MainActivity extends Activity {
                 break;
             }
         }
-        // Priority 2: Overdue unconfirmed doses ("late", including yesterday's late-night doses within 12h grace window)
+        // Priority 2: Overdue unconfirmed doses within the 3-hour window ("late")
         if (nextDose == null) {
             for (int i = 0; i < doseItems.size(); i++) {
                 JSONObject d = doseItems.get(i);
@@ -4715,21 +4800,6 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        // Priority 4: Any unconfirmed "missed" dose of today (if not explicitly skipped)
-        if (nextDose == null) {
-            for (int i = 0; i < doseItems.size(); i++) {
-                JSONObject d = doseItems.get(i);
-                if ("missed".equals(d.optString("status"))) {
-                    JSONObject dm = d.optJSONObject("med");
-                    String dDt = d.optString("date", today);
-                    String rawSt = dm != null ? getDoseStatus(dm.optString("id"), dDt, d.optString("hora")) : "";
-                    if (!"pulado".equals(rawSt)) {
-                        nextDose = d;
-                        break;
-                    }
-                }
-            }
-        }
         if (nextDose == null && !doseItems.isEmpty()) {
             for (int i = 0; i < doseItems.size(); i++) {
                 if ("confirmed".equals(doseItems.get(i).optString("status"))) {
@@ -4745,7 +4815,7 @@ public class MainActivity extends Activity {
             final String heroDate = nextDose.optString("date", today);
             final boolean heroIsYesterday = nextDose.optBoolean("is_yesterday", false);
             String heroSt = nextDose.optString("status");
-            boolean isLate = "late".equals(heroSt) || "missed".equals(heroSt);
+            boolean isLate = "late".equals(heroSt);
             boolean isPend = "pending".equals(heroSt) || "soon".equals(heroSt);
             boolean isDone = "confirmed".equals(heroSt);
             int accent = isLate ? this.cDanger : (isPend ? this.cWarning : (isDone ? this.cSuccess : this.cPrimary));
@@ -5157,12 +5227,21 @@ public class MainActivity extends Activity {
 
                 if (!isConfirmed) {
                     TextView actBtn = new TextView(this);
-                    actBtn.setText(tlPendingReq != null ? "⏳ Pendente" : "Tomar");
-                    actBtn.setTextColor(-1);
-                    actBtn.setTextSize(sp(12.0f));
-                    actBtn.setTypeface(null, 1);
-                    actBtn.setBackground(shape(tlPendingReq != null ? this.cWarning : (isLateDose ? this.cDanger : Color.parseColor("#16A34A")), 10, 0, 0));
-                    actBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+                    if (isMissed) {
+                        actBtn.setText("Perdida");
+                        actBtn.setTextColor(this.cDanger);
+                        actBtn.setTextSize(sp(11.5f));
+                        actBtn.setTypeface(null, 1);
+                        actBtn.setBackground(shape(Color.parseColor("#1AEF4444"), 10, Color.parseColor("#4DEF4444"), 1));
+                        actBtn.setPadding(dp(10), dp(7), dp(10), dp(7));
+                    } else {
+                        actBtn.setText(tlPendingReq != null ? "⏳ Pendente" : "Tomar");
+                        actBtn.setTextColor(-1);
+                        actBtn.setTextSize(sp(12.0f));
+                        actBtn.setTypeface(null, 1);
+                        actBtn.setBackground(shape(tlPendingReq != null ? this.cWarning : (isLateDose ? this.cDanger : Color.parseColor("#16A34A")), 10, 0, 0));
+                        actBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+                    }
                     actBtn.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View v) {

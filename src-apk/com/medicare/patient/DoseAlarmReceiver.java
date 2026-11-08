@@ -13,11 +13,17 @@ import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
+import android.widget.Toast;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
+import java.util.TimeZone;
+import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -29,6 +35,9 @@ import java.util.Set;
 public class DoseAlarmReceiver extends BroadcastReceiver {
     public static final String CHANNEL_ID = "medicare_doses_alarm_v2";
     public static final String ACTION_DOSE_ALARM = "br.com.medicare.paciente.ACTION_DOSE_ALARM";
+    public static final String ACTION_CONFIRM_DOSE = "br.com.medicare.paciente.ACTION_CONFIRM_DOSE";
+    public static final String ACTION_SNOOZE_DOSE = "br.com.medicare.paciente.ACTION_SNOOZE_DOSE";
+    public static final String ACTION_REFRESH_UI = "br.com.medicare.paciente.ACTION_REFRESH_UI";
     private static final String PREFS_NAME = "medicare_patient_store_v2";
     private static final String PREF_SCHEDULED_ALARM_KEYS = "scheduled_alarm_keys_v1";
 
@@ -465,6 +474,237 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
         return false;
     }
 
+    private static void showToastOnMainThread(final Context context, final String message) {
+        if (context == null || message == null) return;
+        try {
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Toast.makeText(context.getApplicationContext(), message, Toast.LENGTH_LONG).show();
+                    } catch (Exception ignored) {}
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private static int readMedStockSafe(JSONObject med) {
+        if (med == null) return 0;
+        String[] keys = {"quantidade", "estoque", "estoque_atual", "stock"};
+        for (int i = 0; i < keys.length; i++) {
+            if (med.has(keys[i])) {
+                int v = med.optInt(keys[i], Integer.MIN_VALUE);
+                if (v != Integer.MIN_VALUE) return v;
+            }
+        }
+        return 0;
+    }
+
+    private static void writeMedStockSafe(JSONObject med, int newStock) {
+        if (med == null) return;
+        try {
+            med.put("quantidade", newStock);
+            med.put("estoque", newStock);
+            med.put("estoque_atual", newStock);
+            med.put("stock", newStock);
+            med.put("_local_unsynced", true);
+            med.put("updated_at_ms", System.currentTimeMillis());
+        } catch (Exception ignored) {}
+    }
+
+    private static boolean confirmDoseFromNotification(Context context, String medId, String medName, String medTime) {
+        try {
+            if (context == null || medId == null || medId.trim().isEmpty()) return false;
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+            String cleanMedId = medId.trim();
+            String normHora = normalizeHora(medTime != null ? medTime : "08:00");
+            if (normHora.isEmpty()) normHora = "08:00";
+
+            // Check if dependent patient profile requires opening the app for caregiver validation
+            String profileRaw = prefs.getString("profile", null);
+            String emailKey = "";
+            if (profileRaw != null && !profileRaw.isEmpty()) {
+                try {
+                    JSONObject prof = new JSONObject(profileRaw);
+                    emailKey = prof.optString("email", "").trim().toLowerCase(Locale.ROOT);
+                    String role = prof.optString("role", prof.optString("perfil", "independente")).trim().toLowerCase(Locale.ROOT);
+                    if ("paciente".equals(role) || "patient".equals(role) || "dependente".equals(role)) {
+                        cancelSnoozeForDose(context, cleanMedId, normHora);
+                        Intent openIntent = new Intent(context, MainActivity.class);
+                        openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                        openIntent.putExtra("med_id", cleanMedId);
+                        openIntent.putExtra("med_time", normHora);
+                        openIntent.putExtra("notif_auto_action", "confirm");
+                        context.startActivity(openIntent);
+                        return true;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            Date now = new Date();
+            String todayIso = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now);
+            Calendar ydCal = Calendar.getInstance();
+            ydCal.add(Calendar.DAY_OF_YEAR, -1);
+            String yesterdayIso = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(ydCal.getTime());
+            String nowTime = new SimpleDateFormat("HH:mm", Locale.US).format(now);
+            SimpleDateFormat utcFmt = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+            utcFmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+            String utcNow = utcFmt.format(now);
+
+            int mSched = 480;
+            int mNow = 480;
+            try {
+                String[] p1 = normHora.split(":");
+                String[] p2 = nowTime.split(":");
+                mSched = Integer.parseInt(p1[0].trim()) * 60 + Integer.parseInt(p1[1].trim());
+                mNow = Integer.parseInt(p2[0].trim()) * 60 + Integer.parseInt(p2[1].trim());
+            } catch (Exception ignored) {}
+
+            // Determine if this confirmation is for a late-night dose from yesterday across midnight (within 3h)
+            String normDate = todayIso;
+            if (mNow < mSched && ((1440 - mSched) + mNow) <= 180) {
+                normDate = yesterdayIso;
+            }
+
+            JSONArray meds = new JSONArray(prefs.getString("meds", "[]"));
+            JSONObject targetMed = null;
+            for (int i = 0; i < meds.length(); i++) {
+                JSONObject m = meds.optJSONObject(i);
+                if (m != null && cleanMedId.equalsIgnoreCase(m.optString("id", "").trim())) {
+                    targetMed = m;
+                    break;
+                }
+            }
+            if (targetMed == null) return false;
+
+            JSONArray doseLogs = new JSONArray(prefs.getString("dose_logs", "[]"));
+            JSONArray cleanedLogs = new JSONArray();
+            String preservedId = "";
+            for (int i = 0; i < doseLogs.length(); i++) {
+                JSONObject log = doseLogs.optJSONObject(i);
+                if (log == null) continue;
+                String lMedId = log.optString("med_id", log.optString("medId", "")).trim();
+                String lDate = log.optString("data", log.optString("dose_date", log.optString("date", ""))).trim();
+                if (lDate.length() >= 10) lDate = lDate.substring(0, 10);
+                String lHora = normalizeHora(log.optString("horario", log.optString("hora", log.optString("horario_programado", ""))));
+                if (cleanMedId.equalsIgnoreCase(lMedId) && normDate.equals(lDate) && normHora.equals(lHora)) {
+                    String st = log.optString("status", "").trim().toLowerCase(Locale.ROOT);
+                    if ("tomado".equals(st) || "tomada".equals(st) || "confirmed".equals(st) || "taken".equals(st)) {
+                        // Already confirmed
+                        cancelSnoozeForDose(context, cleanMedId, normHora);
+                        return true;
+                    }
+                    String existingId = log.optString("id", "").trim();
+                    if (!existingId.isEmpty() && preservedId.isEmpty()) {
+                        preservedId = existingId;
+                    }
+                } else {
+                    cleanedLogs.put(log);
+                }
+            }
+
+            int atrasoMin = 0;
+            if (!todayIso.equals(normDate) && normDate.compareTo(todayIso) < 0) {
+                atrasoMin = (1440 - mSched) + mNow;
+            } else if (mNow > mSched) {
+                atrasoMin = mNow - mSched;
+            }
+
+            String entryId = !preservedId.isEmpty()
+                ? preservedId
+                : UUID.nameUUIDFromBytes(("dose:" + cleanMedId + ":" + normDate + ":" + normHora).getBytes(StandardCharsets.UTF_8)).toString();
+
+            int currentStock = readMedStockSafe(targetMed);
+            int nextStock = currentStock - 1;
+            writeMedStockSafe(targetMed, nextStock);
+
+            String fullMedLabel = (targetMed.optString("nome", medName != null ? medName : "Medicamento").trim()
+                + " " + targetMed.optString("dosagem", "").trim()).trim();
+
+            JSONObject logEntry = new JSONObject();
+            logEntry.put("id", entryId);
+            logEntry.put("med_id", cleanMedId);
+            logEntry.put("med_nome", fullMedLabel);
+            logEntry.put("data", normDate);
+            logEntry.put("dose_date", normDate);
+            logEntry.put("created_at", utcNow);
+            logEntry.put("administered_at", utcNow);
+            logEntry.put("_utc_created_at", true);
+            logEntry.put("horario", normHora);
+            logEntry.put("hora", normHora);
+            logEntry.put("status", "tomado");
+            logEntry.put("hora_real", nowTime);
+            logEntry.put("atraso_minutos", atrasoMin);
+            logEntry.put("stock_before_dose", currentStock);
+            logEntry.put("stock_after_dose", nextStock);
+            logEntry.put("_local_unsynced", true);
+            logEntry.put("updated_at_ms", System.currentTimeMillis());
+            cleanedLogs.put(logEntry);
+
+            JSONArray stockMovements = new JSONArray(prefs.getString("stock_movements", "[]"));
+            JSONObject moveEntry = new JSONObject();
+            moveEntry.put("id", UUID.randomUUID().toString());
+            moveEntry.put("med_id", cleanMedId);
+            moveEntry.put("medication_id", cleanMedId);
+            moveEntry.put("med_nome", targetMed.optString("nome", medName != null ? medName : "Medicamento"));
+            moveEntry.put("med_name", targetMed.optString("nome", medName != null ? medName : "Medicamento"));
+            moveEntry.put("tipo", "saida");
+            moveEntry.put("movement_type", "consumption");
+            moveEntry.put("qtd", 1);
+            moveEntry.put("quantity_change", -1);
+            moveEntry.put("quantity_changed", -1);
+            moveEntry.put("quantity_delta", -1);
+            moveEntry.put("delta", -1);
+            moveEntry.put("previous_quantity", currentStock);
+            moveEntry.put("quantity_before", currentStock);
+            moveEntry.put("new_quantity", nextStock);
+            moveEntry.put("quantity_after", nextStock);
+            moveEntry.put("date", todayIso);
+            moveEntry.put("time", nowTime);
+            moveEntry.put("hora", nowTime);
+            moveEntry.put("data", todayIso + " " + nowTime);
+            moveEntry.put("created_at", utcNow);
+            moveEntry.put("_utc_created_at", true);
+            moveEntry.put("motivo", "Dose confirmada (" + normHora + ")");
+            moveEntry.put("notes", "Dose confirmada (" + normHora + ")");
+            stockMovements.put(moveEntry);
+
+            long nowMs = System.currentTimeMillis();
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString("meds", meds.toString());
+            editor.putString("dose_logs", cleanedLogs.toString());
+            editor.putString("stock_movements", stockMovements.toString());
+            editor.putLong("notif_dose_confirmed_at_ms", nowMs);
+
+            if (!emailKey.isEmpty()) {
+                String snapRaw = prefs.getString("user_snapshot_" + emailKey, null);
+                if (snapRaw != null && !snapRaw.isEmpty()) {
+                    try {
+                        JSONObject snap = new JSONObject(snapRaw);
+                        snap.put("meds", meds);
+                        snap.put("dose_logs", cleanedLogs);
+                        snap.put("stock_movements", stockMovements);
+                        editor.putString("user_snapshot_" + emailKey, snap.toString());
+                    } catch (Exception ignored) {}
+                }
+            }
+            editor.apply();
+
+            cancelSnoozeForDose(context, cleanMedId, normHora);
+
+            try {
+                Intent refreshIntent = new Intent(ACTION_REFRESH_UI);
+                refreshIntent.setPackage(context.getPackageName());
+                context.sendBroadcast(refreshIntent);
+            } catch (Exception ignored) {}
+
+            showToastOnMainThread(context, "✓ Dose de " + targetMed.optString("nome", medName) + " (" + normHora + ") confirmada!");
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     @Override // android.content.BroadcastReceiver
     public void onReceive(Context context, Intent intent) {
         if (context == null || intent == null) return;
@@ -480,14 +720,6 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
 
         try {
             String action = intent.getAction();
-            if (action != null && !ACTION_DOSE_ALARM.equals(action)) {
-                // System boot, package update, time/timezone change, exact alarm permission grant, or battery saver toggle:
-                // Immediately restore all medication alarms using setAlarmClock and purge deleted ones.
-                ensureAlarmChannel(context);
-                scheduleAlarmsFromStorage(context);
-                return;
-            }
-
             String medId = intent.getStringExtra("med_id");
             String medName = intent.getStringExtra("med_name");
             String medTime = intent.getStringExtra("med_time");
@@ -502,6 +734,47 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
             }
             if (medDose == null) {
                 medDose = "";
+            }
+            String normTime = normalizeHora(medTime);
+
+            // Handle Quick Notification Action 1: "✓ Confirmar dose"
+            if (ACTION_CONFIRM_DOSE.equals(action)) {
+                confirmDoseFromNotification(context, medId, medName, normTime);
+                return;
+            }
+
+            // Handle Quick Notification Action 2: "⏰ Adiar 15 min"
+            if (ACTION_SNOOZE_DOSE.equals(action)) {
+                cancelSnoozeForDose(context, medId, normTime);
+                if (medId != null && !medId.isEmpty()) {
+                    AlarmManager am = (AlarmManager) context.getSystemService("alarm");
+                    if (am != null) {
+                        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+                        if (Build.VERSION.SDK_INT >= 23) {
+                            piFlags |= PendingIntent.FLAG_IMMUTABLE;
+                        }
+                        int snoozeReqCode = Math.abs((medId + "_" + normTime).hashCode() % 400000) + 510000;
+                        Intent snoozeIntent = new Intent(context, DoseAlarmReceiver.class);
+                        snoozeIntent.setAction(ACTION_DOSE_ALARM);
+                        snoozeIntent.putExtra("med_id", medId);
+                        snoozeIntent.putExtra("med_name", medName);
+                        snoozeIntent.putExtra("med_time", normTime);
+                        snoozeIntent.putExtra("med_dose", medDose);
+                        snoozeIntent.putExtra("is_snooze", true);
+                        PendingIntent snoozePi = PendingIntent.getBroadcast(context, snoozeReqCode, snoozeIntent, piFlags);
+                        scheduleAlarmClockSafe(context, am, System.currentTimeMillis() + 15L * 60000L, snoozePi);
+                    }
+                }
+                showToastOnMainThread(context, "⏰ Lembrete de " + medName + " adiado por 15 minutos");
+                return;
+            }
+
+            if (action != null && !ACTION_DOSE_ALARM.equals(action)) {
+                // System boot, package update, time/timezone change, exact alarm permission grant, or battery saver toggle:
+                // Immediately restore all medication alarms using setAlarmClock and purge deleted ones.
+                ensureAlarmChannel(context);
+                scheduleAlarmsFromStorage(context);
+                return;
             }
 
             // Verify if the medication and this scheduled time slot still exist and are active before notifying
@@ -530,7 +803,6 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
             if (Build.VERSION.SDK_INT >= 23) {
                 piFlags |= PendingIntent.FLAG_IMMUTABLE;
             }
-            String normTime = normalizeHora(medTime);
             Intent openIntent = new Intent(context, MainActivity.class);
             openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             if (medId != null) openIntent.putExtra("med_id", medId);
@@ -541,6 +813,24 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
                 : (int) (System.currentTimeMillis() % 10000 + 20000);
 
             PendingIntent activityPi = PendingIntent.getActivity(context, notifId, openIntent, piFlags);
+
+            // Action 1 PendingIntent: "✓ Confirmar dose"
+            Intent confirmActionIntent = new Intent(context, DoseAlarmReceiver.class);
+            confirmActionIntent.setAction(ACTION_CONFIRM_DOSE);
+            if (medId != null) confirmActionIntent.putExtra("med_id", medId);
+            confirmActionIntent.putExtra("med_name", medName);
+            confirmActionIntent.putExtra("med_time", normTime);
+            confirmActionIntent.putExtra("med_dose", medDose);
+            PendingIntent confirmActionPi = PendingIntent.getBroadcast(context, notifId + 100000, confirmActionIntent, piFlags);
+
+            // Action 2 PendingIntent: "⏰ Adiar 15 min"
+            Intent snoozeActionIntent = new Intent(context, DoseAlarmReceiver.class);
+            snoozeActionIntent.setAction(ACTION_SNOOZE_DOSE);
+            if (medId != null) snoozeActionIntent.putExtra("med_id", medId);
+            snoozeActionIntent.putExtra("med_name", medName);
+            snoozeActionIntent.putExtra("med_time", normTime);
+            snoozeActionIntent.putExtra("med_dose", medDose);
+            PendingIntent snoozeActionPi = PendingIntent.getBroadcast(context, notifId + 200000, snoozeActionIntent, piFlags);
 
             Notification.Builder builder;
             if (Build.VERSION.SDK_INT >= 26) {
@@ -554,7 +844,7 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
                 : ("💊 Hora do Medicamento: " + medName);
             String subtitle = "Horário programado: " + normTime
                 + (medDose.isEmpty() ? "" : (" • Dose: " + medDose))
-                + " • Toque para confirmar no MediCare";
+                + " • Use os botões abaixo para confirmar ou adiar";
 
             builder.setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(title)
@@ -567,6 +857,14 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
                 .setPriority(Notification.PRIORITY_MAX)
                 .setDefaults(Notification.DEFAULT_ALL)
                 .setAutoCancel(true);
+
+            if (Build.VERSION.SDK_INT >= 20) {
+                builder.addAction(new Notification.Action.Builder(0, "✓ Confirmar dose", confirmActionPi).build());
+                builder.addAction(new Notification.Action.Builder(0, "⏰ Adiar 15 min", snoozeActionPi).build());
+            } else {
+                builder.addAction(0, "✓ Confirmar dose", confirmActionPi);
+                builder.addAction(0, "⏰ Adiar 15 min", snoozeActionPi);
+            }
 
             notificationManager.notify(notifId, builder.build());
 

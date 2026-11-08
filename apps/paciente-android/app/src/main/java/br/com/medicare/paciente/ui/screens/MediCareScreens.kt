@@ -177,7 +177,6 @@ fun PatientHomeScreen(
         state.dailyDoses.firstOrNull { it.status == DoseStatus.PENDING }
             ?: state.dailyDoses.firstOrNull { it.status == DoseStatus.LATE }
             ?: state.dailyDoses.firstOrNull { it.status == DoseStatus.UPCOMING || it.status == DoseStatus.SCHEDULED }
-            ?: state.dailyDoses.firstOrNull { it.status != DoseStatus.CONFIRMED }
     }
     val criticalMeds = remember(state.medications) {
         state.medications.filter { it.ativo && it.quantidade <= 5 }
