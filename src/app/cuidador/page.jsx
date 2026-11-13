@@ -29,6 +29,10 @@ import {
   Eye,
   EyeOff,
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
+  LayoutGrid,
+  RefreshCw,
 } from 'lucide-react';
 
 function readCookieValue(name) {
@@ -105,13 +109,15 @@ export default function CuidadorWebPage() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState([]);
 
-  // Modals
+  // Modals & Mobile Sheets
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
   const [showNewMedModal, setShowNewMedModal] = useState(false);
   const [showDoseModal, setShowDoseModal] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
+  const [showMobileMenuSheet, setShowMobileMenuSheet] = useState(false);
+  const [showPatientPickerSheet, setShowPatientPickerSheet] = useState(false);
 
   // Form states (sem valores clínicos pré-definidos)
   const [inviteTokenInput, setInviteTokenInput] = useState('');
@@ -944,13 +950,33 @@ export default function CuidadorWebPage() {
     patients.find((p) => p.patient_id === selectedPatientId) || patients[0] || null;
 
   const navItems = [
-    { id: 'dashboard', label: 'Central de Doses', icon: Home },
-    { id: 'patients', label: 'Pacientes', icon: Users },
-    { id: 'meds', label: 'Medicamentos & Estoque', icon: Pill },
-    { id: 'agenda', label: 'Agenda', icon: Calendar },
-    { id: 'reports', label: 'Indicadores', icon: BarChart3 },
-    { id: 'audit', label: 'Auditoria', icon: History },
+    { id: 'dashboard', label: 'Central de Doses', mobileLabel: 'Doses', icon: Home },
+    { id: 'patients', label: 'Pacientes', mobileLabel: 'Pacientes', icon: Users },
+    { id: 'meds', label: 'Medicamentos & Estoque', mobileLabel: 'Remédios', icon: Pill },
+    { id: 'agenda', label: 'Agenda', mobileLabel: 'Agenda', icon: Calendar },
+    { id: 'reports', label: 'Indicadores', mobileLabel: 'Indicadores', icon: BarChart3 },
+    { id: 'audit', label: 'Auditoria', mobileLabel: 'Auditoria', icon: History },
   ];
+
+  const mobileNavItems = [
+    { id: 'dashboard', label: 'Doses', icon: Home },
+    { id: 'patients', label: 'Pacientes', icon: Users },
+    { id: 'meds', label: 'Remédios', icon: Pill },
+    { id: 'agenda', label: 'Agenda', icon: Calendar },
+  ];
+
+  const currentTabTitle =
+    currentTab === 'dashboard'
+      ? 'Central de Doses'
+      : currentTab === 'patients'
+      ? 'Pacientes e Vínculos'
+      : currentTab === 'meds'
+      ? 'Medicamentos & Estoque'
+      : currentTab === 'agenda'
+      ? 'Agenda Médica'
+      : currentTab === 'reports'
+      ? 'Indicadores de Adesão'
+      : 'Trilha de Auditoria';
 
   // ─────────────────────────────────────────────────────────────
   // TELA DE LOGIN / CADASTRO DO CUIDADOR
@@ -1323,15 +1349,15 @@ export default function CuidadorWebPage() {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // PAINEL AUTENTICADO DO CUIDADOR
+  // PAINEL AUTENTICADO DO CUIDADOR (MOBILE-FIRST + DESKTOP)
   // ─────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col md:flex-row font-sans antialiased">
-      {/* Toast */}
+    <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col md:flex-row font-sans antialiased overflow-x-hidden">
+      {/* Toast acessível */}
       {notification && (
         <div
           role="status"
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl border text-xs sm:text-sm font-semibold flex items-center gap-2 transition-all ${
+          className={`fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 sm:max-w-sm px-4 py-3 rounded-xl shadow-2xl border text-xs sm:text-sm font-semibold flex items-center gap-2.5 transition-all ${
             notification.type === 'error'
               ? 'bg-rose-950/95 border-rose-700 text-rose-200'
               : 'bg-emerald-950/95 border-emerald-700 text-emerald-200'
@@ -1342,37 +1368,41 @@ export default function CuidadorWebPage() {
           ) : (
             <CheckCircle2 size={16} className="w-4 h-4 shrink-0" />
           )}
-          <span>{notification.msg}</span>
+          <span className="leading-snug">{notification.msg}</span>
         </div>
       )}
 
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-64 bg-[#111827] border-r border-[#1f2937] p-5 justify-between select-none shrink-0">
+      <aside className="hidden md:flex flex-col w-64 lg:w-72 bg-[#101827] border-r border-slate-800/90 p-5 justify-between select-none shrink-0 sticky top-0 h-screen">
         <div>
-          <div className="flex items-center gap-3 mb-6 px-2">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-base">
+          <div className="flex items-center gap-3 mb-7 px-1">
+            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-extrabold text-white text-base shadow-md shadow-blue-600/20">
               M
             </div>
-            <div>
-              <div className="font-bold text-slate-100 text-sm leading-tight">MediCare</div>
-              <div className="text-[11px] text-blue-400 font-semibold tracking-wider">CUIDADOR</div>
+            <div className="min-w-0">
+              <div className="font-bold text-white text-sm leading-tight whitespace-nowrap">MediCare</div>
+              <div className="text-[11px] text-blue-400 font-semibold tracking-wider whitespace-nowrap">Cuidador</div>
             </div>
           </div>
 
-          {/* Seletor de Paciente */}
-          <div className="mb-6 px-2">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-              Paciente em Acompanhamento
+          {/* Seletor de Paciente Desktop */}
+          <div className="mb-6">
+            <label
+              htmlFor="desktop-patient-select"
+              className="block text-[11px] font-semibold text-slate-400 mb-1.5 px-1"
+            >
+              Paciente em acompanhamento
             </label>
             {patients.length === 0 ? (
-              <div className="text-xs text-slate-400 bg-[#1e293b]/60 border border-slate-700/70 rounded-xl px-3 py-2">
+              <div className="text-xs text-slate-400 bg-[#131d31] border border-slate-800 rounded-xl px-3 py-2.5">
                 Nenhum paciente vinculado
               </div>
             ) : (
               <select
+                id="desktop-patient-select"
                 value={selectedPatientId || ''}
                 onChange={(e) => setSelectedPatientId(e.target.value)}
-                className="w-full bg-[#1e293b] border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                className="w-full bg-[#131d31] border border-slate-700/80 rounded-xl px-3 py-2.5 min-h-[42px] text-xs font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
               >
                 {patients.map((p) => (
                   <option key={p.patient_id} value={p.patient_id}>
@@ -1383,109 +1413,159 @@ export default function CuidadorWebPage() {
             )}
           </div>
 
-          <nav className="space-y-1">
+          <nav className="space-y-1" aria-label="Navegação principal">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentTab === item.id;
               return (
                 <button
                   key={item.id}
+                  type="button"
                   onClick={() => setCurrentTab(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 min-h-[42px] rounded-xl text-xs font-semibold transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                     isActive
-                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                      ? 'bg-blue-600/15 text-blue-400 border border-blue-500/30'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 border border-transparent'
                   }`}
                 >
-                  <Icon size={16} className="w-4 h-4" />
-                  <span>{item.label}</span>
+                  <Icon size={17} className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{item.label}</span>
                 </button>
               );
             })}
           </nav>
         </div>
 
-        <div className="border-t border-[#1f2937] pt-4 px-2">
-          <div className="mb-3 truncate">
-            <div className="text-[10px] text-slate-400 font-medium">Cuidador Conectado</div>
-            <div className="text-xs font-bold text-slate-200 truncate">{currentUser?.email || 'cuidador'}</div>
+        <div className="border-t border-slate-800/90 pt-4">
+          <div className="mb-3 px-1 truncate">
+            <div className="text-[11px] text-slate-400 font-medium">Conta conectada</div>
+            <div className="text-xs font-semibold text-slate-200 truncate">{currentUser?.email || 'cuidador'}</div>
           </div>
           <button
+            type="button"
             onClick={handleLogout}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 min-h-[42px] text-xs font-semibold text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
           >
-            <LogOut size={16} className="w-4 h-4" />
+            <LogOut size={16} className="w-4 h-4 shrink-0" />
             <span>Encerrar Sessão</span>
           </button>
         </div>
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 pb-20 md:pb-8">
-        {/* Top Header */}
-        <header className="h-16 border-b border-[#1f2937] px-4 sm:px-6 flex items-center justify-between bg-[#0b1120]/80 backdrop-blur-md sticky top-0 z-40">
-          <div className="flex items-center gap-3 truncate">
-            <h2 className="text-sm font-bold text-slate-200 truncate">
-              {currentTab === 'dashboard' && `Central de Doses • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
-              {currentTab === 'patients' && 'Gestão de Pacientes e Vínculos'}
-              {currentTab === 'meds' && `Medicamentos & Estoque • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
-              {currentTab === 'agenda' && `Agenda Médica • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
-              {currentTab === 'reports' && 'Indicadores de Adesão'}
-              {currentTab === 'audit' && `Trilha de Auditoria • ${selectedPatient?.nome || 'Sem paciente selecionado'}`}
-            </h2>
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Header Compacto (Mobile-First + Desktop) */}
+        <header className="h-14 md:h-16 border-b border-slate-800/90 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 bg-[#0b1120]/90 backdrop-blur-md sticky top-0 z-30">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="md:hidden w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-extrabold text-white text-sm shrink-0">
+              M
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-sm md:text-base font-bold text-white truncate leading-tight">
+                {currentTabTitle}
+              </h2>
+              {selectedPatient && currentTab !== 'patients' && (
+                <p className="hidden md:block text-xs text-slate-400 truncate mt-0.5">
+                  {selectedPatient.nome} · {selectedPatient.relationship_label}
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Seletor rápido de paciente no Mobile */}
+            {patients.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowPatientPickerSheet(true)}
+                className="md:hidden inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] max-w-[155px] rounded-xl bg-[#131d31] border border-slate-700/80 text-xs font-semibold text-slate-100 hover:border-slate-600 transition-colors"
+                aria-label="Selecionar paciente"
+              >
+                <span className="truncate">{selectedPatient?.nome?.split(' ')[0] || 'Paciente'}</span>
+                <ChevronDown size={14} className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              </button>
+            )}
+
             <button
+              type="button"
               onClick={loadData}
-              title="Recarregar dados"
+              title="Atualizar dados"
+              aria-label="Atualizar dados"
               disabled={loading}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
+              className="inline-flex items-center justify-center gap-2 min-w-[40px] min-h-[40px] px-2.5 md:px-3.5 rounded-xl bg-[#131d31] md:bg-slate-800/70 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
-              <Loader2 size={16} className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-            <button
-              onClick={handleLogout}
-              title="Encerrar sessão"
-              className="md:hidden p-2 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
-            >
-              <LogOut size={16} className="w-4 h-4" />
+              <RefreshCw size={15} className={`w-4 h-4 ${loading ? 'animate-spin text-blue-400' : ''}`} />
+              <span className="hidden md:inline text-xs font-semibold">Atualizar</span>
             </button>
           </div>
         </header>
 
+        {/* Sub-navegação mobile entre Indicadores e Auditoria */}
+        {(currentTab === 'reports' || currentTab === 'audit') && (
+          <div className="md:hidden px-4 pt-3">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-[#131d31] border border-slate-800 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setCurrentTab('reports')}
+                className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                  currentTab === 'reports'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Indicadores
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentTab('audit')}
+                className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                  currentTab === 'audit'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Auditoria
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Tab Body */}
-        <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-5xl w-full mx-auto">
+        <main className="flex-1 px-4 py-5 sm:p-6 lg:p-8 max-w-6xl w-full mx-auto pb-24 md:pb-10">
           {/* Estado vazio quando não há paciente com vínculo ativo */}
           {patients.length === 0 && currentTab !== 'patients' && (
-            <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 sm:p-8 text-center space-y-4 mb-6">
+            <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-10 text-center space-y-5 mb-6 max-w-xl mx-auto">
               <div className="w-12 h-12 rounded-2xl bg-blue-600/15 border border-blue-500/30 text-blue-400 flex items-center justify-center mx-auto">
                 <Users size={22} className="w-5 h-5" />
               </div>
-              <div className="space-y-1 max-w-md mx-auto">
-                <h2 className="text-lg font-bold text-white">Nenhum paciente vinculado no momento</h2>
+              <div className="space-y-2 max-w-md mx-auto">
+                <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight [text-wrap:balance]">
+                  Nenhum paciente vinculado no momento
+                </h1>
                 <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
                   Por segurança clínica, o MediCare exibe apenas pacientes com vínculo ativo autorizado. Aceite um código de convite gerado pelo paciente ou cadastre um familiar dependente.
                 </p>
               </div>
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-1">
                 <button
+                  type="button"
                   onClick={() => setShowInviteModal(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
+                  className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs sm:text-sm border border-slate-700 transition-colors whitespace-nowrap"
                 >
-                  <KeyRound size={14} className="w-3.5 h-3.5 text-amber-400" />
+                  <KeyRound size={15} className="w-4 h-4 text-amber-400" />
                   <span>Aceitar Convite</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setNewPatientForm(EMPTY_PATIENT_FORM);
                     setConfirmPatientSave(false);
                     setShowNewPatientModal(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                  className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs sm:text-sm transition-colors whitespace-nowrap"
                 >
-                  <UserPlus size={14} className="w-3.5 h-3.5" />
-                  <span>Cadastrar Paciente Dependente</span>
+                  <UserPlus size={15} className="w-4 h-4" />
+                  <span>Cadastrar Dependente</span>
                 </button>
               </div>
             </div>
@@ -1493,57 +1573,58 @@ export default function CuidadorWebPage() {
 
           {/* TAB 1: CENTRAL DE DOSES */}
           {currentTab === 'dashboard' && selectedPatient && (
-            <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-[#131d31] p-5 sm:p-6 rounded-2xl border border-slate-800">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            <div className="space-y-5 sm:space-y-6">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-[#131d31] p-5 sm:p-6 rounded-2xl border border-slate-800/90">
+                <div className="space-y-1 min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight truncate">
                     {selectedPatient.nome}
                   </h1>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Vínculo:{' '}
-                    <span className="text-slate-300 font-semibold">
-                      {selectedPatient.relationship_label}
-                    </span>{' '}
-                    • Tipo Sanguíneo:{' '}
-                    <span className="text-slate-300 font-semibold">
-                      {selectedPatient.blood_type || 'Não informado'}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
+                    <span>
+                      Vínculo: <strong className="text-slate-200 font-semibold">{selectedPatient.relationship_label}</strong>
                     </span>
-                  </p>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      Tipo sanguíneo: <strong className="text-slate-200 font-semibold">{selectedPatient.blood_type || 'Não informado'}</strong>
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-2 sm:flex sm:items-center gap-2.5 shrink-0">
                   <button
+                    type="button"
                     onClick={() => {
                       setNewMedForm(EMPTY_MED_FORM);
                       setConfirmMedSave(false);
                       setShowNewMedModal(true);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors whitespace-nowrap"
                   >
-                    <Plus size={14} className="w-3.5 h-3.5" />
-                    <span>Novo Medicamento</span>
+                    <Plus size={15} className="w-4 h-4 shrink-0" />
+                    <span>Medicamento</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
                       setShowAppointmentModal(true);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
                   >
-                    <Calendar size={14} className="w-3.5 h-3.5" />
-                    <span>Novo Compromisso</span>
+                    <Calendar size={15} className="w-4 h-4 shrink-0" />
+                    <span>Compromisso</span>
                   </button>
                 </div>
               </div>
 
               {/* Solicitações Pendentes de Validação do Paciente */}
               {approvalRequests.length > 0 && (
-                <div className="bg-amber-950/30 border border-amber-500/40 rounded-2xl p-5 space-y-3">
+                <div className="bg-amber-950/25 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-3">
                   <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
                     <AlertTriangle size={16} className="w-4 h-4 shrink-0" />
-                    <span>Solicitações de Dose Aguardando Validação ({approvalRequests.length})</span>
+                    <span>Solicitações aguardando validação ({approvalRequests.length})</span>
                   </div>
-                  <div className="space-y-2.5">
+                  <div className="space-y-3">
                     {approvalRequests.map((reqItem) => {
                       const isUndo = reqItem.action_type === 'undo_dose' || reqItem.requested_status === 'pending';
                       return (
@@ -1551,25 +1632,26 @@ export default function CuidadorWebPage() {
                           key={reqItem.id}
                           className="bg-[#131d31] border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                         >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-bold text-white">
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                              <span className="font-bold text-white">
                                 {reqItem.med_nome || 'Medicamento'} ({reqItem.hora})
                               </span>
-                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-semibold">
-                                {isUndo ? 'Desfazer Dose' : 'Confirmar Dose'}
+                              <span aria-hidden="true" className="text-slate-500">·</span>
+                              <span className="text-amber-300 font-semibold">
+                                {isUndo ? 'Desfazer dose' : 'Confirmar dose'}
                               </span>
                             </div>
-                            <p className="text-xs text-slate-300">
-                              Motivo informado pelo paciente: <strong>&ldquo;{reqItem.reason || 'Não informado'}&rdquo;</strong>
+                            <p className="text-xs text-slate-300 leading-relaxed">
+                              Motivo do paciente: <strong>&ldquo;{reqItem.reason || 'Não informado'}&rdquo;</strong>
                             </p>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
                             <button
                               type="button"
                               disabled={actionLoading}
                               onClick={() => handleResolveApprovalRequest(reqItem.id, 'approved')}
-                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1"
+                              className="min-h-[42px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap"
                             >
                               <Check size={14} className="w-3.5 h-3.5" />
                               <span>Aprovar</span>
@@ -1578,7 +1660,7 @@ export default function CuidadorWebPage() {
                               type="button"
                               disabled={actionLoading}
                               onClick={() => handleResolveApprovalRequest(reqItem.id, 'rejected')}
-                              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1"
+                              className="min-h-[42px] px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap"
                             >
                               <X size={14} className="w-3.5 h-3.5" />
                               <span>Recusar</span>
@@ -1592,55 +1674,56 @@ export default function CuidadorWebPage() {
               )}
 
               {/* KPIs de Administração */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-                <div className="bg-[#131d31] p-4 rounded-xl border border-slate-800">
-                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Doses Hoje</div>
-                  <div className="text-2xl font-black text-white">{totalDosesToday}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Programadas no dia</div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="bg-[#131d31] p-4 sm:p-5 rounded-2xl border border-slate-800/90">
+                  <div className="text-slate-400 text-xs font-medium mb-1">Doses hoje</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-white tabular-nums">{totalDosesToday}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">Programadas no dia</div>
                 </div>
 
-                <div className="bg-[#131d31] p-4 rounded-xl border border-slate-800">
-                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Confirmadas</div>
-                  <div className="text-2xl font-black text-emerald-400">{confirmedDosesToday}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Paciente ou cuidador</div>
+                <div className="bg-[#131d31] p-4 sm:p-5 rounded-2xl border border-slate-800/90">
+                  <div className="text-slate-400 text-xs font-medium mb-1">Confirmadas</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-emerald-400 tabular-nums">{confirmedDosesToday}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">Paciente ou cuidador</div>
                 </div>
 
-                <div className="bg-[#131d31] p-4 rounded-xl border border-slate-800">
-                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Sem Confirmação</div>
-                  <div className="text-2xl font-black text-amber-400">{unconfirmedDosesToday}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
+                <div className="bg-[#131d31] p-4 sm:p-5 rounded-2xl border border-slate-800/90">
+                  <div className="text-slate-400 text-xs font-medium mb-1">Sem confirmação</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-amber-400 tabular-nums">{unconfirmedDosesToday}</div>
+                  <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
                     {pendingDosesToday} pendente(s) no total
                   </div>
                 </div>
 
-                <div className="bg-[#131d31] p-4 rounded-xl border border-slate-800">
-                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Não Administradas</div>
-                  <div className="text-2xl font-black text-rose-400">{missedDosesToday}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Com justificativa clínica</div>
+                <div className="bg-[#131d31] p-4 sm:p-5 rounded-2xl border border-slate-800/90">
+                  <div className="text-slate-400 text-xs font-medium mb-1">Não administradas</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-rose-400 tabular-nums">{missedDosesToday}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">Com justificativa clínica</div>
                 </div>
               </div>
 
               {/* Lista de Doses do Dia */}
-              <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-5 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+              <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-4 sm:p-6">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-5">
                   <div>
                     <h2 className="text-base font-bold text-white">Linha do Tempo de Doses</h2>
-                    <p className="text-xs text-slate-400">
-                      Distinção entre horário previsto, horário real da administração e momento do registro
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Horário previsto, horário real da administração e registro clínico
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-1 bg-[#0b1120] p-1 rounded-xl border border-slate-800 text-xs flex-wrap">
+                  <div className="flex items-center gap-1 bg-[#0b1120] p-1 rounded-xl border border-slate-800 overflow-x-auto no-scrollbar">
                     {[
                       { id: 'all', label: 'Todas' },
                       { id: 'pending', label: 'Pendentes' },
                       { id: 'confirmed', label: 'Confirmadas' },
-                      { id: 'missed', label: 'Não Administradas' },
+                      { id: 'missed', label: 'Não administradas' },
                     ].map((st) => (
                       <button
                         key={st.id}
+                        type="button"
                         onClick={() => setDoseStatusFilter(st.id)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                        className={`px-3 py-2 min-h-[36px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                           doseStatusFilter === st.id
                             ? 'bg-blue-600 text-white'
                             : 'text-slate-400 hover:text-slate-200'
@@ -1653,11 +1736,25 @@ export default function CuidadorWebPage() {
                 </div>
 
                 {todayDoses.length === 0 ? (
-                  <div className="text-center py-10 text-slate-500 text-sm">
-                    Nenhum medicamento ativo cadastrado para este paciente hoje.
+                  <div className="text-center py-10 space-y-3">
+                    <p className="text-slate-400 text-sm">
+                      Nenhum medicamento ativo programado para este paciente hoje.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewMedForm(EMPTY_MED_FORM);
+                        setConfirmMedSave(false);
+                        setShowNewMedModal(true);
+                      }}
+                      className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
+                    >
+                      <Plus size={15} className="w-4 h-4" />
+                      <span>Cadastrar Primeiro Medicamento</span>
+                    </button>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="divide-y divide-slate-800/80">
                     {todayDoses
                       .filter((d) => doseStatusFilter === 'all' || d.status === doseStatusFilter)
                       .map((dose) => {
@@ -1677,76 +1774,85 @@ export default function CuidadorWebPage() {
                         return (
                           <div
                             key={dose.id}
-                            className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 transition-colors gap-3"
+                            className="py-4 first:pt-1 last:pb-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5"
                           >
-                            <div className="flex items-center gap-3.5">
+                            <div className="flex items-start sm:items-center gap-3.5 min-w-0">
                               <div
-                                className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center font-bold text-xs sm:text-sm border shrink-0 ${
+                                className={`w-14 h-12 rounded-xl flex items-center justify-center font-bold text-xs sm:text-sm border shrink-0 tabular-nums font-mono ${
                                   dose.status === 'confirmed'
                                     ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                                     : dose.status === 'missed'
                                     ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
                                     : dose.display_category === 'unconfirmed'
                                     ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-                                    : 'bg-slate-800/70 text-slate-300 border-slate-700'
+                                    : 'bg-slate-800/70 text-slate-200 border-slate-700'
                                 }`}
                               >
                                 <span>{dose.hora}</span>
                               </div>
 
-                              <div>
-                                <div className="flex items-center gap-2 flex-wrap">
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                   <span className="font-bold text-white text-sm">{dose.med_name}</span>
-                                  <span className="text-xs text-slate-400">({dose.dosagem})</span>
+                                  <span className="text-xs text-slate-400">{dose.dosagem}</span>
+                                  <span aria-hidden="true" className="text-slate-600">·</span>
                                   <span
-                                    className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
+                                    className={`text-xs font-semibold ${
                                       dose.display_category === 'patient_confirmed'
-                                        ? 'bg-emerald-500/20 text-emerald-300'
+                                        ? 'text-emerald-400'
                                         : dose.display_category === 'caregiver_confirmed'
-                                        ? 'bg-blue-500/20 text-blue-300'
-                                        : dose.display_category === 'late'
-                                        ? 'bg-amber-500/20 text-amber-300'
+                                        ? 'text-blue-400'
+                                        : dose.display_category === 'late' || dose.display_category === 'unconfirmed'
+                                        ? 'text-amber-300'
                                         : dose.display_category === 'missed'
-                                        ? 'bg-rose-500/20 text-rose-300'
-                                        : dose.display_category === 'unconfirmed'
-                                        ? 'bg-amber-500/20 text-amber-300'
-                                        : 'bg-slate-800 text-slate-300'
+                                        ? 'text-rose-400'
+                                        : 'text-slate-300'
                                     }`}
                                   >
                                     {dose.status_label}
                                   </span>
                                 </div>
 
-                                <div className="text-xs text-slate-400 mt-1 space-x-2">
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400 tabular-nums">
                                   <span>
-                                    Previsto: <strong className="text-slate-300">{dose.hora}</strong>
+                                    Previsto <strong className="text-slate-300 font-medium">{dose.hora}</strong>
                                   </span>
                                   {administeredTimeStr && (
-                                    <span>
-                                      • Administrado às <strong className="text-slate-300">{administeredTimeStr}</strong>
-                                    </span>
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span>
+                                        Administrado <strong className="text-slate-300 font-medium">{administeredTimeStr}</strong>
+                                      </span>
+                                    </>
                                   )}
                                   {recordedTimeStr && (
-                                    <span>
-                                      • Registrado às <strong className="text-slate-300">{recordedTimeStr}</strong>
-                                    </span>
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span>
+                                        Registrado <strong className="text-slate-300 font-medium">{recordedTimeStr}</strong>
+                                      </span>
+                                    </>
                                   )}
                                   {dose.confirmed_by_name && (
-                                    <span>
-                                      • Autor: <strong className="text-slate-300">{dose.confirmed_by_name}</strong>
-                                    </span>
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span>
+                                        Autor: <strong className="text-slate-300 font-medium">{dose.confirmed_by_name}</strong>
+                                      </span>
+                                    </>
                                   )}
                                 </div>
                                 {dose.correction_reason && (
-                                  <div className="text-[11px] text-slate-400 mt-0.5">
-                                    Observação: <span className="text-slate-300">{dose.correction_reason}</span>
+                                  <div className="text-xs text-slate-400">
+                                    Obs.: <span className="text-slate-300">{dose.correction_reason}</span>
                                   </div>
                                 )}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 self-end sm:self-center">
+                            <div className="sm:self-center shrink-0">
                               <button
+                                type="button"
                                 onClick={() => {
                                   setSelectedDoseTarget(dose);
                                   setDoseAdministeredTime(dose.hora);
@@ -1754,7 +1860,7 @@ export default function CuidadorWebPage() {
                                   setConfirmDoseSave(false);
                                   setShowDoseModal(true);
                                 }}
-                                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-md transition-colors"
+                                className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
                               >
                                 Registrar Ação
                               </button>
@@ -1770,54 +1876,56 @@ export default function CuidadorWebPage() {
 
           {/* TAB 2: PACIENTES */}
           {currentTab === 'patients' && (
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Pacientes Acompanhados</h1>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                     Gerencie vínculos ativos autorizados, convites ou cadastre familiares dependentes.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-2 sm:flex items-center gap-2.5 shrink-0">
                   <button
+                    type="button"
                     onClick={() => setShowInviteModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
+                    className="min-h-[44px] flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors whitespace-nowrap"
                   >
-                    <KeyRound size={14} className="w-3.5 h-3.5 text-amber-400" />
+                    <KeyRound size={15} className="w-4 h-4 text-amber-400 shrink-0" />
                     <span>Aceitar Convite</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       setNewPatientForm(EMPTY_PATIENT_FORM);
                       setConfirmPatientSave(false);
                       setShowNewPatientModal(true);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                    className="min-h-[44px] flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
                   >
-                    <UserPlus size={14} className="w-3.5 h-3.5" />
+                    <UserPlus size={15} className="w-4 h-4 shrink-0" />
                     <span>Novo Paciente</span>
                   </button>
                 </div>
               </div>
 
               <div className="relative">
-                <Search size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <Search size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   value={searchPatient}
                   onChange={(e) => setSearchPatient(e.target.value)}
                   placeholder="Pesquisar paciente vinculado..."
-                  className="w-full bg-[#131d31] border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                  className="w-full bg-[#131d31] border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
                 />
               </div>
 
               {patients.length === 0 ? (
-                <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-8 text-center text-slate-400 text-xs sm:text-sm">
+                <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-8 text-center text-slate-400 text-sm">
                   Nenhum paciente com vínculo ativo encontrado para esta conta de cuidador.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {patients
                     .filter((p) => p.nome.toLowerCase().includes(searchPatient.toLowerCase()))
                     .map((p) => (
@@ -1826,39 +1934,40 @@ export default function CuidadorWebPage() {
                         onClick={() => setSelectedPatientId(p.patient_id)}
                         className={`bg-[#131d31] p-5 rounded-2xl border transition-all cursor-pointer ${
                           selectedPatientId === p.patient_id
-                            ? 'border-blue-500 ring-1 ring-blue-500/50'
-                            : 'border-slate-800 hover:border-slate-700'
+                            ? 'border-blue-500 ring-1 ring-blue-500/40'
+                            : 'border-slate-800/90 hover:border-slate-700'
                         }`}
                       >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 text-sm">
-                              {p.nome.slice(0, 1)}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-11 h-11 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 text-sm shrink-0">
+                              {p.nome.slice(0, 1).toUpperCase()}
                             </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-bold text-white text-sm">{p.nome}</h3>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold">
-                                  {p.relationship_label}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-slate-400 mt-0.5">
-                                Tipo Sanguíneo:{' '}
-                                <strong className="text-slate-300">{p.blood_type || 'Não informado'}</strong>
+                            <div className="min-w-0">
+                              <h3 className="font-bold text-white text-sm truncate">{p.nome}</h3>
+                              <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-slate-400 mt-0.5">
+                                <span className="text-slate-300 font-medium">{p.relationship_label}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{p.blood_type || 'Tipo sanguíneo N/I'}</span>
                                 {p.is_managed && (
-                                  <span className="text-amber-400 ml-2 font-semibold">• Dependente</span>
+                                  <>
+                                    <span aria-hidden="true">·</span>
+                                    <span className="text-amber-400 font-semibold">Dependente</span>
+                                  </>
                                 )}
                               </div>
                             </div>
                           </div>
 
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleRevokeRelationship(p.relationship_id);
                             }}
                             title="Revogar acompanhamento"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                            aria-label={`Revogar vínculo com ${p.nome}`}
+                            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
                           >
                             <Trash2 size={16} className="w-4 h-4" />
                           </button>
@@ -1872,95 +1981,107 @@ export default function CuidadorWebPage() {
 
           {/* TAB 3: MEDICAMENTOS & ESTOQUE */}
           {currentTab === 'meds' && selectedPatient && (
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Prescrições e Estoque</h1>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Tratamentos de {selectedPatient.nome}.
+                  <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                    Tratamentos ativos de {selectedPatient.nome}.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-2 sm:flex items-center gap-2.5 shrink-0">
                   <button
+                    type="button"
                     onClick={() => {
                       setStockForm(EMPTY_STOCK_FORM);
                       setConfirmStockSave(false);
                       setShowStockModal(true);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors"
+                    className="min-h-[44px] flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 transition-colors whitespace-nowrap"
                   >
-                    <Package size={14} className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Reposição de Estoque</span>
+                    <Package size={15} className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Repor Estoque</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       setNewMedForm(EMPTY_MED_FORM);
                       setConfirmMedSave(false);
                       setShowNewMedModal(true);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                    className="min-h-[44px] flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
                   >
-                    <Plus size={14} className="w-3.5 h-3.5" />
+                    <Plus size={15} className="w-4 h-4 shrink-0" />
                     <span>Novo Medicamento</span>
                   </button>
                 </div>
               </div>
 
               {medications.length === 0 ? (
-                <div className="text-center py-10 bg-[#131d31] rounded-2xl border border-slate-800 text-slate-500 text-sm">
-                  Nenhum medicamento ativo cadastrado para este paciente.
+                <div className="text-center py-10 px-4 bg-[#131d31] rounded-2xl border border-slate-800/90 space-y-3">
+                  <p className="text-slate-400 text-sm">
+                    Nenhum medicamento ativo cadastrado para {selectedPatient.nome}.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewMedForm(EMPTY_MED_FORM);
+                      setConfirmMedSave(false);
+                      setShowNewMedModal(true);
+                    }}
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                  >
+                    <Plus size={15} className="w-4 h-4" />
+                    <span>Adicionar Medicamento</span>
+                  </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {medications.map((med) => {
                     const horarios = Array.isArray(med.horarios) ? med.horarios : [];
                     const dosesPerDay = Math.max(1, horarios.length);
                     const daysRemaining = Math.floor(Number(med.quantidade || 0) / dosesPerDay);
                     const isLowStock = Number(med.quantidade || 0) <= 5;
+                    const treatmentLabel =
+                      med.treatment_type === 'continuous'
+                        ? 'Contínuo'
+                        : med.treatment_type === 'sos'
+                        ? 'SOS'
+                        : 'Temporário';
 
                     return (
-                      <div key={med.id} className="bg-[#131d31] p-5 rounded-2xl border border-slate-800">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                              <Pill size={20} className="w-5 h-5" />
+                      <div key={med.id} className="bg-[#131d31] p-5 rounded-2xl border border-slate-800/90 flex flex-col justify-between gap-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+                              <Pill size={18} className="w-5 h-5" />
                             </div>
-                            <div>
-                              <h3 className="font-bold text-white text-base">{med.nome}</h3>
-                              <p className="text-xs text-slate-400">
-                                {med.dosagem} • {med.unidade || 'unidade'}
+                            <div className="min-w-0">
+                              <h3 className="font-bold text-white text-sm sm:text-base truncate">{med.nome}</h3>
+                              <p className="text-xs text-slate-400 truncate">
+                                {med.dosagem} · {med.unidade || 'unidade'} · {treatmentLabel}
                               </p>
                             </div>
                           </div>
-
-                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-semibold uppercase">
-                            {med.treatment_type === 'continuous'
-                              ? 'Contínuo'
-                              : med.treatment_type === 'sos'
-                              ? 'SOS'
-                              : 'Temporário'}
-                          </span>
                         </div>
 
-                        <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <div>
+                        <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="tabular-nums">
                             <span className="text-slate-400">Horários: </span>
-                            <span className="font-semibold text-white">
-                              {horarios.length > 0 ? horarios.join(', ') : 'Não preenchido'}
+                            <span className="font-semibold text-white font-mono">
+                              {horarios.length > 0 ? horarios.join(', ') : 'Não definido'}
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 tabular-nums">
                             <span className="text-slate-400">Estoque:</span>
                             <span
-                              className={`px-2 py-0.5 rounded-md font-bold text-xs ${
-                                isLowStock
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                                  : 'bg-emerald-500/10 text-emerald-300'
+                              className={`font-bold ${
+                                isLowStock ? 'text-rose-400' : 'text-emerald-400'
                               }`}
                             >
-                              {med.quantidade} un ({daysRemaining} dias)
+                              {med.quantidade} un ({daysRemaining}d)
                             </span>
                           </div>
                         </div>
@@ -1974,67 +2095,79 @@ export default function CuidadorWebPage() {
 
           {/* TAB 4: AGENDA */}
           {currentTab === 'agenda' && selectedPatient && (
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Agenda Médica</h1>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                     Consultas e exames de {selectedPatient.nome}.
                   </p>
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
                     setShowAppointmentModal(true);
                   }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                  className="w-full sm:w-auto min-h-[44px] flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
                 >
-                  <Plus size={14} className="w-3.5 h-3.5" />
+                  <Plus size={15} className="w-4 h-4" />
                   <span>Novo Compromisso</span>
                 </button>
               </div>
 
               {appointments.length === 0 ? (
-                <div className="text-center py-10 bg-[#131d31] rounded-2xl border border-slate-800 text-slate-500 text-sm">
-                  Nenhum compromisso clínico agendado.
+                <div className="text-center py-10 px-4 bg-[#131d31] rounded-2xl border border-slate-800/90 space-y-3">
+                  <p className="text-slate-400 text-sm">
+                    Nenhum compromisso clínico agendado para {selectedPatient.nome}.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
+                      setShowAppointmentModal(true);
+                    }}
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
+                  >
+                    <Calendar size={15} className="w-4 h-4" />
+                    <span>Agendar Consulta ou Exame</span>
+                  </button>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {appointments.map((apt) => (
                     <div
                       key={apt.id}
-                      className="bg-[#131d31] p-5 rounded-2xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                      className="bg-[#131d31] p-5 rounded-2xl border border-slate-800/90 flex items-start gap-3.5"
                     >
-                      <div className="flex items-start gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center font-bold text-indigo-400 shrink-0">
-                          <Calendar size={20} className="w-5 h-5" />
+                      <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                        <Calendar size={18} className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-x-2">
+                          <h3 className="font-bold text-white text-sm">{apt.title}</h3>
+                          <span className="text-xs text-indigo-300 font-semibold capitalize">
+                            · {apt.type}
+                          </span>
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-white text-sm">{apt.title}</h3>
-                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-semibold capitalize">
-                              {apt.type}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mt-1.5">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 tabular-nums">
+                          <span className="flex items-center gap-1">
+                            <Clock size={13} className="w-3.5 h-3.5 text-slate-500" />
+                            {apt.date} {apt.time ? `às ${apt.time}` : ''}
+                          </span>
+                          {apt.doctor && (
                             <span className="flex items-center gap-1">
-                              <Clock size={14} className="w-3.5 h-3.5 text-slate-500" />
-                              {apt.date} {apt.time ? `às ${apt.time}` : ''}
+                              <User size={13} className="w-3.5 h-3.5 text-slate-500" />
+                              {apt.doctor}
                             </span>
-                            {apt.doctor && (
-                              <span className="flex items-center gap-1">
-                                <User size={14} className="w-3.5 h-3.5 text-slate-500" />
-                                {apt.doctor}
-                              </span>
-                            )}
-                            {apt.location && (
-                              <span className="flex items-center gap-1">
-                                <MapPin size={14} className="w-3.5 h-3.5 text-slate-500" />
-                                {apt.location}
-                              </span>
-                            )}
-                          </div>
+                          )}
+                          {apt.location && (
+                            <span className="flex items-center gap-1">
+                              <MapPin size={13} className="w-3.5 h-3.5 text-slate-500" />
+                              {apt.location}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2046,44 +2179,44 @@ export default function CuidadorWebPage() {
 
           {/* TAB 5: INDICADORES */}
           {currentTab === 'reports' && selectedPatient && (
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Indicadores de Adesão</h1>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Métricas oficiais de acompanhamento com base no histórico real registrado.
+                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                  Métricas reais de acompanhamento para {selectedPatient.nome}.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>Taxa Geral de Adesão</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800/90">
+                  <div className="text-xs font-medium text-slate-400 mb-2 flex items-center justify-between">
+                    <span>Taxa geral de adesão</span>
                     <TrendingUp size={16} className="w-4 h-4 text-emerald-400" />
                   </div>
-                  <div className="text-3xl font-black text-white">{adherenceRate}%</div>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Doses tomadas em relação ao total previsto do dia
+                  <div className="text-3xl font-extrabold text-white tabular-nums">{adherenceRate}%</div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Doses tomadas em relação ao previsto hoje
                   </p>
                 </div>
 
-                <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>Doses Confirmadas</span>
+                <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800/90">
+                  <div className="text-xs font-medium text-slate-400 mb-2 flex items-center justify-between">
+                    <span>Doses confirmadas</span>
                     <CheckCircle2 size={16} className="w-4 h-4 text-blue-400" />
                   </div>
-                  <div className="text-3xl font-black text-white">{confirmedDosesToday}</div>
-                  <p className="text-[11px] text-slate-500 mt-1">
+                  <div className="text-3xl font-extrabold text-white tabular-nums">{confirmedDosesToday}</div>
+                  <p className="text-xs text-slate-500 mt-1">
                     Confirmadas pelo paciente ou cuidador
                   </p>
                 </div>
 
-                <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>Não Administradas</span>
+                <div className="bg-[#131d31] p-5 rounded-2xl border border-slate-800/90">
+                  <div className="text-xs font-medium text-slate-400 mb-2 flex items-center justify-between">
+                    <span>Não administradas</span>
                     <AlertTriangle size={16} className="w-4 h-4 text-amber-400" />
                   </div>
-                  <div className="text-3xl font-black text-amber-400">{missedDosesToday}</div>
-                  <p className="text-[11px] text-slate-500 mt-1">
+                  <div className="text-3xl font-extrabold text-amber-400 tabular-nums">{missedDosesToday}</div>
+                  <p className="text-xs text-slate-500 mt-1">
                     Com justificativa clínica arquivada
                   </p>
                 </div>
@@ -2093,30 +2226,30 @@ export default function CuidadorWebPage() {
 
           {/* TAB 6: AUDITORIA */}
           {currentTab === 'audit' && selectedPatient && (
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Trilha de Auditoria</h1>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Registros imutáveis com autor, origem, timestamp e justificativa clínica.
+                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                  Registros imutáveis com autor, origem, data e justificativa clínica.
                 </p>
               </div>
 
               {auditLogs.length === 0 ? (
-                <div className="text-center py-10 bg-[#131d31] rounded-2xl border border-slate-800 text-slate-500 text-sm">
+                <div className="text-center py-10 bg-[#131d31] rounded-2xl border border-slate-800/90 text-slate-400 text-sm">
                   Nenhum registro de auditoria arquivado para este paciente.
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 divide-y divide-slate-800/80">
                   {auditLogs.map((log) => (
-                    <div key={log.id} className="bg-[#131d31] p-4 rounded-xl border border-slate-800 text-xs">
-                      <div className="flex items-center justify-between font-bold text-white mb-1">
-                        <span className="text-blue-400 uppercase tracking-wide">{log.action}</span>
-                        <span className="text-slate-500 font-normal">
+                    <div key={log.id} className="p-4 sm:p-5 text-xs space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-bold text-blue-400">{log.action}</span>
+                        <span className="text-slate-400 tabular-nums">
                           {new Date(log.created_at).toLocaleString('pt-BR')}
                         </span>
                       </div>
                       <div className="text-slate-300">
-                        Motivo: <strong className="text-white">{log.reason || 'Ajuste registrado'}</strong>
+                        Motivo: <strong className="text-white font-medium">{log.reason || 'Ajuste registrado'}</strong>
                       </div>
                     </div>
                   ))}
@@ -2128,13 +2261,175 @@ export default function CuidadorWebPage() {
       </div>
 
       {/* ─────────────────────────────────────────────────────────── */}
-      {/* MODAL: ACEITAR CONVITE */}
+      {/* MOBILE SHEET: SELETOR DE PACIENTE                          */}
+      {/* ─────────────────────────────────────────────────────────── */}
+      {showPatientPickerSheet && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setShowPatientPickerSheet(false)}
+        >
+          <div
+            className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-5 sm:p-6 max-w-md w-full shadow-2xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white">Selecionar Paciente</h3>
+              <button
+                type="button"
+                onClick={() => setShowPatientPickerSheet(false)}
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white"
+                aria-label="Fechar"
+              >
+                <X size={18} className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {patients.map((p) => {
+                const isSelected = p.patient_id === selectedPatientId;
+                return (
+                  <button
+                    key={p.patient_id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedPatientId(p.patient_id);
+                      setShowPatientPickerSheet(false);
+                    }}
+                    className={`w-full min-h-[52px] flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${
+                      isSelected
+                        ? 'bg-blue-600/15 border-blue-500/50 text-white'
+                        : 'bg-[#0b1120] border-slate-800 text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold truncate">{p.nome}</div>
+                      <div className="text-xs text-slate-400 truncate">{p.relationship_label}</div>
+                    </div>
+                    {isSelected && <Check size={16} className="w-4 h-4 text-blue-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────── */}
+      {/* MOBILE SHEET: MAIS OPÇÕES (INDICADORES, AUDITORIA, CONTA)  */}
+      {/* ─────────────────────────────────────────────────────────── */}
+      {showMobileMenuSheet && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 md:hidden"
+          onClick={() => setShowMobileMenuSheet(false)}
+        >
+          <div
+            className="bg-[#131d31] rounded-t-3xl border-t border-slate-800 p-5 pb-8 w-full shadow-2xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4" />
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-white">Mais recursos</h3>
+                <p className="text-xs text-slate-400 truncate">{currentUser?.email || 'cuidador'}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileMenuSheet(false)}
+                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white"
+                aria-label="Fechar menu"
+              >
+                <X size={18} className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentTab('reports');
+                  setShowMobileMenuSheet(false);
+                }}
+                className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
+              >
+                <span className="flex items-center gap-3">
+                  <BarChart3 size={18} className="w-4 h-4 text-blue-400" />
+                  Indicadores de Adesão
+                </span>
+                <ChevronRight size={16} className="w-4 h-4 text-slate-500" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentTab('audit');
+                  setShowMobileMenuSheet(false);
+                }}
+                className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
+              >
+                <span className="flex items-center gap-3">
+                  <History size={18} className="w-4 h-4 text-indigo-400" />
+                  Trilha de Auditoria
+                </span>
+                <ChevronRight size={16} className="w-4 h-4 text-slate-500" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileMenuSheet(false);
+                  setShowInviteModal(true);
+                }}
+                className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
+              >
+                <span className="flex items-center gap-3">
+                  <KeyRound size={18} className="w-4 h-4 text-amber-400" />
+                  Aceitar Código de Convite
+                </span>
+                <ChevronRight size={16} className="w-4 h-4 text-slate-500" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileMenuSheet(false);
+                  setNewPatientForm(EMPTY_PATIENT_FORM);
+                  setConfirmPatientSave(false);
+                  setShowNewPatientModal(true);
+                }}
+                className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
+              >
+                <span className="flex items-center gap-3">
+                  <UserPlus size={18} className="w-4 h-4 text-emerald-400" />
+                  Cadastrar Dependente
+                </span>
+                <ChevronRight size={16} className="w-4 h-4 text-slate-500" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileMenuSheet(false);
+                  handleLogout();
+                }}
+                className="w-full min-h-[50px] flex items-center justify-center gap-2 px-4 py-3 mt-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm font-semibold"
+              >
+                <LogOut size={16} className="w-4 h-4" />
+                <span>Encerrar Sessão</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────── */}
+      {/* MODAL: ACEITAR CONVITE                                     */}
       {/* ─────────────────────────────────────────────────────────── */}
       {showInviteModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
             <h3 className="text-base font-bold text-white mb-1">Aceitar Código de Convite</h3>
-            <p className="text-xs text-slate-400 mb-4">
+            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
               Informe o código de convite gerado pelo paciente em seu aplicativo Android MediCare.
             </p>
             <form onSubmit={handleAcceptInvite} className="space-y-4">
@@ -2144,20 +2439,20 @@ export default function CuidadorWebPage() {
                 value={inviteTokenInput}
                 onChange={(e) => setInviteTokenInput(e.target.value)}
                 placeholder="Código de convite"
-                className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2.5 min-h-[44px] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3.5 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               />
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowInviteModal(false)}
-                  className="px-3 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+                  className="min-h-[42px] px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+                  className="min-h-[42px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Vinculando...' : 'Confirmar Vínculo'}
                 </button>
@@ -2168,45 +2463,46 @@ export default function CuidadorWebPage() {
       )}
 
       {/* ─────────────────────────────────────────────────────────── */}
-      {/* MODAL: NOVO PACIENTE DEPENDENTE */}
+      {/* MODAL: NOVO PACIENTE DEPENDENTE                            */}
       {/* ─────────────────────────────────────────────────────────── */}
       {showNewPatientModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
             <h3 className="text-base font-bold text-white mb-1">Cadastrar Paciente Dependente</h3>
-            <p className="text-xs text-slate-400 mb-4">
+            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
               Preencha os dados reais do paciente. Nenhum valor clínico é preenchido automaticamente.
             </p>
             <form onSubmit={handleCreateManagedPatient} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Nome Completo *</label>
+                <label className="block text-xs text-slate-300 mb-1">Nome Completo *</label>
                 <input
                   type="text"
                   required
                   value={newPatientForm.nome}
                   onChange={(e) => setNewPatientForm({ ...newPatientForm, nome: e.target.value })}
                   placeholder="Nome completo do paciente"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Parentesco / Vínculo *</label>
+                  <label className="block text-xs text-slate-300 mb-1">Parentesco / Vínculo *</label>
                   <input
                     type="text"
                     required
                     value={newPatientForm.relationship_label}
                     onChange={(e) => setNewPatientForm({ ...newPatientForm, relationship_label: e.target.value })}
                     placeholder="Ex: Mãe, Pai, Filho"
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Tipo Sanguíneo (opcional)</label>
+                  <label className="block text-xs text-slate-300 mb-1">Tipo Sanguíneo (opcional)</label>
                   <select
                     value={newPatientForm.blood_type}
                     onChange={(e) => setNewPatientForm({ ...newPatientForm, blood_type: e.target.value })}
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   >
                     <option value="">Não informado</option>
                     {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bt) => (
@@ -2217,24 +2513,24 @@ export default function CuidadorWebPage() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Data de Nascimento (opcional)</label>
+                  <label className="block text-xs text-slate-300 mb-1">Data de Nascimento (opcional)</label>
                   <input
                     type="date"
                     value={newPatientForm.dob}
                     onChange={(e) => setNewPatientForm({ ...newPatientForm, dob: e.target.value })}
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Telefone (opcional)</label>
+                  <label className="block text-xs text-slate-300 mb-1">Telefone (opcional)</label>
                   <input
                     type="tel"
                     value={newPatientForm.phone}
                     onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })}
                     placeholder="(00) 00000-0000"
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
               </div>
@@ -2244,7 +2540,7 @@ export default function CuidadorWebPage() {
                   type="checkbox"
                   checked={confirmPatientSave}
                   onChange={(e) => setConfirmPatientSave(e.target.checked)}
-                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
+                  className="mt-0.5 w-4 h-4 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
                 />
                 <span>Confirmo que conferi os dados clínicos e autorizo o cadastro deste paciente dependente.</span>
               </label>
@@ -2253,14 +2549,14 @@ export default function CuidadorWebPage() {
                 <button
                   type="button"
                   onClick={() => setShowNewPatientModal(false)}
-                  className="px-3 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+                  className="min-h-[42px] px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading || !confirmPatientSave}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
+                  className="min-h-[42px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Cadastrando...' : 'Cadastrar Paciente'}
                 </button>
@@ -2271,56 +2567,57 @@ export default function CuidadorWebPage() {
       )}
 
       {/* ─────────────────────────────────────────────────────────── */}
-      {/* MODAL: NOVO MEDICAMENTO */}
+      {/* MODAL: NOVO MEDICAMENTO                                    */}
       {/* ─────────────────────────────────────────────────────────── */}
       {showNewMedModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
             <h3 className="text-base font-bold text-white mb-1">Cadastrar Medicamento</h3>
             <p className="text-xs text-slate-400 mb-4">
               Prescrição para <strong>{selectedPatient?.nome}</strong>. Preencha exatamente conforme a receita médica.
             </p>
             <form onSubmit={handleAddMedication} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Nome do Medicamento *</label>
+                <label className="block text-xs text-slate-300 mb-1">Nome do Medicamento *</label>
                 <input
                   type="text"
                   required
                   value={newMedForm.nome}
                   onChange={(e) => setNewMedForm({ ...newMedForm, nome: e.target.value })}
                   placeholder="Informe o nome do medicamento"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Princípio Ativo (opcional)</label>
+                <label className="block text-xs text-slate-300 mb-1">Princípio Ativo (opcional)</label>
                 <input
                   type="text"
                   value={newMedForm.principio_ativo}
                   onChange={(e) => setNewMedForm({ ...newMedForm, principio_ativo: e.target.value })}
                   placeholder="Informe se desejar registrar"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Dosagem Prescrita *</label>
+                  <label className="block text-xs text-slate-300 mb-1">Dosagem Prescrita *</label>
                   <input
                     type="text"
                     required
                     value={newMedForm.dosagem}
                     onChange={(e) => setNewMedForm({ ...newMedForm, dosagem: e.target.value })}
                     placeholder="Ex: 50mg, 20 gotas"
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Unidade *</label>
+                  <label className="block text-xs text-slate-300 mb-1">Unidade *</label>
                   <select
                     required
                     value={newMedForm.unidade}
                     onChange={(e) => setNewMedForm({ ...newMedForm, unidade: e.target.value })}
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   >
                     <option value="">Selecione...</option>
                     <option value="comprimido">Comprimido</option>
@@ -2338,9 +2635,9 @@ export default function CuidadorWebPage() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Estoque Inicial *</label>
+                  <label className="block text-xs text-slate-300 mb-1">Estoque Inicial *</label>
                   <input
                     type="number"
                     min="0"
@@ -2348,18 +2645,18 @@ export default function CuidadorWebPage() {
                     value={newMedForm.quantidade}
                     onChange={(e) => setNewMedForm({ ...newMedForm, quantidade: e.target.value })}
                     placeholder="Quantidade atual"
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Horários (HH:MM) *</label>
+                  <label className="block text-xs text-slate-300 mb-1">Horários (HH:MM) *</label>
                   <input
                     type="text"
                     required
                     value={newMedForm.horarios}
                     onChange={(e) => setNewMedForm({ ...newMedForm, horarios: e.target.value })}
                     placeholder="Ex: 08:00, 20:00"
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
               </div>
@@ -2369,7 +2666,7 @@ export default function CuidadorWebPage() {
                   type="checkbox"
                   checked={confirmMedSave}
                   onChange={(e) => setConfirmMedSave(e.target.checked)}
-                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
+                  className="mt-0.5 w-4 h-4 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
                 />
                 <span>Confirmo que revisei o nome, a dosagem, os horários e o estoque inicial deste medicamento.</span>
               </label>
@@ -2378,14 +2675,14 @@ export default function CuidadorWebPage() {
                 <button
                   type="button"
                   onClick={() => setShowNewMedModal(false)}
-                  className="px-3 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+                  className="min-h-[42px] px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading || !confirmMedSave}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
+                  className="min-h-[42px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Salvando...' : 'Salvar Medicamento'}
                 </button>
@@ -2396,43 +2693,44 @@ export default function CuidadorWebPage() {
       )}
 
       {/* ─────────────────────────────────────────────────────────── */}
-      {/* MODAL: REGISTRAR AÇÃO DE DOSE */}
+      {/* MODAL: REGISTRAR AÇÃO DE DOSE                              */}
       {/* ─────────────────────────────────────────────────────────── */}
       {showDoseModal && selectedDoseTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
             <h3 className="text-base font-bold text-white mb-1">Registro Clínico de Administração</h3>
-            <p className="text-xs text-slate-400 mb-4">
+            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
               <strong>{selectedDoseTarget.med_name}</strong> ({selectedDoseTarget.dosagem}) previsto para{' '}
-              <strong>{selectedDoseTarget.hora}</strong> • Paciente: <strong>{selectedPatient?.nome}</strong>.
+              <strong>{selectedDoseTarget.hora}</strong> · Paciente: <strong>{selectedPatient?.nome}</strong>.
             </p>
 
             <div className="space-y-3 mb-4">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">
+                <label className="block text-xs text-slate-300 mb-1">
                   Horário Real da Administração (para doses tomadas)
                 </label>
                 <input
                   type="time"
                   value={doseAdministeredTime}
                   onChange={(e) => setDoseAdministeredTime(e.target.value)}
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white focus:outline-none focus:border-blue-500"
                 />
-                <span className="block text-[10px] text-slate-500 mt-1">
-                  O sistema separa o horário previsto ({selectedDoseTarget.hora}), o horário real informado acima e o timestamp exato deste registro.
+                <span className="block text-[11px] text-slate-400 mt-1">
+                  O sistema registra separadamente o horário previsto ({selectedDoseTarget.hora}) e o horário real.
                 </span>
               </div>
 
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  Justificativa / Observação Clínica (obrigatória para dose não administrada)
+                <label className="block text-xs text-slate-300 mb-1">
+                  Justificativa / Observação Clínica (obrigatória se não administrada)
                 </label>
                 <input
                   type="text"
                   value={doseActionReason}
                   onChange={(e) => setDoseActionReason(e.target.value)}
                   placeholder="Ex: Administrado após o café / Paciente recusou por náusea"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 />
               </div>
 
@@ -2441,7 +2739,7 @@ export default function CuidadorWebPage() {
                   type="checkbox"
                   checked={confirmDoseSave}
                   onChange={(e) => setConfirmDoseSave(e.target.checked)}
-                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
+                  className="mt-0.5 w-4 h-4 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
                 />
                 <span>Confirmo a veracidade deste registro de administração sob minha responsabilidade de cuidador.</span>
               </label>
@@ -2472,7 +2770,7 @@ export default function CuidadorWebPage() {
             <button
               type="button"
               onClick={() => setShowDoseModal(false)}
-              className="w-full mt-3 py-2 rounded-lg text-slate-400 hover:text-white text-xs font-semibold transition-colors"
+              className="w-full mt-3 min-h-[40px] py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold transition-colors"
             >
               Cancelar
             </button>
@@ -2481,78 +2779,79 @@ export default function CuidadorWebPage() {
       )}
 
       {/* ─────────────────────────────────────────────────────────── */}
-      {/* MODAL: NOVO COMPROMISSO */}
+      {/* MODAL: NOVO COMPROMISSO                                    */}
       {/* ─────────────────────────────────────────────────────────── */}
       {showAppointmentModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-2">Agendar Consulta ou Exame</h3>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
+            <h3 className="text-base font-bold text-white mb-3">Agendar Consulta ou Exame</h3>
             <form onSubmit={handleAddAppointment} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Título do Evento *</label>
+                <label className="block text-xs text-slate-300 mb-1">Título do Evento *</label>
                 <input
                   type="text"
                   required
                   value={newAppointmentForm.title}
                   onChange={(e) => setNewAppointmentForm({ ...newAppointmentForm, title: e.target.value })}
                   placeholder="Ex: Retorno Cardiologia"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Data *</label>
+                  <label className="block text-xs text-slate-300 mb-1">Data *</label>
                   <input
                     type="date"
                     required
                     value={newAppointmentForm.date}
                     onChange={(e) => setNewAppointmentForm({ ...newAppointmentForm, date: e.target.value })}
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Horário *</label>
+                  <label className="block text-xs text-slate-300 mb-1">Horário *</label>
                   <input
                     type="time"
                     required
                     value={newAppointmentForm.time}
                     onChange={(e) => setNewAppointmentForm({ ...newAppointmentForm, time: e.target.value })}
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Médico ou Especialista (opcional)</label>
+                <label className="block text-xs text-slate-300 mb-1">Médico ou Especialista (opcional)</label>
                 <input
                   type="text"
                   value={newAppointmentForm.doctor}
                   onChange={(e) => setNewAppointmentForm({ ...newAppointmentForm, doctor: e.target.value })}
                   placeholder="Nome do profissional"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Local / Clínica (opcional)</label>
+                <label className="block text-xs text-slate-300 mb-1">Local / Clínica (opcional)</label>
                 <input
                   type="text"
                   value={newAppointmentForm.location}
                   onChange={(e) => setNewAppointmentForm({ ...newAppointmentForm, location: e.target.value })}
                   placeholder="Endereço ou consultório"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAppointmentModal(false)}
-                  className="px-3 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+                  className="min-h-[42px] px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+                  className="min-h-[42px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Agendando...' : 'Agendar Evento'}
                 </button>
@@ -2563,20 +2862,21 @@ export default function CuidadorWebPage() {
       )}
 
       {/* ─────────────────────────────────────────────────────────── */}
-      {/* MODAL: REPOSIÇÃO DE ESTOQUE */}
+      {/* MODAL: REPOSIÇÃO DE ESTOQUE                                */}
       {/* ─────────────────────────────────────────────────────────── */}
       {showStockModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-2">Registrar Reposição de Estoque</h3>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
+            <h3 className="text-base font-bold text-white mb-3">Registrar Reposição de Estoque</h3>
             <form onSubmit={handleAddStock} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Medicamento *</label>
+                <label className="block text-xs text-slate-300 mb-1">Medicamento *</label>
                 <select
                   required
                   value={stockForm.medication_id}
                   onChange={(e) => setStockForm({ ...stockForm, medication_id: e.target.value })}
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 >
                   <option value="">Selecione um medicamento...</option>
                   {medications.map((m) => (
@@ -2587,7 +2887,7 @@ export default function CuidadorWebPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Quantidade Adicionada *</label>
+                <label className="block text-xs text-slate-300 mb-1">Quantidade Adicionada *</label>
                 <input
                   type="number"
                   min="1"
@@ -2595,17 +2895,17 @@ export default function CuidadorWebPage() {
                   value={stockForm.quantity_added}
                   onChange={(e) => setStockForm({ ...stockForm, quantity_added: e.target.value })}
                   placeholder="Informe quantas unidades foram adquiridas"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Observação (opcional)</label>
+                <label className="block text-xs text-slate-300 mb-1">Observação (opcional)</label>
                 <input
                   type="text"
                   value={stockForm.notes}
                   onChange={(e) => setStockForm({ ...stockForm, notes: e.target.value })}
                   placeholder="Ex: Compra em farmácia"
-                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-xs text-white"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
                 />
               </div>
 
@@ -2614,7 +2914,7 @@ export default function CuidadorWebPage() {
                   type="checkbox"
                   checked={confirmStockSave}
                   onChange={(e) => setConfirmStockSave(e.target.checked)}
-                  className="mt-0.5 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
+                  className="mt-0.5 w-4 h-4 rounded border-slate-600 bg-[#0b1120] text-blue-600 focus:ring-blue-500"
                 />
                 <span>Confirmo a quantidade adicionada ao estoque deste medicamento.</span>
               </label>
@@ -2623,14 +2923,14 @@ export default function CuidadorWebPage() {
                 <button
                   type="button"
                   onClick={() => setShowStockModal(false)}
-                  className="px-3 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+                  className="min-h-[42px] px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading || !confirmStockSave}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
+                  className="min-h-[42px] px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Registrando...' : 'Confirmar Reposição'}
                 </button>
@@ -2640,24 +2940,53 @@ export default function CuidadorWebPage() {
         </div>
       )}
 
-      {/* Mobile Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-md border-t border-[#1e293b] px-2 py-2 z-50 flex items-center justify-around select-none">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = currentTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setCurrentTab(item.id)}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-lg transition-colors min-h-[44px] ${
-                isActive ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Icon size={20} className="w-5 h-5 mb-0.5" />
-              <span className="text-[10px] leading-none">{item.label.split(' ')[0]}</span>
-            </button>
-          );
-        })}
+      {/* Mobile Bottom Navigation Bar (5 colunas fixas, zero corte em qualquer tela) */}
+      <nav
+        aria-label="Menu inferior"
+        className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-md border-t border-slate-800/90 z-40 select-none pb-[env(safe-area-inset-bottom)]"
+      >
+        <div className="grid grid-cols-5 items-center h-16 px-1">
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = currentTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setCurrentTab(item.id)}
+                className={`relative flex flex-col items-center justify-center gap-1 min-h-[52px] px-1 rounded-xl transition-colors focus:outline-none ${
+                  isActive ? 'text-blue-400 font-semibold' : 'text-slate-400 hover:text-slate-200 font-medium'
+                }`}
+              >
+                {isActive && (
+                  <span className="absolute top-1 w-5 h-0.5 rounded-full bg-blue-400" aria-hidden="true" />
+                )}
+                <Icon size={20} className="w-5 h-5 shrink-0" />
+                <span className="text-[11px] leading-none whitespace-nowrap truncate max-w-full">
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={() => setShowMobileMenuSheet(true)}
+            className={`relative flex flex-col items-center justify-center gap-1 min-h-[52px] px-1 rounded-xl transition-colors focus:outline-none ${
+              currentTab === 'reports' || currentTab === 'audit' || showMobileMenuSheet
+                ? 'text-blue-400 font-semibold'
+                : 'text-slate-400 hover:text-slate-200 font-medium'
+            }`}
+          >
+            {(currentTab === 'reports' || currentTab === 'audit') && (
+              <span className="absolute top-1 w-5 h-0.5 rounded-full bg-blue-400" aria-hidden="true" />
+            )}
+            <LayoutGrid size={20} className="w-5 h-5 shrink-0" />
+            <span className="text-[11px] leading-none whitespace-nowrap truncate max-w-full">
+              Mais
+            </span>
+          </button>
+        </div>
       </nav>
     </div>
   );

@@ -37,6 +37,7 @@ export const metadata = {
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
+  viewportFit: 'cover',
   themeColor: '#0b1120',
 };
 
@@ -48,11 +49,11 @@ export default function RootLayout({ children }) {
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className="bg-[#0b1120] text-slate-100 min-h-screen antialiased selection:bg-blue-600 selection:text-white">
+      <body className="bg-[#0b1120] text-slate-100 min-h-screen antialiased selection:bg-blue-600 selection:text-white overflow-x-hidden">
         {children}
       </body>
     </html>
