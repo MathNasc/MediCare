@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import medicareLogo from '../../../public/icon-192.png';
+import { registerServiceWorker, PWAInstallButton, OfflineIndicator } from '@/lib/usePWA';
 import {
   Home,
   Users,
@@ -142,10 +143,256 @@ export default function CuidadorWebPage() {
   const [searchPatient, setSearchPatient] = useState('');
   const [doseStatusFilter, setDoseStatusFilter] = useState('all');
 
-  const showToast = useCallback((msg, type = 'success') => {
+  // Navigation history & PWA back-button state
+  const [canGoBack, setCanGoBack] = useState(false);
+  const tabStackRef = useRef(['dashboard']);
+  const currentTabRef = useRef('dashboard');
+  const isAuthenticatedRef = useRef(false);
+  const authModeRef = useRef('login');
+  const hasAnyOverlayRef = useRef(false);
+  const overlayHistoryPushedRef = useRef(false);
+  const signupHistoryPushedRef = useRef(false);
+  const rootGuardArmedRef = useRef(false);
+  const ignoringPopRef = useRef(0);
+  const lastBackPressAtRef = useRef(0);
+  const toastTimerRef = useRef(null);
+
+  const hasAnyOverlay =
+    showRecoverModal ||
+    showInviteModal ||
+    showNewPatientModal ||
+    showNewMedModal ||
+    showDoseModal ||
+    showAppointmentModal ||
+    showStockModal ||
+    showMobileMenuSheet ||
+    showPatientPickerSheet;
+
+  currentTabRef.current = currentTab;
+  isAuthenticatedRef.current = isAuthenticated;
+  authModeRef.current = authMode;
+  hasAnyOverlayRef.current = hasAnyOverlay;
+
+  const showToast = useCallback((msg, type = 'success', duration = 4000) => {
     setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 4000);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setNotification(null);
+      toastTimerRef.current = null;
+    }, duration);
   }, []);
+
+  const closeAllOverlays = useCallback(() => {
+    setShowRecoverModal(false);
+    setShowInviteModal(false);
+    setShowNewPatientModal(false);
+    setShowNewMedModal(false);
+    setShowDoseModal(false);
+    setShowAppointmentModal(false);
+    setShowStockModal(false);
+    setShowMobileMenuSheet(false);
+    setShowPatientPickerSheet(false);
+  }, []);
+
+  const navigateToTab = useCallback(
+    (nextTab) => {
+      const targetTab = nextTab || 'dashboard';
+      const wasOverlayOpen = hasAnyOverlayRef.current || overlayHistoryPushedRef.current;
+
+      if (wasOverlayOpen) {
+        closeAllOverlays();
+      }
+
+      if (targetTab === currentTabRef.current) {
+        return;
+      }
+
+      const nextStack = [...tabStackRef.current, targetTab];
+      tabStackRef.current = nextStack;
+      setCurrentTab(targetTab);
+      setCanGoBack(nextStack.length > 1);
+
+      if (typeof window !== 'undefined' && window.history?.pushState) {
+        const statePayload = {
+          medicare: true,
+          kind: 'tab',
+          tab: targetTab,
+          depth: nextStack.length,
+        };
+        if (overlayHistoryPushedRef.current) {
+          overlayHistoryPushedRef.current = false;
+          window.history.replaceState(statePayload, '');
+        } else {
+          window.history.pushState(statePayload, '');
+        }
+        rootGuardArmedRef.current = true;
+      }
+    },
+    [closeAllOverlays]
+  );
+
+  const switchAuthMode = useCallback((nextMode) => {
+    setAuthError(null);
+    if (nextMode === authModeRef.current) return;
+
+    setAuthMode(nextMode);
+    if (typeof window === 'undefined' || !window.history?.pushState) return;
+
+    if (nextMode === 'signup') {
+      if (!signupHistoryPushedRef.current) {
+        signupHistoryPushedRef.current = true;
+        window.history.pushState({ medicare: true, kind: 'auth', mode: 'signup' }, '');
+        rootGuardArmedRef.current = true;
+      }
+    } else if (signupHistoryPushedRef.current) {
+      signupHistoryPushedRef.current = false;
+      ignoringPopRef.current += 1;
+      window.history.back();
+    }
+  }, []);
+
+  const handleUiBack = useCallback(() => {
+    if (hasAnyOverlayRef.current) {
+      closeAllOverlays();
+      return;
+    }
+    if (!isAuthenticatedRef.current && authModeRef.current === 'signup') {
+      if (
+        signupHistoryPushedRef.current &&
+        typeof window !== 'undefined' &&
+        window.history.state?.kind === 'auth'
+      ) {
+        window.history.back();
+      } else {
+        signupHistoryPushedRef.current = false;
+        setAuthMode('login');
+        setAuthError(null);
+      }
+      return;
+    }
+    if (isAuthenticatedRef.current && tabStackRef.current.length > 1) {
+      if (typeof window !== 'undefined' && window.history.state?.kind === 'tab') {
+        window.history.back();
+      } else {
+        const nextStack = tabStackRef.current.slice(0, -1);
+        tabStackRef.current = nextStack;
+        setCurrentTab(nextStack[nextStack.length - 1] || 'dashboard');
+        setCanGoBack(nextStack.length > 1);
+      }
+    }
+  }, [closeAllOverlays]);
+
+  // Registra Service Worker do PWA
+  useEffect(() => {
+    registerServiceWorker();
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Sincroniza abertura/fechamento de modais e sheets com o histórico do navegador
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.history?.pushState) return;
+
+    if (hasAnyOverlay && !overlayHistoryPushedRef.current) {
+      overlayHistoryPushedRef.current = true;
+      window.history.pushState({ medicare: true, kind: 'overlay' }, '');
+      rootGuardArmedRef.current = true;
+    } else if (!hasAnyOverlay && overlayHistoryPushedRef.current) {
+      overlayHistoryPushedRef.current = false;
+      ignoringPopRef.current += 1;
+      window.history.back();
+    }
+  }, [hasAnyOverlay]);
+
+  // Limpa entrada de cadastro do histórico ao autenticar com sucesso
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.history?.replaceState) return;
+    if (isAuthenticated && signupHistoryPushedRef.current) {
+      signupHistoryPushedRef.current = false;
+      window.history.replaceState({ medicare: true, kind: 'root-guard' }, '');
+    }
+  }, [isAuthenticated]);
+
+  // Arma proteção contra fechamento acidental na raiz após primeira interação do usuário
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.history?.pushState) return undefined;
+
+    const armRootGuard = () => {
+      if (
+        rootGuardArmedRef.current ||
+        hasAnyOverlayRef.current ||
+        tabStackRef.current.length > 1 ||
+        (!isAuthenticatedRef.current && authModeRef.current === 'signup')
+      ) {
+        return;
+      }
+      if (window.history.state?.kind !== 'root-guard') {
+        window.history.replaceState({ medicare: true, kind: 'root-base' }, '');
+        window.history.pushState({ medicare: true, kind: 'root-guard' }, '');
+      }
+      rootGuardArmedRef.current = true;
+    };
+
+    window.addEventListener('pointerdown', armRootGuard, { passive: true });
+    window.addEventListener('keydown', armRootGuard, { passive: true });
+
+    const handlePopState = () => {
+      if (ignoringPopRef.current > 0) {
+        ignoringPopRef.current -= 1;
+        return;
+      }
+
+      if (hasAnyOverlayRef.current) {
+        overlayHistoryPushedRef.current = false;
+        closeAllOverlays();
+        return;
+      }
+
+      if (!isAuthenticatedRef.current && authModeRef.current === 'signup') {
+        signupHistoryPushedRef.current = false;
+        setAuthMode('login');
+        setAuthError(null);
+        return;
+      }
+
+      if (isAuthenticatedRef.current && tabStackRef.current.length > 1) {
+        const nextStack = tabStackRef.current.slice(0, -1);
+        tabStackRef.current = nextStack;
+        setCurrentTab(nextStack[nextStack.length - 1] || 'dashboard');
+        setCanGoBack(nextStack.length > 1);
+        return;
+      }
+
+      // Raiz do app: exige dois toques em Voltar em até 2,2s para sair do PWA
+      const now = Date.now();
+      if (now - lastBackPressAtRef.current < 2200) {
+        rootGuardArmedRef.current = false;
+        lastBackPressAtRef.current = 0;
+        if (window.history.state?.kind === 'root-base') {
+          window.history.back();
+        }
+        return;
+      }
+
+      lastBackPressAtRef.current = now;
+      showToast('Pressione voltar novamente para sair do aplicativo', 'info', 2200);
+      if (window.history.state?.kind !== 'root-guard') {
+        window.history.pushState({ medicare: true, kind: 'root-guard' }, '');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('pointerdown', armRootGuard);
+      window.removeEventListener('keydown', armRootGuard);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [closeAllOverlays, showToast]);
 
   const syncCsrfToken = useCallback((explicitToken) => {
     const fromCookie = readCookieValue('medicare_csrf_token');
@@ -155,6 +402,22 @@ export default function CuidadorWebPage() {
   }, []);
 
   const clearClientSession = useCallback(() => {
+    const extraBackSteps =
+      (tabStackRef.current.length > 1 ? tabStackRef.current.length - 1 : 0) +
+      (overlayHistoryPushedRef.current ? 1 : 0);
+
+    overlayHistoryPushedRef.current = false;
+    signupHistoryPushedRef.current = false;
+    tabStackRef.current = ['dashboard'];
+    setCurrentTab('dashboard');
+    setCanGoBack(false);
+    closeAllOverlays();
+
+    if (extraBackSteps > 0 && typeof window !== 'undefined' && window.history?.go) {
+      ignoringPopRef.current += 1;
+      window.history.go(-extraBackSteps);
+    }
+
     setIsAuthenticated(false);
     setCurrentUser(null);
     csrfTokenRef.current = '';
@@ -173,7 +436,7 @@ export default function CuidadorWebPage() {
     } catch {
       // ignore storage errors
     }
-  }, []);
+  }, [closeAllOverlays]);
 
   // Helper centralizado de requisição autenticada via cookies HttpOnly + proteção CSRF
   const apiFetch = useCallback(
@@ -994,7 +1257,42 @@ export default function CuidadorWebPage() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 antialiased selection:bg-blue-600 selection:text-white">
-        <div className="w-full max-w-[420px] bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-8 shadow-2xl shadow-black/40">
+        {notification && (
+          <div
+            role="status"
+            className={`fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 sm:max-w-sm px-4 py-3 rounded-xl shadow-2xl border text-xs sm:text-sm font-semibold flex items-center gap-2.5 transition-all ${
+              notification.type === 'error'
+                ? 'bg-rose-950/95 border-rose-700 text-rose-200'
+                : notification.type === 'info'
+                ? 'bg-slate-900/95 border-slate-700 text-slate-100'
+                : 'bg-emerald-950/95 border-emerald-700 text-emerald-200'
+            }`}
+          >
+            {notification.type === 'error' ? (
+              <AlertTriangle size={16} className="w-4 h-4 shrink-0" />
+            ) : notification.type === 'info' ? (
+              <AlertCircle size={16} className="w-4 h-4 shrink-0 text-blue-400" />
+            ) : (
+              <CheckCircle2 size={16} className="w-4 h-4 shrink-0" />
+            )}
+            <span className="leading-snug">{notification.msg}</span>
+          </div>
+        )}
+
+        <OfflineIndicator />
+
+        <div className="w-full max-w-[420px] bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-8 shadow-2xl shadow-black/40 relative">
+          {authMode === 'signup' && (
+            <button
+              type="button"
+              onClick={handleUiBack}
+              aria-label="Voltar para tela de login"
+              className="absolute top-4 left-4 min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-xl bg-[#0b1120] border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+            >
+              <ArrowLeft size={18} className="w-4 h-4" />
+            </button>
+          )}
+
           {/* Logo / Header */}
           <div className="text-center mb-6">
             <Image
@@ -1020,10 +1318,7 @@ export default function CuidadorWebPage() {
           <div className="flex bg-[#0b1120] p-1 rounded-xl mb-5 border border-slate-800">
             <button
               type="button"
-              onClick={() => {
-                setAuthMode('login');
-                setAuthError(null);
-              }}
+              onClick={() => switchAuthMode('login')}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                 authMode === 'login'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
@@ -1034,10 +1329,7 @@ export default function CuidadorWebPage() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setAuthMode('signup');
-                setAuthError(null);
-              }}
+              onClick={() => switchAuthMode('signup')}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                 authMode === 'signup'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
@@ -1142,10 +1434,7 @@ export default function CuidadorWebPage() {
                 <span className="text-xs text-slate-400">Não tem uma conta? </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setAuthMode('signup');
-                    setAuthError(null);
-                  }}
+                  onClick={() => switchAuthMode('signup')}
                   className="text-xs text-blue-400 hover:text-blue-300 font-semibold underline underline-offset-2 transition-colors"
                 >
                   Criar conta de cuidador
@@ -1272,10 +1561,7 @@ export default function CuidadorWebPage() {
                 <span className="text-xs text-slate-400">Já possui uma conta? </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setAuthMode('login');
-                    setAuthError(null);
-                  }}
+                  onClick={() => switchAuthMode('login')}
                   className="text-xs text-blue-400 hover:text-blue-300 font-semibold underline underline-offset-2 transition-colors"
                 >
                   Entrar aqui
@@ -1283,6 +1569,8 @@ export default function CuidadorWebPage() {
               </div>
             </form>
           )}
+
+          <PWAInstallButton variant="auth" />
 
           {/* Link "Voltar ao portal" */}
           <div className="mt-6 pt-5 border-t border-slate-800/80 text-center">
@@ -1368,17 +1656,23 @@ export default function CuidadorWebPage() {
           className={`fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 sm:max-w-sm px-4 py-3 rounded-xl shadow-2xl border text-xs sm:text-sm font-semibold flex items-center gap-2.5 transition-all ${
             notification.type === 'error'
               ? 'bg-rose-950/95 border-rose-700 text-rose-200'
+              : notification.type === 'info'
+              ? 'bg-slate-900/95 border-slate-700 text-slate-100'
               : 'bg-emerald-950/95 border-emerald-700 text-emerald-200'
           }`}
         >
           {notification.type === 'error' ? (
             <AlertTriangle size={16} className="w-4 h-4 shrink-0" />
+          ) : notification.type === 'info' ? (
+            <AlertCircle size={16} className="w-4 h-4 shrink-0 text-blue-400" />
           ) : (
             <CheckCircle2 size={16} className="w-4 h-4 shrink-0" />
           )}
           <span className="leading-snug">{notification.msg}</span>
         </div>
       )}
+
+      <OfflineIndicator />
 
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex flex-col w-64 lg:w-72 bg-[#101827] border-r border-slate-800/90 p-5 justify-between select-none shrink-0 sticky top-0 h-screen">
@@ -1434,7 +1728,7 @@ export default function CuidadorWebPage() {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setCurrentTab(item.id)}
+                  onClick={() => navigateToTab(item.id)}
                   className={`w-full flex items-center gap-3 px-3.5 py-2.5 min-h-[42px] rounded-xl text-xs font-semibold transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                     isActive
                       ? 'bg-blue-600/15 text-blue-400 border border-blue-500/30'
@@ -1470,14 +1764,26 @@ export default function CuidadorWebPage() {
         {/* Top Header Compacto (Mobile-First + Desktop) */}
         <header className="h-14 md:h-16 border-b border-slate-800/90 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 bg-[#0b1120]/90 backdrop-blur-md sticky top-0 z-30">
           <div className="flex items-center gap-2.5 min-w-0">
-            <Image
-              src={medicareLogo}
-              alt="MediCare Cuidador"
-              width={32}
-              height={32}
-              referrerPolicy="no-referrer"
-              className="md:hidden w-8 h-8 rounded-lg shadow-sm shrink-0"
-            />
+            {canGoBack ? (
+              <button
+                type="button"
+                onClick={handleUiBack}
+                aria-label="Voltar para tela anterior"
+                title="Voltar"
+                className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] rounded-xl bg-[#131d31] border border-slate-800 text-slate-200 hover:text-white hover:border-slate-700 transition-colors shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                <ArrowLeft size={18} className="w-4 h-4" />
+              </button>
+            ) : (
+              <Image
+                src={medicareLogo}
+                alt="MediCare Cuidador"
+                width={32}
+                height={32}
+                referrerPolicy="no-referrer"
+                className="md:hidden w-8 h-8 rounded-lg shadow-sm shrink-0"
+              />
+            )}
             <div className="min-w-0">
               <h2 className="text-sm md:text-base font-bold text-white truncate leading-tight">
                 {currentTabTitle}
@@ -1491,6 +1797,8 @@ export default function CuidadorWebPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <PWAInstallButton variant="header" />
+
             {/* Seletor rápido de paciente no Mobile */}
             {patients.length > 0 && (
               <button
@@ -1524,7 +1832,7 @@ export default function CuidadorWebPage() {
             <div className="grid grid-cols-2 gap-1 p-1 bg-[#131d31] border border-slate-800 rounded-xl">
               <button
                 type="button"
-                onClick={() => setCurrentTab('reports')}
+                onClick={() => navigateToTab('reports')}
                 className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
                   currentTab === 'reports'
                     ? 'bg-blue-600 text-white shadow-sm'
@@ -1535,7 +1843,7 @@ export default function CuidadorWebPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setCurrentTab('audit')}
+                onClick={() => navigateToTab('audit')}
                 className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
                   currentTab === 'audit'
                     ? 'bg-blue-600 text-white shadow-sm'
@@ -2363,10 +2671,7 @@ export default function CuidadorWebPage() {
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => {
-                  setCurrentTab('reports');
-                  setShowMobileMenuSheet(false);
-                }}
+                onClick={() => navigateToTab('reports')}
                 className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
               >
                 <span className="flex items-center gap-3">
@@ -2378,10 +2683,7 @@ export default function CuidadorWebPage() {
 
               <button
                 type="button"
-                onClick={() => {
-                  setCurrentTab('audit');
-                  setShowMobileMenuSheet(false);
-                }}
+                onClick={() => navigateToTab('audit')}
                 className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
               >
                 <span className="flex items-center gap-3">
@@ -2422,6 +2724,11 @@ export default function CuidadorWebPage() {
                 </span>
                 <ChevronRight size={16} className="w-4 h-4 text-slate-500" />
               </button>
+
+              <PWAInstallButton
+                variant="menu"
+                onAfterAction={() => setShowMobileMenuSheet(false)}
+              />
 
               <button
                 type="button"
@@ -2971,7 +3278,7 @@ export default function CuidadorWebPage() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setCurrentTab(item.id)}
+                onClick={() => navigateToTab(item.id)}
                 className={`relative flex flex-col items-center justify-center gap-1 min-h-[52px] px-1 rounded-xl transition-colors focus:outline-none ${
                   isActive ? 'text-blue-400 font-semibold' : 'text-slate-400 hover:text-slate-200 font-medium'
                 }`}
