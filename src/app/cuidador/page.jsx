@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import Image from 'next/image';
+import medicareLogo from '../../../public/icon-192.png';
 import {
   Home,
   Users,
@@ -995,9 +997,15 @@ export default function CuidadorWebPage() {
         <div className="w-full max-w-[420px] bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-8 shadow-2xl shadow-black/40">
           {/* Logo / Header */}
           <div className="text-center mb-6">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 font-black text-xl mb-3 shadow-md shadow-blue-600/20">
-              M
-            </div>
+            <Image
+              src={medicareLogo}
+              alt="MediCare Cuidador"
+              width={52}
+              height={52}
+              priority
+              referrerPolicy="no-referrer"
+              className="mx-auto mb-3 w-[52px] h-[52px] rounded-2xl shadow-lg shadow-purple-900/30"
+            />
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
               {authMode === 'signup' ? 'Criar Conta de Cuidador' : 'Bem-vindo ao MediCare Cuidador'}
             </h1>
@@ -1376,9 +1384,14 @@ export default function CuidadorWebPage() {
       <aside className="hidden md:flex flex-col w-64 lg:w-72 bg-[#101827] border-r border-slate-800/90 p-5 justify-between select-none shrink-0 sticky top-0 h-screen">
         <div>
           <div className="flex items-center gap-3 mb-7 px-1">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-extrabold text-white text-base shadow-md shadow-blue-600/20">
-              M
-            </div>
+            <Image
+              src={medicareLogo}
+              alt="MediCare Cuidador"
+              width={36}
+              height={36}
+              referrerPolicy="no-referrer"
+              className="w-9 h-9 rounded-xl shadow-md shadow-purple-900/30 shrink-0"
+            />
             <div className="min-w-0">
               <div className="font-bold text-white text-sm leading-tight whitespace-nowrap">MediCare</div>
               <div className="text-[11px] text-blue-400 font-semibold tracking-wider whitespace-nowrap">Cuidador</div>
@@ -1457,9 +1470,14 @@ export default function CuidadorWebPage() {
         {/* Top Header Compacto (Mobile-First + Desktop) */}
         <header className="h-14 md:h-16 border-b border-slate-800/90 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 bg-[#0b1120]/90 backdrop-blur-md sticky top-0 z-30">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="md:hidden w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-extrabold text-white text-sm shrink-0">
-              M
-            </div>
+            <Image
+              src={medicareLogo}
+              alt="MediCare Cuidador"
+              width={32}
+              height={32}
+              referrerPolicy="no-referrer"
+              className="md:hidden w-8 h-8 rounded-lg shadow-sm shrink-0"
+            />
             <div className="min-w-0">
               <h2 className="text-sm md:text-base font-bold text-white truncate leading-tight">
                 {currentTabTitle}
