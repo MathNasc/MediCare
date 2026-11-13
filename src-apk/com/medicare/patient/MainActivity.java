@@ -205,6 +205,25 @@ public class MainActivity extends Activity {
     private void handleNotificationAutoActionIntent(Intent intent) {
         try {
             if (intent == null || !this.isLoggedIn) return;
+            String openTab = intent.getStringExtra("open_tab");
+            if ("calendar".equals(openTab)) {
+                intent.removeExtra("open_tab");
+                String evDate = intent.getStringExtra("event_date");
+                this.activeTab = "calendar";
+                if (evDate != null && evDate.trim().length() >= 10) {
+                    String iso = evDate.trim().substring(0, 10);
+                    this.selectedCalDate = iso;
+                    try {
+                        String[] p = iso.split("-");
+                        if (p.length == 3) {
+                            this.calYear = Integer.parseInt(p[0]);
+                            this.calMonth = Math.max(0, Math.min(11, Integer.parseInt(p[1]) - 1));
+                        }
+                    } catch (Exception ignored) {}
+                }
+                render();
+                return;
+            }
             String autoAction = intent.getStringExtra("notif_auto_action");
             String medId = intent.getStringExtra("med_id");
             String medTime = intent.getStringExtra("med_time");
@@ -383,12 +402,16 @@ public class MainActivity extends Activity {
             if (this.prefs != null && this.meds != null) {
                 SharedPreferences.Editor ed = this.prefs.edit();
                 ed.putString("meds", this.meds.toString());
+                if (this.events != null) {
+                    ed.putString("events", this.events.toString());
+                }
                 if (this.profile != null) {
                     ed.putString("profile", this.profile.toString());
                 }
                 ed.putBoolean("is_logged_in", this.isLoggedIn);
                 ed.apply();
             }
+            DoseAlarmReceiver.ensureEventChannel(this);
             DoseAlarmReceiver.scheduleAlarmsFromStorage(this);
         } catch (Exception ignored) {}
     }
@@ -9781,11 +9804,27 @@ public class MainActivity extends Activity {
                 nCard.setLayoutParams(ncLp);
 
                 TextView tvNT = new TextView(this);
-                tvNT.setText("[" + optCleanString(nObj, "category", "Geral") + "] " + optCleanString(nObj, "text", optCleanString(nObj, "content", "")));
+                String nTime = optCleanString(nObj, "time", optCleanString(nObj, "hora", ""));
+                if (nTime.length() >= 5 && nTime.charAt(2) == ':') nTime = nTime.substring(0, 5);
+                String nCat = optCleanString(nObj, "category", "Geral");
+                String nHeader = nTime.isEmpty() ? ("[" + nCat + "] ") : ("[" + nCat + " · " + nTime + "] ");
+                tvNT.setText(nHeader + optCleanString(nObj, "text", optCleanString(nObj, "content", "")));
                 tvNT.setTextColor(this.cTextMain);
                 tvNT.setTextSize(sp(13.0f));
                 tvNT.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
                 nCard.addView(tvNT);
+
+                TextView btnEditN = new TextView(this);
+                btnEditN.setText("✏️");
+                btnEditN.setPadding(dp(8), dp(4), dp(4), dp(4));
+                btnEditN.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dlg.dismiss();
+                        showNoteModal(dateStr, nObj, nIdx);
+                    }
+                });
+                nCard.addView(btnEditN);
 
                 TextView btnDelN = new TextView(this);
                 btnDelN.setText("🗑");
@@ -9865,11 +9904,24 @@ public class MainActivity extends Activity {
             String tm = optCleanString(ev, "time", optCleanString(ev, "hora", ""));
             if (tm.length() >= 5 && tm.charAt(2) == ':') tm = tm.substring(0, 5);
             String loc = optCleanString(ev, "location", optCleanString(ev, "local", ""));
-            tvET.setText("📅 " + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
+            boolean evNotify = ev.optBoolean("notify_enabled", true);
+            tvET.setText((evNotify ? "🔔 " : "📅 ") + t + (tm.isEmpty() ? "" : " às " + tm) + (loc.isEmpty() ? "" : " • " + loc));
             tvET.setTextColor(this.cTextMain);
             tvET.setTextSize(sp(13.0f));
             tvET.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
             eCard.addView(tvET);
+
+            TextView btnEditE = new TextView(this);
+            btnEditE.setText("✏️");
+            btnEditE.setPadding(dp(8), dp(4), dp(4), dp(4));
+            btnEditE.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dlg.dismiss();
+                    showEventModal(dateStr, ev, eIdx);
+                }
+            });
+            eCard.addView(btnEditE);
 
             TextView btnDelE = new TextView(this);
             btnDelE.setText("🗑");
@@ -10023,116 +10075,633 @@ public class MainActivity extends Activity {
         styleDialogWindow(dlg);
     }
 
+    private void openNativeDatePicker(String currentIso, final TextView targetLabel, final String[] isoHolder) {
+        Calendar cal = Calendar.getInstance();
+        String normIso = parseDateInputToIso(currentIso, todayIso());
+        try {
+            if (normIso != null && normIso.length() == 10 && normIso.charAt(4) == '-' && normIso.charAt(7) == '-') {
+                String[] parts = normIso.split("-");
+                cal.set(Calendar.YEAR, Integer.parseInt(parts[0]));
+                cal.set(Calendar.MONTH, Integer.parseInt(parts[1]) - 1);
+                cal.set(Calendar.DAY_OF_MONTH, Integer.parseInt(parts[2]));
+            }
+        } catch (Exception ignored) {}
+        int pickerTheme = this.isDarkMode
+            ? android.R.style.Theme_DeviceDefault_Dialog_Alert
+            : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
+        new DatePickerDialog(this, pickerTheme, new DatePickerDialog.OnDateSetListener() {
+            @Override
+            public void onDateSet(DatePicker view, int year, int month, int dayOfMonth) {
+                String pickedIso = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth);
+                isoHolder[0] = pickedIso;
+                if (targetLabel != null) {
+                    targetLabel.setText("📅  " + formatDateForDeviceLocale(pickedIso));
+                }
+            }
+        }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show();
+    }
+
+    private void openNativeTimePicker(String currentHm, final TextView targetLabel, final String[] hmHolder) {
+        int hr = 9, mn = 0;
+        try {
+            String t = currentHm != null ? currentHm.trim() : "";
+            String[] parts = t.split(":");
+            if (parts.length >= 2) {
+                hr = Math.max(0, Math.min(23, Integer.parseInt(parts[0].replaceAll("[^0-9]", ""))));
+                mn = Math.max(0, Math.min(59, Integer.parseInt(parts[1].replaceAll("[^0-9]", ""))));
+            }
+        } catch (Exception ignored) {}
+        int pickerTheme = this.isDarkMode
+            ? android.R.style.Theme_DeviceDefault_Dialog_Alert
+            : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
+        new TimePickerDialog(this, pickerTheme, new TimePickerDialog.OnTimeSetListener() {
+            @Override
+            public void onTimeSet(TimePicker view, int hourOfDay, int minute) {
+                String pickedHm = String.format(Locale.US, "%02d:%02d", hourOfDay, minute);
+                hmHolder[0] = pickedHm;
+                if (targetLabel != null) {
+                    targetLabel.setText("⏰  " + pickedHm);
+                }
+            }
+        }, hr, mn, true).show();
+    }
+
+    private LinearLayout createPickerTriggerCard(final TextView valueTv, String actionCue) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(0);
+        box.setGravity(16);
+        box.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+        box.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        valueTv.setTextColor(this.cTextMain);
+        valueTv.setTextSize(sp(14.0f));
+        valueTv.setTypeface(null, 1);
+        valueTv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        box.addView(valueTv);
+
+        TextView cueTv = new TextView(this);
+        cueTv.setText(actionCue);
+        cueTv.setTextColor(this.cPrimary);
+        cueTv.setTextSize(sp(11.0f));
+        cueTv.setTypeface(null, 1);
+        cueTv.setPadding(dp(6), 0, 0, 0);
+        box.addView(cueTv);
+        return box;
+    }
+
     private void showNoteModal(final String defaultDate, final JSONObject existing, final int editIdx) {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        root.setPadding(dp(20), dp(20), dp(20), dp(18));
+
+        // Header
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(0, 0, 0, dp(14));
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(existing == null ? "📝 Nova anotação" : "📝 Editar anotação");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(17.5f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hdr.addView(tvTitle);
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(14.0f));
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 16, 0, 0));
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(32), dp(32)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        ScrollView sv = createStableScrollView();
+        sv.setVerticalScrollBarEnabled(false);
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(1);
 
-        String initNoteDateIso = existing != null ? existing.optString("date", defaultDate) : defaultDate;
-        final EditText inDate = createInput("Data (" + getDeviceDateHint() + ")", formatDateForDeviceLocale(initNoteDateIso));
-        final EditText inCat = createInput("Categoria (Sintoma, Dúvida médica, Efeito colateral, Geral)", existing != null ? existing.optString("category", "Geral") : "Sintoma");
-        final EditText inText = createInput("Anotação * (Ex: Tontura leve pela manhã)", existing != null ? existing.optString("text", "") : "");
+        String fallbackDate = (defaultDate != null && !defaultDate.isEmpty()) ? defaultDate : todayIso();
+        String rawInitDate = existing != null ? existing.optString("date", fallbackDate) : fallbackDate;
+        final String[] selectedDateIso = { parseDateInputToIso(rawInitDate, fallbackDate) };
+        String nowHm = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
+        String rawInitTime = existing != null ? optCleanString(existing, "time", optCleanString(existing, "hora", nowHm)) : nowHm;
+        if (rawInitTime.length() >= 5 && rawInitTime.charAt(2) == ':') rawInitTime = rawInitTime.substring(0, 5);
+        else if (rawInitTime.isEmpty()) rawInitTime = nowHm;
+        final String[] selectedTimeHm = { rawInitTime };
 
-        l.addView(inDate);
-        l.addView(inCat);
-        l.addView(inText);
+        // Data e Horário lado a lado com Calendário e Relógio
+        LinearLayout dtRow = new LinearLayout(this);
+        dtRow.setOrientation(0);
+        LinearLayout.LayoutParams dtRowLp = new LinearLayout.LayoutParams(-1, -2);
+        dtRowLp.bottomMargin = dp(12);
+        dtRow.setLayoutParams(dtRowLp);
 
-        showStyledFormModal(
-            existing == null ? "📝 Nova anotação" : "📝 Editar anotação",
-            l,
-            "Salvar anotação",
-            "Cancelar",
-            this.cPrimary,
-            new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        String txt = inText.getText().toString().trim();
-                        if (txt.isEmpty()) return;
-                        String dtRaw = inDate.getText().toString().trim();
-                        String dt = dtRaw.isEmpty() ? defaultDate : parseDateInputToIso(dtRaw, defaultDate);
-                        JSONObject obj = existing != null ? existing : new JSONObject();
-                        if (existing == null) obj.put("id", "note-" + System.currentTimeMillis());
-                        obj.put("date", dt);
-                        obj.put("category", inCat.getText().toString().trim());
-                        obj.put("text", txt);
-                        if (editIdx >= 0) {
-                            MainActivity.this.calNotesList.put(editIdx, obj);
-                        } else {
-                            MainActivity.this.calNotesList.put(obj);
+        LinearLayout dateCol = new LinearLayout(this);
+        dateCol.setOrientation(1);
+        LinearLayout.LayoutParams dColLp = new LinearLayout.LayoutParams(0, -2, 1.25f);
+        dColLp.rightMargin = dp(8);
+        dateCol.setLayoutParams(dColLp);
+        dateCol.addView(createFormLabel("DATA (CALENDÁRIO)"));
+        final TextView tvDateVal = new TextView(this);
+        tvDateVal.setText("📅  " + formatDateForDeviceLocale(selectedDateIso[0]));
+        LinearLayout dateCard = createPickerTriggerCard(tvDateVal, "Alterar");
+        dateCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openNativeDatePicker(selectedDateIso[0], tvDateVal, selectedDateIso);
+            }
+        });
+        dateCol.addView(dateCard);
+        dtRow.addView(dateCol);
+
+        LinearLayout timeCol = new LinearLayout(this);
+        timeCol.setOrientation(1);
+        timeCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 0.95f));
+        timeCol.addView(createFormLabel("HORA (RELÓGIO)"));
+        final TextView tvTimeVal = new TextView(this);
+        tvTimeVal.setText("⏰  " + selectedTimeHm[0]);
+        LinearLayout timeCard = createPickerTriggerCard(tvTimeVal, "Alterar");
+        timeCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openNativeTimePicker(selectedTimeHm[0], tvTimeVal, selectedTimeHm);
+            }
+        });
+        timeCol.addView(timeCard);
+        dtRow.addView(timeCol);
+        l.addView(dtRow);
+
+        // Categoria com chips rápidos
+        l.addView(createFormLabel("CATEGORIA"));
+        final String[] presetCats = new String[]{"Sintoma", "Dúvida médica", "Efeito colateral", "Medição", "Geral", "Outro"};
+        String initCat = existing != null ? optCleanString(existing, "category", "Sintoma") : "Sintoma";
+        if (initCat.isEmpty()) initCat = "Sintoma";
+        boolean matchesPreset = false;
+        for (int p = 0; p < presetCats.length - 1; p++) {
+            if (presetCats[p].equalsIgnoreCase(initCat)) {
+                initCat = presetCats[p];
+                matchesPreset = true;
+                break;
+            }
+        }
+        final String[] selectedCat = { matchesPreset ? initCat : "Outro" };
+        final EditText inCustomCat = createInput("Qual categoria?", matchesPreset ? "" : initCat);
+        inCustomCat.setVisibility(matchesPreset ? View.GONE : View.VISIBLE);
+
+        final HorizontalScrollView catScroll = new HorizontalScrollView(this);
+        catScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout.LayoutParams csLp = new LinearLayout.LayoutParams(-1, -2);
+        csLp.bottomMargin = dp(10);
+        catScroll.setLayoutParams(csLp);
+        final LinearLayout catRow = new LinearLayout(this);
+        catRow.setOrientation(0);
+        catScroll.addView(catRow);
+
+        final Runnable[] renderCatChips = new Runnable[1];
+        renderCatChips[0] = new Runnable() {
+            @Override
+            public void run() {
+                catRow.removeAllViews();
+                for (int c = 0; c < presetCats.length; c++) {
+                    final String catOption = presetCats[c];
+                    boolean sel = catOption.equals(selectedCat[0]);
+                    TextView chip = new TextView(MainActivity.this);
+                    chip.setText(catOption);
+                    chip.setTextColor(sel ? Color.WHITE : MainActivity.this.cTextMuted);
+                    chip.setTextSize(sp(12.5f));
+                    chip.setTypeface(null, 1);
+                    chip.setBackground(shape(sel ? MainActivity.this.cPrimary : MainActivity.this.cBgMain, 99, sel ? MainActivity.this.cPrimary : MainActivity.this.cBorder, 1));
+                    chip.setPadding(dp(13), dp(8), dp(13), dp(8));
+                    LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(-2, -2);
+                    chLp.rightMargin = dp(7);
+                    chip.setLayoutParams(chLp);
+                    chip.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            selectedCat[0] = catOption;
+                            inCustomCat.setVisibility("Outro".equals(catOption) ? View.VISIBLE : View.GONE);
+                            renderCatChips[0].run();
                         }
-                        MainActivity.this.calNotes.put(dt, txt);
-                        saveAll();
-                        render();
-                        Toast.makeText(MainActivity.this, "Anotação salva!", 0).show();
-                    } catch (Exception ignored) {}
+                    });
+                    catRow.addView(chip);
                 }
             }
-        );
+        };
+        renderCatChips[0].run();
+        l.addView(catScroll);
+        l.addView(inCustomCat);
+
+        l.addView(createFormLabel("ANOTAÇÃO *"));
+        final EditText inText = createInput("Ex: Tontura leve pela manhã", existing != null ? optCleanString(existing, "text", optCleanString(existing, "content", "")) : "");
+        inText.setSingleLine(false);
+        inText.setMinLines(3);
+        inText.setGravity(48);
+        l.addView(inText);
+
+        sv.addView(l);
+        root.addView(sv, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(0);
+        btnRow.setGravity(16);
+        LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(-1, -2);
+        brLp.topMargin = dp(10);
+        btnRow.setLayoutParams(brLp);
+
+        TextView btnCancel = new TextView(this);
+        btnCancel.setText("Cancelar");
+        btnCancel.setTextColor(this.cTextMain);
+        btnCancel.setTextSize(sp(14.0f));
+        btnCancel.setTypeface(null, 1);
+        btnCancel.setGravity(17);
+        btnCancel.setBackground(shape(this.cBgMain, 13, this.cBorder, 1));
+        btnCancel.setPadding(dp(14), dp(13), dp(14), dp(13));
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        cLp.rightMargin = dp(10);
+        btnCancel.setLayoutParams(cLp);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        btnRow.addView(btnCancel);
+
+        TextView btnOk = new TextView(this);
+        btnOk.setText("Salvar anotação");
+        btnOk.setTextColor(Color.WHITE);
+        btnOk.setTextSize(sp(14.0f));
+        btnOk.setTypeface(null, 1);
+        btnOk.setGravity(17);
+        btnOk.setBackground(shape(this.cPrimary, 13, 0, 0));
+        btnOk.setPadding(dp(14), dp(13), dp(14), dp(13));
+        btnOk.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.2f));
+        btnOk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    String txt = inText.getText().toString().trim();
+                    if (txt.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Escreva a anotação antes de salvar.", Toast.LENGTH_SHORT).show();
+                        inText.requestFocus();
+                        return;
+                    }
+                    String catFinal = "Outro".equals(selectedCat[0])
+                        ? (inCustomCat.getText().toString().trim().isEmpty() ? "Geral" : inCustomCat.getText().toString().trim())
+                        : selectedCat[0];
+                    String dt = selectedDateIso[0];
+                    String tm = selectedTimeHm[0];
+                    JSONObject obj = existing != null ? existing : new JSONObject();
+                    if (existing == null) obj.put("id", "note-" + System.currentTimeMillis());
+                    obj.put("date", dt);
+                    obj.put("time", tm);
+                    obj.put("hora", tm);
+                    obj.put("category", catFinal);
+                    obj.put("text", txt);
+                    obj.put("content", txt);
+                    if (editIdx >= 0) {
+                        MainActivity.this.calNotesList.put(editIdx, obj);
+                    } else {
+                        MainActivity.this.calNotesList.put(obj);
+                    }
+                    MainActivity.this.calNotes.put(dt, txt);
+                    saveAll();
+                    render();
+                    dialog.dismiss();
+                    Toast.makeText(MainActivity.this, "Anotação salva!", Toast.LENGTH_SHORT).show();
+                } catch (Exception ignored) {}
+            }
+        });
+        btnRow.addView(btnOk);
+
+        root.addView(btnRow);
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
     }
 
     private void showEventModal(final String defaultDate, final JSONObject existing, final int editIdx) {
-        ScrollView sv = new ScrollView(this);
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 24, this.cBorder, 1));
+        root.setPadding(dp(20), dp(20), dp(20), dp(18));
+
+        // Header
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setOrientation(0);
+        hdr.setGravity(16);
+        hdr.setPadding(0, 0, 0, dp(14));
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(existing == null ? "📅 Novo evento de saúde" : "📅 Editar evento");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(17.5f));
+        tvTitle.setTypeface(null, 1);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        hdr.addView(tvTitle);
+        TextView btnClose = new TextView(this);
+        btnClose.setText("✕");
+        btnClose.setTextColor(this.cTextMuted);
+        btnClose.setTextSize(sp(14.0f));
+        btnClose.setGravity(17);
+        btnClose.setBackground(shape(this.cSurfaceHover, 16, 0, 0));
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(dp(32), dp(32)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        hdr.addView(btnClose);
+        root.addView(hdr);
+
+        ScrollView sv = createStableScrollView();
+        sv.setVerticalScrollBarEnabled(false);
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(1);
 
-        String initEvDateIso = existing != null ? existing.optString("date", existing.optString("data", defaultDate)) : defaultDate;
-        final EditText inType = createInput("Tipo (Consulta médica, Exame, Retorno, Receita, Lembrete)", existing != null ? existing.optString("type", "Consulta médica") : "Consulta médica");
-        final EditText inTitle = createInput("Título * (Ex: Cardiologista Dr. Silva)", existing != null ? existing.optString("title", existing.optString("titulo", "")) : "");
-        final EditText inDate = createInput("Data (" + getDeviceDateHint() + ")", formatDateForDeviceLocale(initEvDateIso));
-        final EditText inTime = createInput("Horário (Ex: 14:00)", existing != null ? existing.optString("time", existing.optString("hora", "09:00")) : "09:00");
-        final EditText inLoc = createInput("Local / Profissional (opcional)", existing != null ? existing.optString("location", existing.optString("local", "")) : "");
-        final EditText inNotes = createInput("Observações (Ex: Levar exames anteriores)", existing != null ? existing.optString("notes", existing.optString("notas", "")) : "");
+        // Tipo do evento com chips selecionáveis
+        l.addView(createFormLabel("TIPO DO EVENTO"));
+        final String[][] presetTypes = new String[][]{
+            {"Consulta médica", "🩺 Consulta médica"},
+            {"Exame", "🔬 Exame"},
+            {"Retorno", "🔄 Retorno"},
+            {"Receita", "📋 Receita"},
+            {"Procedimento", "🏥 Procedimento"},
+            {"Lembrete", "📌 Lembrete"}
+        };
+        String initTypeRaw = existing != null ? optCleanString(existing, "type", optCleanString(existing, "tipo", "Consulta médica")) : "Consulta médica";
+        if (initTypeRaw.isEmpty()) initTypeRaw = "Consulta médica";
+        String matchedType = initTypeRaw;
+        for (int pt = 0; pt < presetTypes.length; pt++) {
+            if (presetTypes[pt][0].equalsIgnoreCase(initTypeRaw) || initTypeRaw.toLowerCase(Locale.ROOT).contains(presetTypes[pt][0].toLowerCase(Locale.ROOT).split(" ")[0])) {
+                matchedType = presetTypes[pt][0];
+                break;
+            }
+        }
+        final String[] selectedType = { matchedType };
 
-        l.addView(inType);
-        l.addView(inTitle);
-        l.addView(inDate);
-        l.addView(inTime);
-        l.addView(inLoc);
-        l.addView(inNotes);
-        sv.addView(l);
+        final HorizontalScrollView typeScroll = new HorizontalScrollView(this);
+        typeScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout.LayoutParams tsLp = new LinearLayout.LayoutParams(-1, -2);
+        tsLp.bottomMargin = dp(12);
+        typeScroll.setLayoutParams(tsLp);
+        final LinearLayout typeRow = new LinearLayout(this);
+        typeRow.setOrientation(0);
+        typeScroll.addView(typeRow);
 
-        showStyledFormModal(
-            existing == null ? "📅 Novo evento de saúde" : "📅 Editar evento",
-            sv,
-            "Salvar evento",
-            "Cancelar",
-            this.cPrimary,
-            new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        String title = inTitle.getText().toString().trim();
-                        if (title.isEmpty()) return;
-                        String dtRaw = inDate.getText().toString().trim();
-                        String dt = dtRaw.isEmpty() ? defaultDate : parseDateInputToIso(dtRaw, defaultDate);
-                        String tm = inTime.getText().toString().trim();
-                        String loc = inLoc.getText().toString().trim();
-                        String nts = inNotes.getText().toString().trim();
-                        JSONObject obj = existing != null ? existing : new JSONObject();
-                        if (existing == null) obj.put("id", "ev-" + System.currentTimeMillis());
-                        obj.put("type", inType.getText().toString().trim());
-                        obj.put("title", title);
-                        obj.put("titulo", title);
-                        obj.put("date", dt);
-                        obj.put("data", dt);
-                        obj.put("time", tm);
-                        obj.put("hora", tm);
-                        obj.put("location", loc);
-                        obj.put("local", loc);
-                        obj.put("notes", nts);
-                        obj.put("notas", nts);
-                        if (editIdx >= 0) {
-                            MainActivity.this.events.put(editIdx, obj);
-                        } else {
-                            MainActivity.this.events.put(obj);
+        final Runnable[] renderTypeChips = new Runnable[1];
+        renderTypeChips[0] = new Runnable() {
+            @Override
+            public void run() {
+                typeRow.removeAllViews();
+                for (int pt = 0; pt < presetTypes.length; pt++) {
+                    final String code = presetTypes[pt][0];
+                    final String label = presetTypes[pt][1];
+                    boolean sel = code.equalsIgnoreCase(selectedType[0]);
+                    TextView chip = new TextView(MainActivity.this);
+                    chip.setText(label);
+                    chip.setTextColor(sel ? Color.WHITE : MainActivity.this.cTextMuted);
+                    chip.setTextSize(sp(12.5f));
+                    chip.setTypeface(null, 1);
+                    chip.setBackground(shape(sel ? Color.parseColor("#8B5CF6") : MainActivity.this.cBgMain, 99, sel ? Color.parseColor("#8B5CF6") : MainActivity.this.cBorder, 1));
+                    chip.setPadding(dp(13), dp(8), dp(13), dp(8));
+                    LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(-2, -2);
+                    chLp.rightMargin = dp(7);
+                    chip.setLayoutParams(chLp);
+                    chip.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            selectedType[0] = code;
+                            renderTypeChips[0].run();
                         }
-                        saveAll();
-                        render();
-                        Toast.makeText(MainActivity.this, "Evento salvo!", 0).show();
-                    } catch (Exception ignored) {}
+                    });
+                    typeRow.addView(chip);
                 }
             }
-        );
+        };
+        renderTypeChips[0].run();
+        l.addView(typeScroll);
+
+        l.addView(createFormLabel("TÍTULO *"));
+        final EditText inTitle = createInput("Ex: Cardiologista Dr. Silva", existing != null ? optCleanString(existing, "title", optCleanString(existing, "titulo", "")) : "");
+        l.addView(inTitle);
+
+        // Data e Horário lado a lado com Calendário e Relógio
+        String fallbackDate = (defaultDate != null && !defaultDate.isEmpty()) ? defaultDate : todayIso();
+        String rawInitDate = existing != null ? optCleanString(existing, "date", optCleanString(existing, "data", fallbackDate)) : fallbackDate;
+        final String[] selectedDateIso = { parseDateInputToIso(rawInitDate, fallbackDate) };
+        String rawInitTime = existing != null ? optCleanString(existing, "time", optCleanString(existing, "hora", "09:00")) : "09:00";
+        if (rawInitTime.length() >= 5 && rawInitTime.charAt(2) == ':') rawInitTime = rawInitTime.substring(0, 5);
+        else if (rawInitTime.isEmpty()) rawInitTime = "09:00";
+        final String[] selectedTimeHm = { rawInitTime };
+
+        LinearLayout dtRow = new LinearLayout(this);
+        dtRow.setOrientation(0);
+        LinearLayout.LayoutParams dtRowLp = new LinearLayout.LayoutParams(-1, -2);
+        dtRowLp.bottomMargin = dp(12);
+        dtRow.setLayoutParams(dtRowLp);
+
+        LinearLayout dateCol = new LinearLayout(this);
+        dateCol.setOrientation(1);
+        LinearLayout.LayoutParams dColLp = new LinearLayout.LayoutParams(0, -2, 1.25f);
+        dColLp.rightMargin = dp(8);
+        dateCol.setLayoutParams(dColLp);
+        dateCol.addView(createFormLabel("DATA (CALENDÁRIO)"));
+        final TextView tvDateVal = new TextView(this);
+        tvDateVal.setText("📅  " + formatDateForDeviceLocale(selectedDateIso[0]));
+        LinearLayout dateCard = createPickerTriggerCard(tvDateVal, "Alterar");
+        dateCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openNativeDatePicker(selectedDateIso[0], tvDateVal, selectedDateIso);
+            }
+        });
+        dateCol.addView(dateCard);
+        dtRow.addView(dateCol);
+
+        LinearLayout timeCol = new LinearLayout(this);
+        timeCol.setOrientation(1);
+        timeCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 0.95f));
+        timeCol.addView(createFormLabel("HORA (RELÓGIO)"));
+        final TextView tvTimeVal = new TextView(this);
+        tvTimeVal.setText("⏰  " + selectedTimeHm[0]);
+        LinearLayout timeCard = createPickerTriggerCard(tvTimeVal, "Alterar");
+        timeCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openNativeTimePicker(selectedTimeHm[0], tvTimeVal, selectedTimeHm);
+            }
+        });
+        timeCol.addView(timeCard);
+        dtRow.addView(timeCol);
+        l.addView(dtRow);
+
+        l.addView(createFormLabel("LOCAL / PROFISSIONAL (OPCIONAL)"));
+        final EditText inLoc = createInput("Ex: Clínica Central / Dra. Ana", existing != null ? optCleanString(existing, "location", optCleanString(existing, "local", "")) : "");
+        l.addView(inLoc);
+
+        l.addView(createFormLabel("OBSERVAÇÕES (OPCIONAL)"));
+        final EditText inNotes = createInput("Ex: Levar exames anteriores e jejum 8h", existing != null ? optCleanString(existing, "notes", optCleanString(existing, "notas", "")) : "");
+        inNotes.setSingleLine(false);
+        inNotes.setMinLines(2);
+        inNotes.setGravity(48);
+        l.addView(inNotes);
+
+        // Card de Notificações do Evento (1 dia antes, 3 horas antes, na hora)
+        final boolean[] notifyEnabled = { existing == null || existing.optBoolean("notify_enabled", true) };
+        LinearLayout notifyCard = new LinearLayout(this);
+        notifyCard.setOrientation(0);
+        notifyCard.setGravity(16);
+        notifyCard.setBackground(shape(Color.parseColor("#148B5CF6"), 14, Color.parseColor("#4D8B5CF6"), 1));
+        notifyCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams ncLp = new LinearLayout.LayoutParams(-1, -2);
+        ncLp.topMargin = dp(2);
+        ncLp.bottomMargin = dp(4);
+        notifyCard.setLayoutParams(ncLp);
+
+        final CheckBox cbNotify = new CheckBox(this);
+        cbNotify.setChecked(notifyEnabled[0]);
+        cbNotify.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                notifyEnabled[0] = cbNotify.isChecked();
+            }
+        });
+        notifyCard.addView(cbNotify);
+
+        LinearLayout notifyTextCol = new LinearLayout(this);
+        notifyTextCol.setOrientation(1);
+        LinearLayout.LayoutParams ntcLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        ntcLp.leftMargin = dp(6);
+        notifyTextCol.setLayoutParams(ntcLp);
+
+        TextView tvNotifHdr = new TextView(this);
+        tvNotifHdr.setText("🔔 Notificar este evento automaticamente");
+        tvNotifHdr.setTextColor(this.cTextMain);
+        tvNotifHdr.setTextSize(sp(13.0f));
+        tvNotifHdr.setTypeface(null, 1);
+        notifyTextCol.addView(tvNotifHdr);
+
+        TextView tvNotifSub = new TextView(this);
+        tvNotifSub.setText("Lembretes: 1 dia antes, 3 horas antes e na hora");
+        tvNotifSub.setTextColor(this.cTextMuted);
+        tvNotifSub.setTextSize(sp(11.5f));
+        notifyTextCol.addView(tvNotifSub);
+        notifyCard.addView(notifyTextCol);
+
+        notifyCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean next = !cbNotify.isChecked();
+                cbNotify.setChecked(next);
+                notifyEnabled[0] = next;
+            }
+        });
+        l.addView(notifyCard);
+
+        sv.addView(l);
+        root.addView(sv, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(0);
+        btnRow.setGravity(16);
+        LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(-1, -2);
+        brLp.topMargin = dp(12);
+        btnRow.setLayoutParams(brLp);
+
+        TextView btnCancel = new TextView(this);
+        btnCancel.setText("Cancelar");
+        btnCancel.setTextColor(this.cTextMain);
+        btnCancel.setTextSize(sp(14.0f));
+        btnCancel.setTypeface(null, 1);
+        btnCancel.setGravity(17);
+        btnCancel.setBackground(shape(this.cBgMain, 13, this.cBorder, 1));
+        btnCancel.setPadding(dp(14), dp(13), dp(14), dp(13));
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        cLp.rightMargin = dp(10);
+        btnCancel.setLayoutParams(cLp);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        btnRow.addView(btnCancel);
+
+        TextView btnOk = new TextView(this);
+        btnOk.setText("Salvar evento");
+        btnOk.setTextColor(Color.WHITE);
+        btnOk.setTextSize(sp(14.0f));
+        btnOk.setTypeface(null, 1);
+        btnOk.setGravity(17);
+        btnOk.setBackground(shape(this.cPrimary, 13, 0, 0));
+        btnOk.setPadding(dp(14), dp(13), dp(14), dp(13));
+        btnOk.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.2f));
+        btnOk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    String title = inTitle.getText().toString().trim();
+                    if (title.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Informe o título do evento.", Toast.LENGTH_SHORT).show();
+                        inTitle.requestFocus();
+                        return;
+                    }
+                    String dt = selectedDateIso[0];
+                    String tm = selectedTimeHm[0];
+                    String loc = inLoc.getText().toString().trim();
+                    String nts = inNotes.getText().toString().trim();
+                    JSONObject obj = existing != null ? existing : new JSONObject();
+                    if (existing == null) obj.put("id", "ev-" + System.currentTimeMillis());
+                    String evId = obj.optString("id", "");
+                    obj.put("type", selectedType[0]);
+                    obj.put("tipo", selectedType[0]);
+                    obj.put("title", title);
+                    obj.put("titulo", title);
+                    obj.put("date", dt);
+                    obj.put("data", dt);
+                    obj.put("time", tm);
+                    obj.put("hora", tm);
+                    obj.put("location", loc);
+                    obj.put("local", loc);
+                    obj.put("notes", nts);
+                    obj.put("notas", nts);
+                    obj.put("notify_enabled", notifyEnabled[0]);
+                    obj.put("updated_at_ms", System.currentTimeMillis());
+                    if (!evId.isEmpty()) {
+                        DoseAlarmReceiver.cancelAllAlarmsForEvent(MainActivity.this, evId);
+                    }
+                    if (editIdx >= 0) {
+                        MainActivity.this.events.put(editIdx, obj);
+                    } else {
+                        MainActivity.this.events.put(obj);
+                    }
+                    saveAll();
+                    render();
+                    dialog.dismiss();
+                    String msg = notifyEnabled[0]
+                        ? "Evento salvo! Lembretes agendados (1 dia antes, 3h antes e na hora)."
+                        : "Evento salvo!";
+                    Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+                } catch (Exception ignored) {}
+            }
+        });
+        btnRow.addView(btnOk);
+
+        root.addView(btnRow);
+        dialog.setView(root);
+        dialog.show();
+        styleDialogWindow(dialog);
     }
 
     private void buildAiTab(LinearLayout linearLayout) {
@@ -14914,6 +15483,12 @@ public class MainActivity extends Activity {
                     String dt = optCleanString(ro, "date", "");
                     if (dt.length() >= 10) dt = dt.substring(0, 10);
                     ro.put("date", dt);
+                    String tm = optCleanString(ro, "time", optCleanString(ro, "hora", ""));
+                    if (tm.length() >= 5 && tm.charAt(2) == ':') tm = tm.substring(0, 5);
+                    if (!tm.isEmpty()) {
+                        ro.put("time", tm);
+                        ro.put("hora", tm);
+                    }
                     String txt = optCleanString(ro, "text", optCleanString(ro, "content", optCleanString(ro, "description", "")));
                     if (!txt.isEmpty()) {
                         ro.put("text", txt);

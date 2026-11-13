@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="br.com.medicare.paciente"
-    android:versionCode="279"
-    android:versionName="2.7.9">
+    android:versionCode="280"
+    android:versionName="2.8.0">
 
     <uses-sdk
         android:minSdkVersion="24"
@@ -52,6 +52,7 @@
                 <action android:name="br.com.medicare.paciente.ACTION_DOSE_ALARM" />
                 <action android:name="br.com.medicare.paciente.ACTION_CONFIRM_DOSE" />
                 <action android:name="br.com.medicare.paciente.ACTION_SNOOZE_DOSE" />
+                <action android:name="br.com.medicare.paciente.ACTION_EVENT_ALARM" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />

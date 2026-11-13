@@ -34,12 +34,47 @@ import java.util.Set;
 /* loaded from: classes.dex */
 public class DoseAlarmReceiver extends BroadcastReceiver {
     public static final String CHANNEL_ID = "medicare_doses_alarm_v2";
+    public static final String EVENT_CHANNEL_ID = "medicare_events_alarm_v1";
     public static final String ACTION_DOSE_ALARM = "br.com.medicare.paciente.ACTION_DOSE_ALARM";
     public static final String ACTION_CONFIRM_DOSE = "br.com.medicare.paciente.ACTION_CONFIRM_DOSE";
     public static final String ACTION_SNOOZE_DOSE = "br.com.medicare.paciente.ACTION_SNOOZE_DOSE";
+    public static final String ACTION_EVENT_ALARM = "br.com.medicare.paciente.ACTION_EVENT_ALARM";
     public static final String ACTION_REFRESH_UI = "br.com.medicare.paciente.ACTION_REFRESH_UI";
     private static final String PREFS_NAME = "medicare_patient_store_v2";
     private static final String PREF_SCHEDULED_ALARM_KEYS = "scheduled_alarm_keys_v1";
+    private static final String PREF_SCHEDULED_EVENT_ALARM_KEYS = "scheduled_event_alarm_keys_v1";
+    private static final String PREF_FIRED_EVENT_ALARM_KEYS = "fired_event_alarm_keys_v1";
+
+    public static void ensureEventChannel(Context context) {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationManager nm = (NotificationManager) context.getSystemService("notification");
+                if (nm == null) return;
+                NotificationChannel channel = new NotificationChannel(
+                    EVENT_CHANNEL_ID,
+                    "Lembretes de Consultas e Eventos",
+                    NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Notificações 1 dia antes, 3 horas antes e no horário dos eventos de saúde");
+                channel.enableVibration(true);
+                channel.setVibrationPattern(new long[]{0L, 300L, 150L, 300L});
+                channel.enableLights(true);
+                channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                try {
+                    Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                    if (soundUri == null) {
+                        soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+                    }
+                    AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build();
+                    channel.setSound(soundUri, attrs);
+                } catch (Exception ignored) {}
+                nm.createNotificationChannel(channel);
+            }
+        } catch (Exception ignored) {}
+    }
 
     public static void ensureAlarmChannel(Context context) {
         try {
@@ -334,7 +369,7 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
                         if (activeNotifs != null) {
                             for (int n = 0; n < activeNotifs.length; n++) {
                                 StatusBarNotification sbn = activeNotifs[n];
-                                if (sbn != null && sbn.getId() >= 20000 && !validActiveNotifIds.contains(sbn.getId())) {
+                                if (sbn != null && sbn.getId() >= 20000 && sbn.getId() < 1000000 && !validActiveNotifIds.contains(sbn.getId())) {
                                     nm.cancel(sbn.getId());
                                 }
                             }
@@ -342,6 +377,387 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
                     }
                 } catch (Exception ignored) {}
             }
+
+            // 5. Schedule upcoming Health Event reminders (1 day before, 3 hours before, and at event time)
+            scheduleEventAlarmsFromStorage(context);
+        } catch (Exception ignored) {}
+    }
+
+    private static boolean isStockEventObj(JSONObject ev) {
+        if (ev == null) return false;
+        String tp = ev.optString("type", ev.optString("tipo", "")).trim().toLowerCase(Locale.ROOT);
+        if ("estoque".equals(tp) || "stock".equals(tp) || "reposicao".equals(tp) || "reposição".equals(tp)) {
+            return true;
+        }
+        String id = ev.optString("id", "").trim();
+        if (id.startsWith("ev-st-")) return true;
+        String title = ev.optString("title", ev.optString("titulo", "")).trim();
+        return title.startsWith("Reposição:") || title.startsWith("Reposição de estoque") || title.startsWith("Ajuste de estoque");
+    }
+
+    private static String normalizeEventHora(String rawTime) {
+        if (rawTime == null) return "09:00";
+        String t = rawTime.trim();
+        if (t.isEmpty() || "null".equalsIgnoreCase(t)) return "09:00";
+        String[] parts = t.split(":");
+        if (parts.length >= 2) {
+            try {
+                int h = Math.max(0, Math.min(23, Integer.parseInt(parts[0].replaceAll("[^0-9]", ""))));
+                int m = Math.max(0, Math.min(59, Integer.parseInt(parts[1].replaceAll("[^0-9]", "").substring(0, Math.min(2, parts[1].replaceAll("[^0-9]", "").length())))));
+                return String.format(Locale.US, "%02d:%02d", h, m);
+            } catch (Exception ignored) {}
+        }
+        return "09:00";
+    }
+
+    private static String normalizeEventDateIso(String rawDate) {
+        if (rawDate == null) return "";
+        String s = rawDate.trim();
+        if (s.isEmpty() || "null".equalsIgnoreCase(s)) return "";
+        if (s.length() >= 10 && s.charAt(4) == '-' && s.charAt(7) == '-') {
+            return s.substring(0, 10);
+        }
+        String[] patterns = new String[]{"dd/MM/yyyy", "MM/dd/yyyy", "dd-MM-yyyy", "yyyy/MM/dd", "dd.MM.yyyy"};
+        for (int i = 0; i < patterns.length; i++) {
+            try {
+                SimpleDateFormat fmt = new SimpleDateFormat(patterns[i], Locale.US);
+                fmt.setLenient(false);
+                Date d = fmt.parse(s);
+                if (d != null) {
+                    return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(d);
+                }
+            } catch (Exception ignored) {}
+        }
+        return "";
+    }
+
+    private static long parseEventDateTimeMillis(String dateIso, String normHora) {
+        if (dateIso == null || dateIso.length() != 10) return -1L;
+        try {
+            String[] dParts = dateIso.split("-");
+            int yr = Integer.parseInt(dParts[0]);
+            int mo = Integer.parseInt(dParts[1]) - 1;
+            int dy = Integer.parseInt(dParts[2]);
+            String[] tParts = normalizeEventHora(normHora).split(":");
+            int hr = Integer.parseInt(tParts[0]);
+            int mn = Integer.parseInt(tParts[1]);
+            Calendar cal = Calendar.getInstance();
+            cal.set(Calendar.YEAR, yr);
+            cal.set(Calendar.MONTH, mo);
+            cal.set(Calendar.DAY_OF_MONTH, dy);
+            cal.set(Calendar.HOUR_OF_DAY, hr);
+            cal.set(Calendar.MINUTE, mn);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            return cal.getTimeInMillis();
+        } catch (Exception e) {
+            return -1L;
+        }
+    }
+
+    private static int eventStageIndex(String stage) {
+        if ("1d".equals(stage)) return 0;
+        if ("3h".equals(stage)) return 1;
+        return 2;
+    }
+
+    private static int eventStageRequestCode(String evId, String stage) {
+        int idx = eventStageIndex(stage);
+        return 1000000 + (Math.abs((evId + "_" + stage).hashCode() % 300000) * 3) + idx;
+    }
+
+    private static int eventStageNotificationId(String evId, String stage) {
+        int idx = eventStageIndex(stage);
+        return 2000000 + (Math.abs((evId + "_" + stage).hashCode() % 500000) * 3) + idx;
+    }
+
+    public static void cancelEventAlarmStage(Context context, String evId, String stage) {
+        try {
+            if (context == null || evId == null || evId.trim().isEmpty()) return;
+            AlarmManager am = (AlarmManager) context.getSystemService("alarm");
+            NotificationManager nm = (NotificationManager) context.getSystemService("notification");
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) {
+                flags |= PendingIntent.FLAG_IMMUTABLE;
+            }
+            if (am != null) {
+                Intent evIntent = new Intent(context, DoseAlarmReceiver.class);
+                evIntent.setAction(ACTION_EVENT_ALARM);
+                PendingIntent pi = PendingIntent.getBroadcast(context, eventStageRequestCode(evId.trim(), stage), evIntent, flags);
+                am.cancel(pi);
+                pi.cancel();
+            }
+            if (nm != null) {
+                nm.cancel(eventStageNotificationId(evId.trim(), stage));
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public static void cancelAllAlarmsForEvent(Context context, String evId) {
+        cancelEventAlarmStage(context, evId, "1d");
+        cancelEventAlarmStage(context, evId, "3h");
+        cancelEventAlarmStage(context, evId, "0h");
+    }
+
+    public static void scheduleEventAlarmsFromStorage(Context context) {
+        try {
+            if (context == null) return;
+            AlarmManager am = (AlarmManager) context.getSystemService("alarm");
+            if (am == null) return;
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+            boolean isLoggedIn = prefs.getBoolean("is_logged_in", false);
+            String profileRaw = prefs.getString("profile", null);
+            boolean prefNotifOn = true;
+            if (profileRaw != null && !profileRaw.isEmpty()) {
+                try {
+                    JSONObject prof = new JSONObject(profileRaw);
+                    prefNotifOn = prof.optBoolean("notifications_enabled", true);
+                } catch (Exception ignored) {}
+            }
+            Set<String> deletedIds = new HashSet<>();
+            try {
+                JSONArray delArr = new JSONArray(prefs.getString("deleted_record_ids", "[]"));
+                for (int d = 0; d < delArr.length(); d++) {
+                    String did = delArr.optString(d, "").trim().toLowerCase(Locale.ROOT);
+                    if (!did.isEmpty()) deletedIds.add(did);
+                }
+            } catch (Exception ignored) {}
+
+            JSONObject firedMap = new JSONObject();
+            try {
+                firedMap = new JSONObject(prefs.getString(PREF_FIRED_EVENT_ALARM_KEYS, "{}"));
+            } catch (Exception ignored) {}
+            long nowMs = System.currentTimeMillis();
+            long pruneCutoff = nowMs - 30L * 24L * 60L * 60L * 1000L;
+            JSONObject prunedFired = new JSONObject();
+            try {
+                java.util.Iterator<String> it = firedMap.keys();
+                while (it.hasNext()) {
+                    String fk = it.next();
+                    long fAt = firedMap.optLong(fk, 0L);
+                    if (fAt >= pruneCutoff) {
+                        prunedFired.put(fk, fAt);
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            boolean enabled = isLoggedIn && prefNotifOn;
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) {
+                flags |= PendingIntent.FLAG_IMMUTABLE;
+            }
+
+            JSONArray eventsArr = new JSONArray(prefs.getString("events", "[]"));
+            Set<String> newScheduledKeys = new HashSet<>();
+            String[] stageNames = new String[]{"1d", "3h", "0h"};
+            long[] stageOffsetsMs = new long[]{24L * 60L * 60L * 1000L, 3L * 60L * 60L * 1000L, 0L};
+
+            for (int i = 0; i < eventsArr.length(); i++) {
+                JSONObject ev = eventsArr.optJSONObject(i);
+                if (ev == null || isStockEventObj(ev)) continue;
+                String evId = ev.optString("id", "").trim();
+                if (evId.isEmpty()) continue;
+                boolean isDeleted = deletedIds.contains(evId.toLowerCase(Locale.ROOT));
+                boolean notifyOn = ev.optBoolean("notify_enabled", true);
+                if (!enabled || isDeleted || !notifyOn) {
+                    cancelAllAlarmsForEvent(context, evId);
+                    continue;
+                }
+
+                String dateIso = normalizeEventDateIso(ev.optString("date", ev.optString("data", "")));
+                String normTime = normalizeEventHora(ev.optString("time", ev.optString("hora", "09:00")));
+                long eventMs = parseEventDateTimeMillis(dateIso, normTime);
+                if (eventMs <= 0L) continue;
+
+                String evTitle = ev.optString("title", ev.optString("titulo", "Evento de saúde")).trim();
+                if (evTitle.isEmpty()) evTitle = "Evento de saúde";
+                String evType = ev.optString("type", ev.optString("tipo", "Consulta médica")).trim();
+                String evLoc = ev.optString("location", ev.optString("local", "")).trim();
+                String evNotes = ev.optString("notes", ev.optString("notas", "")).trim();
+
+                for (int s = 0; s < stageNames.length; s++) {
+                    String stage = stageNames[s];
+                    long triggerMs = eventMs - stageOffsetsMs[s];
+                    String firedKey = evId + "|" + stage + "|" + triggerMs;
+                    if (triggerMs <= nowMs || prunedFired.has(firedKey)) {
+                        continue;
+                    }
+                    Intent evIntent = new Intent(context, DoseAlarmReceiver.class);
+                    evIntent.setAction(ACTION_EVENT_ALARM);
+                    evIntent.putExtra("event_id", evId);
+                    evIntent.putExtra("event_title", evTitle);
+                    evIntent.putExtra("event_type", evType);
+                    evIntent.putExtra("event_date", dateIso);
+                    evIntent.putExtra("event_time", normTime);
+                    evIntent.putExtra("event_location", evLoc);
+                    evIntent.putExtra("event_notes", evNotes);
+                    evIntent.putExtra("event_stage", stage);
+                    evIntent.putExtra("expected_trigger_ms", triggerMs);
+
+                    PendingIntent pi = PendingIntent.getBroadcast(
+                        context,
+                        eventStageRequestCode(evId, stage),
+                        evIntent,
+                        flags
+                    );
+                    scheduleAlarmClockSafe(context, am, triggerMs, pi);
+                    newScheduledKeys.add(evId + "|" + stage);
+                }
+            }
+
+            try {
+                JSONArray prevEventKeys = new JSONArray(prefs.getString(PREF_SCHEDULED_EVENT_ALARM_KEYS, "[]"));
+                for (int k = 0; k < prevEventKeys.length(); k++) {
+                    String key = prevEventKeys.optString(k, "");
+                    if (!key.isEmpty() && !newScheduledKeys.contains(key)) {
+                        int sep = key.lastIndexOf('|');
+                        if (sep > 0 && sep < key.length() - 1) {
+                            cancelEventAlarmStage(context, key.substring(0, sep), key.substring(sep + 1));
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            JSONArray saveEvKeys = new JSONArray();
+            for (String k : newScheduledKeys) {
+                saveEvKeys.put(k);
+            }
+            prefs.edit()
+                .putString(PREF_SCHEDULED_EVENT_ALARM_KEYS, saveEvKeys.toString())
+                .putString(PREF_FIRED_EVENT_ALARM_KEYS, prunedFired.toString())
+                .apply();
+        } catch (Exception ignored) {}
+    }
+
+    private static void handleEventAlarm(Context context, Intent intent) {
+        try {
+            if (context == null || intent == null) return;
+            String evId = intent.getStringExtra("event_id");
+            String stage = intent.getStringExtra("event_stage");
+            long expectedTriggerMs = intent.getLongExtra("expected_trigger_ms", -1L);
+            if (evId == null || evId.trim().isEmpty()) return;
+            String cleanEvId = evId.trim();
+            if (stage == null || stage.trim().isEmpty()) stage = "0h";
+
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, 0);
+            if (!prefs.getBoolean("is_logged_in", false)) return;
+            String profileRaw = prefs.getString("profile", null);
+            if (profileRaw != null && !profileRaw.isEmpty()) {
+                try {
+                    JSONObject prof = new JSONObject(profileRaw);
+                    if (!prof.optBoolean("notifications_enabled", true)) return;
+                } catch (Exception ignored) {}
+            }
+            try {
+                JSONArray delArr = new JSONArray(prefs.getString("deleted_record_ids", "[]"));
+                for (int d = 0; d < delArr.length(); d++) {
+                    if (cleanEvId.equalsIgnoreCase(delArr.optString(d, "").trim())) {
+                        cancelAllAlarmsForEvent(context, cleanEvId);
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            JSONArray eventsArr = new JSONArray(prefs.getString("events", "[]"));
+            JSONObject matchedEv = null;
+            for (int i = 0; i < eventsArr.length(); i++) {
+                JSONObject e = eventsArr.optJSONObject(i);
+                if (e != null && cleanEvId.equalsIgnoreCase(e.optString("id", "").trim())) {
+                    matchedEv = e;
+                    break;
+                }
+            }
+            if (matchedEv == null || isStockEventObj(matchedEv) || !matchedEv.optBoolean("notify_enabled", true)) {
+                cancelAllAlarmsForEvent(context, cleanEvId);
+                return;
+            }
+
+            String dateIso = normalizeEventDateIso(matchedEv.optString("date", matchedEv.optString("data", "")));
+            String normTime = normalizeEventHora(matchedEv.optString("time", matchedEv.optString("hora", "09:00")));
+            long eventMs = parseEventDateTimeMillis(dateIso, normTime);
+            long offsetMs = "1d".equals(stage) ? (24L * 60L * 60L * 1000L) : ("3h".equals(stage) ? (3L * 60L * 60L * 1000L) : 0L);
+            long currentExpectedMs = eventMs > 0L ? (eventMs - offsetMs) : -1L;
+            if (expectedTriggerMs > 0L && currentExpectedMs > 0L && Math.abs(expectedTriggerMs - currentExpectedMs) > 60000L) {
+                return;
+            }
+
+            long firedStampMs = currentExpectedMs > 0L ? currentExpectedMs : expectedTriggerMs;
+            String firedKey = cleanEvId + "|" + stage + "|" + firedStampMs;
+            JSONObject firedMap = new JSONObject();
+            try {
+                firedMap = new JSONObject(prefs.getString(PREF_FIRED_EVENT_ALARM_KEYS, "{}"));
+            } catch (Exception ignored) {}
+            if (firedMap.has(firedKey)) return;
+            firedMap.put(firedKey, System.currentTimeMillis());
+            prefs.edit().putString(PREF_FIRED_EVENT_ALARM_KEYS, firedMap.toString()).apply();
+
+            ensureEventChannel(context);
+            NotificationManager notificationManager = (NotificationManager) context.getSystemService("notification");
+            if (notificationManager == null) return;
+
+            String evTitle = matchedEv.optString("title", matchedEv.optString("titulo", intent.getStringExtra("event_title"))).trim();
+            if (evTitle.isEmpty()) evTitle = "Evento de saúde";
+            String evType = matchedEv.optString("type", matchedEv.optString("tipo", "Consulta médica")).trim();
+            String evLoc = matchedEv.optString("location", matchedEv.optString("local", "")).trim();
+            String evNotes = matchedEv.optString("notes", matchedEv.optString("notas", "")).trim();
+
+            String brDate = dateIso;
+            try {
+                if (dateIso.length() == 10) {
+                    String[] dp = dateIso.split("-");
+                    brDate = dp[2] + "/" + dp[1] + "/" + dp[0];
+                }
+            } catch (Exception ignored) {}
+
+            String notifTitle;
+            String leadText;
+            if ("1d".equals(stage)) {
+                notifTitle = "📅 Lembrete (amanhã): " + evTitle;
+                leadText = "Falta 1 dia • " + brDate + " às " + normTime;
+            } else if ("3h".equals(stage)) {
+                notifTitle = "⏰ Daqui a 3 horas: " + evTitle;
+                leadText = "Hoje às " + normTime + " (em 3 horas)";
+            } else {
+                notifTitle = "🔔 Agora (" + normTime + "): " + evTitle;
+                leadText = "Horário do seu evento • " + brDate + " às " + normTime;
+            }
+
+            StringBuilder bodySb = new StringBuilder(leadText);
+            if (!evType.isEmpty()) bodySb.append(" • ").append(evType);
+            if (!evLoc.isEmpty()) bodySb.append("\nLocal/Profissional: ").append(evLoc);
+            if (!evNotes.isEmpty()) bodySb.append("\nObs.: ").append(evNotes);
+            String notifBody = bodySb.toString();
+
+            int notifId = eventStageNotificationId(cleanEvId, stage);
+            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) {
+                piFlags |= PendingIntent.FLAG_IMMUTABLE;
+            }
+            Intent openIntent = new Intent(context, MainActivity.class);
+            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            openIntent.putExtra("open_tab", "calendar");
+            openIntent.putExtra("event_date", dateIso);
+            openIntent.putExtra("event_id", cleanEvId);
+            PendingIntent activityPi = PendingIntent.getActivity(context, notifId, openIntent, piFlags);
+
+            Notification.Builder builder;
+            if (Build.VERSION.SDK_INT >= 26) {
+                builder = new Notification.Builder(context, EVENT_CHANNEL_ID);
+            } else {
+                builder = new Notification.Builder(context);
+            }
+            builder.setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(notifTitle)
+                .setContentText(notifBody)
+                .setStyle(new Notification.BigTextStyle().bigText(notifBody))
+                .setContentIntent(activityPi)
+                .setCategory(Notification.CATEGORY_EVENT)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setPriority(Notification.PRIORITY_HIGH)
+                .setDefaults(Notification.DEFAULT_ALL)
+                .setAutoCancel(true);
+
+            notificationManager.notify(notifId, builder.build());
         } catch (Exception ignored) {}
     }
 
@@ -769,10 +1185,17 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
                 return;
             }
 
+            // Handle Health Event reminder notifications (1d before, 3h before, and at event time)
+            if (ACTION_EVENT_ALARM.equals(action)) {
+                handleEventAlarm(context, intent);
+                return;
+            }
+
             if (action != null && !ACTION_DOSE_ALARM.equals(action)) {
                 // System boot, package update, time/timezone change, exact alarm permission grant, or battery saver toggle:
-                // Immediately restore all medication alarms using setAlarmClock and purge deleted ones.
+                // Immediately restore all medication and event alarms using setAlarmClock and purge deleted ones.
                 ensureAlarmChannel(context);
+                ensureEventChannel(context);
                 scheduleAlarmsFromStorage(context);
                 return;
             }
