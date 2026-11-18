@@ -2526,8 +2526,74 @@ public class MainActivity extends Activity {
             final EditText nomeInput = createInput("Nome Completo", this.profile.optString("nome", ""));
             container.addView(nomeInput);
 
-            final EditText dobInput = createInput("Data de Nascimento (Ex: " + formatYmdForDeviceLocale(1965, 8, 15) + ")", formatDateForDeviceLocale(this.profile.optString("data_nascimento", "")));
-            container.addView(dobInput);
+            final String[] selectedDobIso = {
+                parseDateInputToIso(this.profile.optString("data_nascimento", this.profile.optString("dob", "")), "")
+            };
+            if (selectedDobIso[0] != null && !(selectedDobIso[0].length() == 10 && selectedDobIso[0].charAt(4) == '-' && selectedDobIso[0].charAt(7) == '-')) {
+                selectedDobIso[0] = "";
+            }
+
+            LinearLayout dobBox = new LinearLayout(this);
+            dobBox.setOrientation(0);
+            dobBox.setGravity(16);
+            dobBox.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+            dobBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout.LayoutParams dobLp = new LinearLayout.LayoutParams(-1, -2);
+            dobLp.bottomMargin = dp(10);
+            dobBox.setLayoutParams(dobLp);
+
+            final TextView dobValueTv = new TextView(this);
+            boolean hasInitialDob = selectedDobIso[0] != null && !selectedDobIso[0].isEmpty();
+            dobValueTv.setText(hasInitialDob
+                ? "📅  " + formatDateForDeviceLocale(selectedDobIso[0])
+                : "Data de Nascimento (" + getDeviceDateHint() + ")");
+            dobValueTv.setTextColor(hasInitialDob ? this.cTextMain : this.cTextLight);
+            dobValueTv.setTextSize(sp(14.0f));
+            dobValueTv.setSingleLine(true);
+            dobValueTv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            dobBox.addView(dobValueTv);
+
+            final TextView dobCueTv = new TextView(this);
+            dobCueTv.setText(hasInitialDob ? "📅 Alterar" : "📅 Escolher");
+            dobCueTv.setTextColor(this.cPrimary);
+            dobCueTv.setTextSize(sp(12.0f));
+            dobCueTv.setTypeface(null, 1);
+            dobCueTv.setPadding(dp(8), 0, 0, 0);
+            dobBox.addView(dobCueTv);
+
+            dobBox.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    int yr = 1980, mo = 0, dy = 1;
+                    String curIso = selectedDobIso[0];
+                    try {
+                        if (curIso != null && curIso.length() == 10 && curIso.charAt(4) == '-' && curIso.charAt(7) == '-') {
+                            String[] parts = curIso.split("-");
+                            yr = Integer.parseInt(parts[0]);
+                            mo = Integer.parseInt(parts[1]) - 1;
+                            dy = Integer.parseInt(parts[2]);
+                        }
+                    } catch (Exception ignored) {}
+                    int pickerTheme = MainActivity.this.isDarkMode
+                        ? android.R.style.Theme_DeviceDefault_Dialog_Alert
+                        : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
+                    DatePickerDialog dpDlg = new DatePickerDialog(MainActivity.this, pickerTheme, new DatePickerDialog.OnDateSetListener() {
+                        @Override
+                        public void onDateSet(DatePicker view, int year, int month, int dayOfMonth) {
+                            String pickedIso = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth);
+                            selectedDobIso[0] = pickedIso;
+                            dobValueTv.setText("📅  " + formatDateForDeviceLocale(pickedIso));
+                            dobValueTv.setTextColor(MainActivity.this.cTextMain);
+                            dobCueTv.setText("📅 Alterar");
+                        }
+                    }, yr, mo, dy);
+                    try {
+                        dpDlg.getDatePicker().setMaxDate(System.currentTimeMillis());
+                    } catch (Exception ignored) {}
+                    dpDlg.show();
+                }
+            });
+            container.addView(dobBox);
 
             final EditText sangueInput = createInput("Tipo Sanguíneo (Ex: O+, A+, B+)", this.profile.optString("tipo_sanguineo", ""));
             container.addView(sangueInput);
@@ -2557,9 +2623,12 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     String n = nomeInput.getText().toString().trim();
-                    String d = dobInput.getText().toString().trim();
+                    String d = selectedDobIso[0] != null ? selectedDobIso[0].trim() : "";
                     String s = sangueInput.getText().toString().trim();
-                    if (!n.isEmpty()) try { MainActivity.this.profile.put("nome", n); } catch (Exception ignored) {}
+                    if (!n.isEmpty()) try {
+                        MainActivity.this.profile.put("nome", n);
+                        MainActivity.this.profile.put("full_name", n);
+                    } catch (Exception ignored) {}
                     if (!d.isEmpty()) {
                         try {
                             String isoDob = parseDateInputToIso(d, d);
@@ -2567,7 +2636,10 @@ public class MainActivity extends Activity {
                             MainActivity.this.profile.put("dob", isoDob);
                         } catch (Exception ignored) {}
                     }
-                    if (!s.isEmpty()) try { MainActivity.this.profile.put("tipo_sanguineo", s); } catch (Exception ignored) {}
+                    if (!s.isEmpty()) try {
+                        MainActivity.this.profile.put("tipo_sanguineo", s);
+                        MainActivity.this.profile.put("blood_type", s);
+                    } catch (Exception ignored) {}
                     MainActivity.this.saveAll();
                     onboardingStep = 2;
                     render();
@@ -12982,6 +13054,9 @@ public class MainActivity extends Activity {
         inDob.setTextColor(this.cTextMain);
         inDob.setTextSize(sp(15.0f));
         inDob.setSingleLine(true);
+        inDob.setFocusable(false);
+        inDob.setFocusableInTouchMode(false);
+        inDob.setCursorVisible(false);
         inDob.setBackgroundColor(Color.TRANSPARENT);
         inDob.setPadding(0, dp(8), dp(6), dp(8));
         inDob.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -12991,7 +13066,7 @@ public class MainActivity extends Activity {
         tvCalIcon.setText("📅");
         tvCalIcon.setTextSize(sp(16.0f));
         tvCalIcon.setPadding(dp(4), dp(4), dp(2), dp(4));
-        tvCalIcon.setOnClickListener(new View.OnClickListener() {
+        View.OnClickListener openDobPicker = new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 int yr = 1980, mo = 0, dy = 1;
@@ -13005,14 +13080,24 @@ public class MainActivity extends Activity {
                         dy = Integer.parseInt(parts[2]);
                     }
                 } catch (Exception ignored) {}
-                new DatePickerDialog(MainActivity.this, new DatePickerDialog.OnDateSetListener() {
+                int pickerTheme = MainActivity.this.isDarkMode
+                    ? android.R.style.Theme_DeviceDefault_Dialog_Alert
+                    : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
+                DatePickerDialog dpDlg = new DatePickerDialog(MainActivity.this, pickerTheme, new DatePickerDialog.OnDateSetListener() {
                     @Override
                     public void onDateSet(DatePicker view, int year, int month, int dayOfMonth) {
                         inDob.setText(formatYmdForDeviceLocale(year, month + 1, dayOfMonth));
                     }
-                }, yr, mo, dy).show();
+                }, yr, mo, dy);
+                try {
+                    dpDlg.getDatePicker().setMaxDate(System.currentTimeMillis());
+                } catch (Exception ignored) {}
+                dpDlg.show();
             }
-        });
+        };
+        dobBox.setOnClickListener(openDobPicker);
+        inDob.setOnClickListener(openDobPicker);
+        tvCalIcon.setOnClickListener(openDobPicker);
         dobBox.addView(tvCalIcon);
         colDob.addView(dobBox);
         rowDobGender.addView(colDob);
