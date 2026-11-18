@@ -92,6 +92,7 @@ import org.json.JSONObject;
 public class MainActivity extends Activity {
     private static final String EMBEDDED_API_KEY = "";
     private static final String EMBEDDED_BACKEND_URL = "http://144.22.160.191:3009";
+    private static final String FALLBACK_BACKEND_URL = "https://medicare-cuidador.duckdns.org";
     private static final int REQ_PICK_PROFILE_PHOTO = 1001;
     private static final int REQ_CAPTURE_PROFILE_PHOTO = 1002;
     private static final int REQ_POST_NOTIFICATIONS = 1003;
@@ -12911,16 +12912,19 @@ public class MainActivity extends Activity {
         String localVerName = getCurrentAppVersionName();
         int localVerCode = getCurrentAppVersionCode();
 
-        LinearLayout rVer = new LinearLayout(this);
-        rVer.setOrientation(0);
-        rVer.setGravity(16);
-        rVer.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout rVerContainer = new LinearLayout(this);
+        rVerContainer.setOrientation(1);
+        rVerContainer.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        LinearLayout rVerHeader = new LinearLayout(this);
+        rVerHeader.setOrientation(0);
+        rVerHeader.setGravity(16);
 
         TextView tvVerIcon = new TextView(this);
         tvVerIcon.setText("📦");
         tvVerIcon.setTextSize(sp(22.0f));
         tvVerIcon.setPadding(0, 0, dp(14), 0);
-        rVer.addView(tvVerIcon);
+        rVerHeader.addView(tvVerIcon);
 
         LinearLayout verCol = new LinearLayout(this);
         verCol.setOrientation(1);
@@ -12946,26 +12950,30 @@ public class MainActivity extends Activity {
         tvVerSub.setPadding(0, dp(2), 0, 0);
         verCol.addView(tvVerSub);
 
-        rVer.addView(verCol);
+        rVerHeader.addView(verCol);
+        rVerContainer.addView(rVerHeader);
 
         TextView btnCheckUpdate = new TextView(this);
+        LinearLayout.LayoutParams btnUpdLp = new LinearLayout.LayoutParams(-1, -2);
+        btnUpdLp.topMargin = dp(12);
+        btnCheckUpdate.setLayoutParams(btnUpdLp);
         if (this.isCheckingApkUpdate) {
-            btnCheckUpdate.setText("Verificando...");
+            btnCheckUpdate.setText("Verificando atualizações...");
             btnCheckUpdate.setTextColor(this.cTextMuted);
             btnCheckUpdate.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
         } else if (this.apkUpdateAvailable) {
-            btnCheckUpdate.setText("Baixar v" + (this.remoteApkVersionName.isEmpty() ? "Nova" : this.remoteApkVersionName));
+            btnCheckUpdate.setText("⬇️ Baixar atualização v" + (this.remoteApkVersionName.isEmpty() ? "Nova" : this.remoteApkVersionName));
             btnCheckUpdate.setTextColor(Color.WHITE);
             btnCheckUpdate.setBackground(shape(this.cSuccess, 12, 0, 0));
         } else {
-            btnCheckUpdate.setText("Verificar atualizações");
+            btnCheckUpdate.setText("🔄 Verificar atualizações");
             btnCheckUpdate.setTextColor(Color.WHITE);
             btnCheckUpdate.setBackground(shape(this.cPrimary, 12, 0, 0));
         }
-        btnCheckUpdate.setTextSize(sp(13.0f));
+        btnCheckUpdate.setTextSize(sp(14.0f));
         btnCheckUpdate.setTypeface(null, 1);
         btnCheckUpdate.setGravity(17);
-        btnCheckUpdate.setPadding(dp(12), dp(10), dp(12), dp(10));
+        btnCheckUpdate.setPadding(dp(14), dp(12), dp(14), dp(12));
         btnCheckUpdate.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -12977,8 +12985,8 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        rVer.addView(btnCheckUpdate);
-        card.addView(rVer);
+        rVerContainer.addView(btnCheckUpdate);
+        card.addView(rVerContainer);
 
         linearLayout.addView(card);
     }
@@ -12990,7 +12998,7 @@ public class MainActivity extends Activity {
                 return pi.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "2.8.4";
+        return "2.8.5";
     }
 
     private int getCurrentAppVersionCode() {
@@ -13003,7 +13011,7 @@ public class MainActivity extends Activity {
                 return pi.versionCode;
             }
         } catch (Exception ignored) {}
-        return 284;
+        return 285;
     }
 
     private void checkForAppUpdate() {
@@ -13014,65 +13022,95 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                try {
-                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/apk/version");
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setConnectTimeout(8000);
-                    conn.setReadTimeout(8000);
-                    int code = conn.getResponseCode();
-                    if (code != 200) {
-                        throw new Exception("HTTP " + code);
-                    }
-                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        sb.append(line);
-                    }
-                    br.close();
-                    JSONObject json = new JSONObject(sb.toString());
-                    final int remoteCode = json.optInt("versionCode", 0);
-                    final String remoteName = json.optString("versionName", "").trim();
-                    final boolean apkAvail = json.optBoolean("apkAvailable", true);
-                    String dlPath = json.optString("downloadUrl", "/api/apk").trim();
-                    if (dlPath.isEmpty()) dlPath = "/api/apk";
-                    final String fullDownloadUrl = dlPath.startsWith("http") ? dlPath : (EMBEDDED_BACKEND_URL + (dlPath.startsWith("/") ? dlPath : "/" + dlPath));
+                String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
+                String lastError = "Servidor indisponível";
+                String matchedBase = null;
+                JSONObject json = null;
 
-                    final int localCode = getCurrentAppVersionCode();
-                    final String localName = getCurrentAppVersionName();
-                    final boolean hasNewer = apkAvail && (remoteCode > localCode || (remoteCode == localCode && !remoteName.isEmpty() && !remoteName.equals(localName)));
-
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            MainActivity.this.isCheckingApkUpdate = false;
-                            MainActivity.this.remoteApkVersionCode = remoteCode;
-                            MainActivity.this.remoteApkVersionName = remoteName;
-                            MainActivity.this.remoteApkDownloadUrl = fullDownloadUrl;
-                            MainActivity.this.apkUpdateAvailable = hasNewer;
-                            if (hasNewer) {
-                                MainActivity.this.apkUpdateStatusText = "Nova versão v" + remoteName + " disponível!";
-                                render();
-                                showAppUpdateAvailableDialog();
-                            } else {
-                                MainActivity.this.apkUpdateStatusText = "Atualizado ✓ (última versão instalada)";
-                                render();
-                                Toast.makeText(MainActivity.this, "✓ Aplicativo já está na versão mais recente (" + localName + ").", 0).show();
-                            }
+                for (String base : baseCandidates) {
+                    if (base == null || base.trim().isEmpty()) continue;
+                    HttpURLConnection conn = null;
+                    try {
+                        URL url = new URL(base + "/api/apk/version");
+                        conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("GET");
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(8000);
+                        conn.setRequestProperty("Cache-Control", "no-cache");
+                        int code = conn.getResponseCode();
+                        if (code != 200) {
+                            lastError = "HTTP " + code;
+                            continue;
                         }
-                    });
-                } catch (Exception e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            MainActivity.this.isCheckingApkUpdate = false;
-                            MainActivity.this.apkUpdateStatusText = "Não foi possível verificar agora";
-                            render();
-                            Toast.makeText(MainActivity.this, "Erro ao verificar atualizações. Tente novamente.", 1).show();
+                        BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            sb.append(line);
                         }
-                    });
+                        br.close();
+                        JSONObject parsed = new JSONObject(sb.toString());
+                        if (!parsed.optBoolean("ok", true)) {
+                            lastError = parsed.optString("error", "Resposta inválida");
+                            continue;
+                        }
+                        json = parsed;
+                        matchedBase = base;
+                        break;
+                    } catch (Exception ex) {
+                        String msg = ex.getMessage();
+                        lastError = (msg != null && !msg.trim().isEmpty()) ? msg.trim() : ex.getClass().getSimpleName();
+                    } finally {
+                        if (conn != null) {
+                            try { conn.disconnect(); } catch (Exception ignored) {}
+                        }
+                    }
                 }
+
+                if (json == null || matchedBase == null) {
+                    final String errDisplay = lastError.length() > 60 ? lastError.substring(0, 60) + "..." : lastError;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            MainActivity.this.isCheckingApkUpdate = false;
+                            MainActivity.this.apkUpdateStatusText = "Falha ao verificar (" + errDisplay + ")";
+                            render();
+                            Toast.makeText(MainActivity.this, "Erro ao verificar atualizações: " + errDisplay, 1).show();
+                        }
+                    });
+                    return;
+                }
+
+                final int remoteCode = json.optInt("versionCode", 0);
+                final String remoteName = json.optString("versionName", "").trim();
+                final boolean apkAvail = json.optBoolean("apkAvailable", true);
+                String dlPath = json.optString("downloadUrl", "/api/apk").trim();
+                if (dlPath.isEmpty()) dlPath = "/api/apk";
+                final String fullDownloadUrl = dlPath.startsWith("http") ? dlPath : (matchedBase + (dlPath.startsWith("/") ? dlPath : "/" + dlPath));
+
+                final int localCode = getCurrentAppVersionCode();
+                final String localName = getCurrentAppVersionName();
+                final boolean hasNewer = apkAvail && (remoteCode > localCode || (remoteCode == localCode && !remoteName.isEmpty() && !remoteName.equals(localName)));
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        MainActivity.this.isCheckingApkUpdate = false;
+                        MainActivity.this.remoteApkVersionCode = remoteCode;
+                        MainActivity.this.remoteApkVersionName = remoteName;
+                        MainActivity.this.remoteApkDownloadUrl = fullDownloadUrl;
+                        MainActivity.this.apkUpdateAvailable = hasNewer;
+                        if (hasNewer) {
+                            MainActivity.this.apkUpdateStatusText = "Nova versão v" + remoteName + " disponível!";
+                            render();
+                            showAppUpdateAvailableDialog();
+                        } else {
+                            MainActivity.this.apkUpdateStatusText = "Atualizado ✓ (última versão instalada)";
+                            render();
+                            Toast.makeText(MainActivity.this, "✓ Aplicativo já está na versão mais recente (" + localName + ").", 0).show();
+                        }
+                    }
+                });
             }
         }).start();
     }
@@ -13083,7 +13121,7 @@ public class MainActivity extends Activity {
             + (this.remoteApkVersionCode > 0 ? " (Build " + this.remoteApkVersionCode + ")" : "");
         final String dlUrl = !this.remoteApkDownloadUrl.isEmpty()
             ? this.remoteApkDownloadUrl
-            : (EMBEDDED_BACKEND_URL + "/api/apk");
+            : (FALLBACK_BACKEND_URL + "/api/apk");
         final String verLabel = !this.remoteApkVersionName.isEmpty() ? this.remoteApkVersionName : "nova";
 
         showStyledConfirmDialog(
@@ -13103,6 +13141,15 @@ public class MainActivity extends Activity {
 
     private void startApkUpdateDownload(final String downloadUrl, final String versionLabel) {
         try {
+            if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                Toast.makeText(this, "Autorize 'Instalar apps desconhecidos' para atualizar e toque novamente.", 1).show();
+                try {
+                    Intent permIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()));
+                    startActivity(permIntent);
+                    return;
+                } catch (Exception ignored) {}
+            }
+
             DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
             if (dm == null) {
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)));
