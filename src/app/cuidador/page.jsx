@@ -59,8 +59,35 @@ const EMPTY_MED_FORM = {
   unidade: '',
   quantidade: '',
   horarios: '',
-  treatment_type: 'continuous',
+  treatment_type: '',
+  treatment_days: '',
+  observacoes: '',
 };
+
+const SCHEDULE_INTERVAL_PRESETS = [
+  { hours: 24, label: '24h (1x/dia)' },
+  { hours: 12, label: '12 em 12h' },
+  { hours: 8, label: '8 em 8h' },
+  { hours: 6, label: '6 em 6h' },
+  { hours: 4, label: '4 em 4h' },
+];
+
+function buildIntervalScheduleList(startHm, intervalHours) {
+  const match = String(startHm || '').trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  const baseHour = match ? Number(match[1]) : 8;
+  const baseMin = match ? Number(match[2]) : 0;
+  const startTotal = baseHour * 60 + baseMin;
+  const count = Math.max(1, Math.round(24 / intervalHours));
+  const stepMins = intervalHours * 60;
+  const list = [];
+  for (let i = 0; i < count; i += 1) {
+    const m = (startTotal + i * stepMins) % 1440;
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    list.push(`${hh}:${mm}`);
+  }
+  return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
+}
 
 const EMPTY_APPOINTMENT_FORM = {
   type: 'consulta',
@@ -129,6 +156,8 @@ export default function CuidadorWebPage() {
   const [confirmPatientSave, setConfirmPatientSave] = useState(false);
 
   const [newMedForm, setNewMedForm] = useState(EMPTY_MED_FORM);
+  const [scheduleBaseTime, setScheduleBaseTime] = useState('08:00');
+  const [selectedIntervalHours, setSelectedIntervalHours] = useState(null);
   const [confirmMedSave, setConfirmMedSave] = useState(false);
 
   const [selectedDoseTarget, setSelectedDoseTarget] = useState(null);
@@ -885,11 +914,17 @@ export default function CuidadorWebPage() {
     const nomeTrim = newMedForm.nome.trim();
     const dosagemTrim = newMedForm.dosagem.trim();
     const unidadeTrim = newMedForm.unidade.trim();
+    const treatmentType = newMedForm.treatment_type;
+    const isSos = treatmentType === 'sos';
+    const isTemp = treatmentType === 'temporary';
     const qtdNum = Number(newMedForm.quantidade);
-    const horariosArr = newMedForm.horarios
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const daysNum = Number(newMedForm.treatment_days);
+    const horariosArr = isSos
+      ? []
+      : newMedForm.horarios
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
 
     if (!nomeTrim) {
       showToast('Informe o nome do medicamento.', 'error');
@@ -903,11 +938,19 @@ export default function CuidadorWebPage() {
       showToast('Selecione a unidade farmacêutica.', 'error');
       return;
     }
+    if (!['continuous', 'temporary', 'sos'].includes(treatmentType)) {
+      showToast('Selecione o tipo de tratamento (Contínuo, Temporário ou SOS).', 'error');
+      return;
+    }
+    if (isTemp && (!Number.isFinite(daysNum) || daysNum < 1 || newMedForm.treatment_days === '')) {
+      showToast('Informe a duração do tratamento temporário em dias.', 'error');
+      return;
+    }
     if (!Number.isFinite(qtdNum) || qtdNum < 0 || newMedForm.quantidade === '') {
       showToast('Informe uma quantidade de estoque inicial válida.', 'error');
       return;
     }
-    if (horariosArr.length === 0 || !horariosArr.every((h) => /^([01]\d|2[0-3]):[0-5]\d$/.test(h))) {
+    if (!isSos && (horariosArr.length === 0 || !horariosArr.every((h) => /^([01]\d|2[0-3]):[0-5]\d$/.test(h)))) {
       showToast('Informe horários válidos no formato HH:MM (ex: 08:00, 20:00).', 'error');
       return;
     }
@@ -915,6 +958,12 @@ export default function CuidadorWebPage() {
       showToast('Confirme que revisou a prescrição antes de salvar o medicamento.', 'error');
       return;
     }
+
+    const sortedHorarios = Array.from(new Set(horariosArr)).sort((a, b) => a.localeCompare(b));
+    const startIso = new Date().toISOString().slice(0, 10);
+    const endIso = isTemp
+      ? new Date(Date.now() + Math.max(0, Math.round(daysNum) - 1) * 86400000).toISOString().slice(0, 10)
+      : null;
 
     setActionLoading(true);
     try {
@@ -928,8 +977,12 @@ export default function CuidadorWebPage() {
           dosagem: dosagemTrim,
           unidade: unidadeTrim,
           quantidade: Math.round(qtdNum),
-          horarios: horariosArr,
-          treatment_type: newMedForm.treatment_type,
+          horarios: sortedHorarios,
+          treatment_type: treatmentType,
+          treatment_days: isTemp ? Math.round(daysNum) : null,
+          start_date: isTemp ? startIso : null,
+          end_date: isTemp ? endIso : null,
+          observacoes: newMedForm.observacoes.trim() || null,
           ativo: true,
           status: 'ativo',
         }),
@@ -941,6 +994,8 @@ export default function CuidadorWebPage() {
       showToast('Medicamento cadastrado com sucesso!');
       setShowNewMedModal(false);
       setNewMedForm(EMPTY_MED_FORM);
+      setScheduleBaseTime('08:00');
+      setSelectedIntervalHours(null);
       setConfirmMedSave(false);
       loadData();
     } catch (err) {
@@ -2362,6 +2417,8 @@ export default function CuidadorWebPage() {
                     type="button"
                     onClick={() => {
                       setNewMedForm(EMPTY_MED_FORM);
+                      setScheduleBaseTime('08:00');
+                      setSelectedIntervalHours(null);
                       setConfirmMedSave(false);
                       setShowNewMedModal(true);
                     }}
@@ -2382,6 +2439,8 @@ export default function CuidadorWebPage() {
                     type="button"
                     onClick={() => {
                       setNewMedForm(EMPTY_MED_FORM);
+                      setScheduleBaseTime('08:00');
+                      setSelectedIntervalHours(null);
                       setConfirmMedSave(false);
                       setShowNewMedModal(true);
                     }}
@@ -2403,6 +2462,8 @@ export default function CuidadorWebPage() {
                         ? 'Contínuo'
                         : med.treatment_type === 'sos'
                         ? 'SOS'
+                        : med.treatment_days
+                        ? `Temporário (${med.treatment_days}d)`
                         : 'Temporário';
 
                     return (
@@ -2435,7 +2496,11 @@ export default function CuidadorWebPage() {
                           <div className="tabular-nums">
                             <span className="text-slate-400">Horários: </span>
                             <span className="font-semibold text-white font-mono">
-                              {horarios.length > 0 ? horarios.join(', ') : 'Não definido'}
+                              {horarios.length > 0
+                                ? horarios.join(', ')
+                                : med.treatment_type === 'sos'
+                                ? 'Sob demanda (SOS)'
+                                : 'Não definido'}
                             </span>
                           </div>
 
@@ -2446,7 +2511,9 @@ export default function CuidadorWebPage() {
                                 isLowStock ? 'text-rose-400' : 'text-emerald-400'
                               }`}
                             >
-                              {med.quantidade} un ({daysRemaining}d)
+                              {med.treatment_type === 'sos'
+                                ? `${med.quantidade} un`
+                                : `${med.quantidade} un (${daysRemaining}d)`}
                             </span>
                           </div>
                         </div>
@@ -2999,30 +3066,166 @@ export default function CuidadorWebPage() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-xs text-slate-300 mb-1">Estoque Inicial *</label>
+              <div>
+                <label className="block text-xs text-slate-300 mb-1.5">Tipo de Tratamento *</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    {
+                      id: 'continuous',
+                      label: 'Contínuo',
+                      sub: 'Uso diário',
+                      activeClass: 'bg-emerald-500/15 border-emerald-500 text-emerald-300',
+                    },
+                    {
+                      id: 'temporary',
+                      label: 'Temporário',
+                      sub: 'Por dias',
+                      activeClass: 'bg-amber-500/15 border-amber-500 text-amber-300',
+                    },
+                    {
+                      id: 'sos',
+                      label: 'SOS',
+                      sub: 'Se necessário',
+                      activeClass: 'bg-blue-500/15 border-blue-500 text-blue-300',
+                    },
+                  ].map((opt) => {
+                    const isSelected = newMedForm.treatment_type === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setNewMedForm((prev) => ({
+                            ...prev,
+                            treatment_type: opt.id,
+                            ...(opt.id === 'sos' ? { horarios: '' } : {}),
+                          }));
+                          if (opt.id === 'sos') {
+                            setSelectedIntervalHours(null);
+                          }
+                        }}
+                        className={`min-h-[52px] px-2.5 py-2 rounded-xl border text-left transition-colors ${
+                          isSelected
+                            ? opt.activeClass
+                            : 'bg-[#0b1120] border-slate-700 text-slate-300 hover:border-slate-500'
+                        }`}
+                      >
+                        <div className="text-xs font-bold leading-tight">{opt.label}</div>
+                        <div className="text-[10px] opacity-80 mt-0.5 leading-tight">{opt.sub}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {newMedForm.treatment_type === 'temporary' && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                  <label className="block text-xs font-semibold text-amber-300 mb-1">
+                    Duração do Tratamento (dias) *
+                  </label>
                   <input
                     type="number"
-                    min="0"
+                    min="1"
                     required
-                    value={newMedForm.quantidade}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, quantidade: e.target.value })}
-                    placeholder="Quantidade atual"
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
+                    value={newMedForm.treatment_days}
+                    onChange={(e) => setNewMedForm({ ...newMedForm, treatment_days: e.target.value })}
+                    placeholder="Ex: 7, 10, 14"
+                    className="w-full bg-[#0b1120] border border-amber-500/40 rounded-xl px-3 py-2 min-h-[42px] text-sm text-white"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs text-slate-300 mb-1">Horários (HH:MM) *</label>
+              )}
+
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">Estoque Inicial *</label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={newMedForm.quantidade}
+                  onChange={(e) => setNewMedForm({ ...newMedForm, quantidade: e.target.value })}
+                  placeholder="Quantidade atual"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
+                />
+              </div>
+
+              {newMedForm.treatment_type === 'sos' ? (
+                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-xs text-blue-300 leading-relaxed">
+                  Uso Sob Demanda (SOS): este medicamento não terá horários fixos e ficará disponível no app do paciente para registro sempre que utilizado.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs text-slate-300">Horários (HH:MM) *</label>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-400">1ª dose:</span>
+                      <input
+                        type="time"
+                        value={scheduleBaseTime}
+                        onChange={(e) => {
+                          const nextBase = e.target.value || '08:00';
+                          setScheduleBaseTime(nextBase);
+                          if (selectedIntervalHours) {
+                            const nextList = buildIntervalScheduleList(nextBase, selectedIntervalHours);
+                            setNewMedForm((prev) => ({ ...prev, horarios: nextList.join(', ') }));
+                          }
+                        }}
+                        className="bg-[#0b1120] border border-slate-700 rounded-lg px-2 py-1 text-xs text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-[#0b1120] border border-slate-800 space-y-2">
+                    <span className="block text-[11px] font-semibold text-slate-400">
+                      Sugestão por intervalo:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {SCHEDULE_INTERVAL_PRESETS.map((preset) => {
+                        const isActive = selectedIntervalHours === preset.hours;
+                        return (
+                          <button
+                            key={preset.hours}
+                            type="button"
+                            onClick={() => {
+                              setSelectedIntervalHours(preset.hours);
+                              const list = buildIntervalScheduleList(scheduleBaseTime || '08:00', preset.hours);
+                              setNewMedForm((prev) => ({ ...prev, horarios: list.join(', ') }));
+                            }}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors ${
+                              isActive
+                                ? 'bg-blue-600 border-blue-500 text-white'
+                                : 'bg-[#131d31] border-slate-700 text-slate-300 hover:border-blue-500/60 hover:text-white'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   <input
                     type="text"
                     required
                     value={newMedForm.horarios}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, horarios: e.target.value })}
-                    placeholder="Ex: 08:00, 20:00"
-                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
+                    onChange={(e) => {
+                      setSelectedIntervalHours(null);
+                      setNewMedForm({ ...newMedForm, horarios: e.target.value });
+                    }}
+                    placeholder="Ex: 08:00, 16:00, 00:00"
+                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white font-mono"
                   />
                 </div>
+              )}
+
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">Observações (opcional)</label>
+                <input
+                  type="text"
+                  value={newMedForm.observacoes}
+                  onChange={(e) => setNewMedForm({ ...newMedForm, observacoes: e.target.value })}
+                  placeholder="Ex: Tomar após as refeições"
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
+                />
               </div>
 
               <label className="flex items-start gap-2.5 pt-2 text-xs text-slate-300 cursor-pointer select-none">

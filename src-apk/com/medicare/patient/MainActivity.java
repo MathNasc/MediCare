@@ -7682,6 +7682,128 @@ public class MainActivity extends Activity {
         }
 
         if (!isSOS) {
+            final String[] intervalBaseTime = {
+                scheduleList.size() > 0 && scheduleList.get(0) != null && !scheduleList.get(0).trim().isEmpty()
+                    ? scheduleList.get(0).trim()
+                    : "08:00"
+            };
+            final int[] activeIntervalHours = {-1};
+
+            final Runnable applyIntervalPreset = new Runnable() {
+                @Override
+                public void run() {
+                    if (activeIntervalHours[0] <= 0) return;
+                    int intervalH = activeIntervalHours[0];
+                    int baseH = 8, baseM = 0;
+                    try {
+                        String[] parts = intervalBaseTime[0].split(":");
+                        baseH = Integer.parseInt(parts[0].trim());
+                        baseM = Integer.parseInt(parts[1].trim());
+                    } catch (Exception ignored) {}
+                    int startTotal = ((baseH * 60 + baseM) % 1440 + 1440) % 1440;
+                    int count = Math.max(1, 24 / intervalH);
+                    int step = intervalH * 60;
+                    ArrayList<String> generated = new ArrayList<>();
+                    for (int k = 0; k < count; k++) {
+                        int tot = (startTotal + k * step) % 1440;
+                        String hm = String.format(Locale.US, "%02d:%02d", tot / 60, tot % 60);
+                        if (!generated.contains(hm)) {
+                            generated.add(hm);
+                        }
+                    }
+                    Collections.sort(generated, new Comparator<String>() {
+                        @Override
+                        public int compare(String a, String b) {
+                            return Integer.compare(parseTimeMinutesForSort(a), parseTimeMinutesForSort(b));
+                        }
+                    });
+                    scheduleList.clear();
+                    scheduleList.addAll(generated);
+                }
+            };
+
+            LinearLayout sugCard = new LinearLayout(this);
+            sugCard.setOrientation(1);
+            sugCard.setBackground(shape(this.isDarkMode ? Color.parseColor("#111B2E") : this.cBgMain, 14, this.cBorder, 1));
+            sugCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+            LinearLayout.LayoutParams scLp2 = new LinearLayout.LayoutParams(-1, -2);
+            scLp2.topMargin = dp(4);
+            scLp2.bottomMargin = dp(10);
+            sugCard.setLayoutParams(scLp2);
+
+            LinearLayout sugTopRow = new LinearLayout(this);
+            sugTopRow.setOrientation(0);
+            sugTopRow.setGravity(16);
+            sugTopRow.setPadding(0, 0, 0, dp(8));
+
+            TextView tvSugTitle = new TextView(this);
+            tvSugTitle.setText("SUGESTÃO POR INTERVALO");
+            tvSugTitle.setTextColor(this.cTextMuted);
+            tvSugTitle.setTextSize(sp(10.5f));
+            tvSugTitle.setTypeface(null, 1);
+            tvSugTitle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            sugTopRow.addView(tvSugTitle);
+
+            final TextView btnBaseTime = new TextView(this);
+            btnBaseTime.setText("1ª dose: ⏰ " + intervalBaseTime[0]);
+            btnBaseTime.setTextColor(this.cPrimary);
+            btnBaseTime.setTextSize(sp(11.5f));
+            btnBaseTime.setTypeface(null, 1);
+            btnBaseTime.setBackground(shape(Color.parseColor("#143B82F6"), 10, Color.parseColor("#593B82F6"), 1));
+            btnBaseTime.setPadding(dp(10), dp(5), dp(10), dp(5));
+            sugTopRow.addView(btnBaseTime);
+            sugCard.addView(sugTopRow);
+
+            HorizontalScrollView sugScroll = new HorizontalScrollView(this);
+            sugScroll.setHorizontalScrollBarEnabled(false);
+            final LinearLayout sugChipsRow = new LinearLayout(this);
+            sugChipsRow.setOrientation(0);
+            sugScroll.addView(sugChipsRow);
+            sugCard.addView(sugScroll);
+
+            final int[] presetHoursArr = {24, 12, 8, 6, 4};
+            final String[] presetLabelsArr = {"24h (1x)", "12 em 12h", "8 em 8h", "6 em 6h", "4 em 4h"};
+
+            final Runnable[] renderTimesRef = new Runnable[1];
+            final Runnable[] renderChipsRef = new Runnable[1];
+
+            renderChipsRef[0] = new Runnable() {
+                @Override
+                public void run() {
+                    sugChipsRow.removeAllViews();
+                    for (int pIdx = 0; pIdx < presetHoursArr.length; pIdx++) {
+                        final int pHrs = presetHoursArr[pIdx];
+                        final boolean isAct = (activeIntervalHours[0] == pHrs);
+                        TextView chip = new TextView(MainActivity.this);
+                        chip.setText(presetLabelsArr[pIdx]);
+                        chip.setTextColor(isAct ? Color.WHITE : MainActivity.this.cTextMain);
+                        chip.setTextSize(sp(12.0f));
+                        chip.setTypeface(null, 1);
+                        chip.setSingleLine(true);
+                        chip.setBackground(shape(
+                            isAct ? MainActivity.this.cPrimary : (MainActivity.this.isDarkMode ? Color.parseColor("#182438") : MainActivity.this.cSurface),
+                            10,
+                            isAct ? MainActivity.this.cPrimary : MainActivity.this.cBorder,
+                            1
+                        ));
+                        chip.setPadding(dp(12), dp(8), dp(12), dp(8));
+                        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-2, -2);
+                        if (pIdx < presetHoursArr.length - 1) cLp.rightMargin = dp(6);
+                        chip.setLayoutParams(cLp);
+                        chip.setOnClickListener(new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                activeIntervalHours[0] = pHrs;
+                                applyIntervalPreset.run();
+                                if (renderTimesRef[0] != null) renderTimesRef[0].run();
+                                if (renderChipsRef[0] != null) renderChipsRef[0].run();
+                            }
+                        });
+                        sugChipsRow.addView(chip);
+                    }
+                }
+            };
+
             LinearLayout schedHdr = new LinearLayout(this);
             schedHdr.setOrientation(0);
             schedHdr.setGravity(16);
@@ -7732,8 +7854,15 @@ public class MainActivity extends Activity {
                                 new TimePickerDialog(MainActivity.this, new TimePickerDialog.OnTimeSetListener() {
                                     @Override
                                     public void onTimeSet(TimePicker view, int hourOfDay, int minute) {
-                                        scheduleList.set(curIdx, String.format(Locale.US, "%02d:%02d", hourOfDay, minute));
-                                        run();
+                                        String nextHm = String.format(Locale.US, "%02d:%02d", hourOfDay, minute);
+                                        scheduleList.set(curIdx, nextHm);
+                                        if (curIdx == 0 && activeIntervalHours[0] < 0) {
+                                            intervalBaseTime[0] = nextHm;
+                                            btnBaseTime.setText("1ª dose: ⏰ " + intervalBaseTime[0]);
+                                        }
+                                        activeIntervalHours[0] = -1;
+                                        if (renderChipsRef[0] != null) renderChipsRef[0].run();
+                                        if (renderTimesRef[0] != null) renderTimesRef[0].run();
                                     }
                                 }, hr, min, true).show();
                             }
@@ -7755,7 +7884,9 @@ public class MainActivity extends Activity {
                                 @Override
                                 public void onClick(View v) {
                                     scheduleList.remove(curIdx);
-                                    run();
+                                    activeIntervalHours[0] = -1;
+                                    if (renderChipsRef[0] != null) renderChipsRef[0].run();
+                                    if (renderTimesRef[0] != null) renderTimesRef[0].run();
                                 }
                             });
                             tRow.addView(btnRemTime);
@@ -7764,6 +7895,33 @@ public class MainActivity extends Activity {
                     }
                 }
             };
+            renderTimesRef[0] = renderTimes;
+            renderChipsRef[0].run();
+
+            btnBaseTime.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    int hr = 8, min = 0;
+                    try {
+                        String[] p = intervalBaseTime[0].split(":");
+                        hr = Integer.parseInt(p[0].trim());
+                        min = Integer.parseInt(p[1].trim());
+                    } catch (Exception ignored) {}
+                    new TimePickerDialog(MainActivity.this, new TimePickerDialog.OnTimeSetListener() {
+                        @Override
+                        public void onTimeSet(TimePicker view, int hourOfDay, int minute) {
+                            intervalBaseTime[0] = String.format(Locale.US, "%02d:%02d", hourOfDay, minute);
+                            btnBaseTime.setText("1ª dose: ⏰ " + intervalBaseTime[0]);
+                            if (activeIntervalHours[0] > 0) {
+                                applyIntervalPreset.run();
+                            } else if (scheduleList.size() == 1) {
+                                scheduleList.set(0, intervalBaseTime[0]);
+                            }
+                            renderTimes.run();
+                        }
+                    }, hr, min, true).show();
+                }
+            });
 
             TextView btnAddTime = new TextView(this);
             btnAddTime.setText("+ Adicionar horário");
@@ -7776,11 +7934,14 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     scheduleList.add("12:00");
+                    activeIntervalHours[0] = -1;
+                    if (renderChipsRef[0] != null) renderChipsRef[0].run();
                     renderTimes.run();
                 }
             });
             schedHdr.addView(btnAddTime);
             body.addView(schedHdr);
+            body.addView(sugCard);
             renderTimes.run();
             body.addView(timesContainer);
 
@@ -12999,7 +13160,7 @@ public class MainActivity extends Activity {
                 return pi.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "2.8.6";
+        return "2.8.7";
     }
 
     private int getCurrentAppVersionCode() {
@@ -13012,7 +13173,7 @@ public class MainActivity extends Activity {
                 return pi.versionCode;
             }
         } catch (Exception ignored) {}
-        return 286;
+        return 287;
     }
 
     private void checkForAppUpdate() {
