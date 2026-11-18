@@ -13,11 +13,11 @@ function urlBase64ToUint8Array(base64String) {
   return output;
 }
 
-export const isPushSupported = () =>
+export const isPushSupported = (overridePublicKey = '') =>
   typeof window !== 'undefined' &&
   'serviceWorker' in navigator &&
   'PushManager' in window &&
-  Boolean(VAPID_PUBLIC_KEY);
+  Boolean(overridePublicKey || VAPID_PUBLIC_KEY);
 
 /**
  * Pede permissão de notificação (se necessário) e inscreve o dispositivo
@@ -25,7 +25,7 @@ export const isPushSupported = () =>
  * ({ endpoint, keys: { p256dh, auth } }) pronta para salvar no banco de dados,
  * ou null se não suportado / permissão negada.
  */
-export async function subscribeToPush() {
+export async function subscribeToPush(overridePublicKey = '') {
   if (typeof window === 'undefined' || !('Notification' in window)) return null;
   if (Notification.permission === 'denied') return null;
 
@@ -45,13 +45,14 @@ export async function subscribeToPush() {
     }
   } catch {}
 
-  if (!isPushSupported()) return null;
+  const activeKey = overridePublicKey || VAPID_PUBLIC_KEY;
+  if (!isPushSupported(activeKey)) return null;
 
   try {
     const reg = await navigator.serviceWorker.ready;
 
     let sub = await reg.pushManager.getSubscription();
-    const currentVapidArray = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+    const currentVapidArray = urlBase64ToUint8Array(activeKey);
 
     if (sub && sub.options && sub.options.applicationServerKey) {
       const existingKey = new Uint8Array(sub.options.applicationServerKey);

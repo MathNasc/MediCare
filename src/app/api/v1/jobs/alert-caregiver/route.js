@@ -69,7 +69,7 @@ export async function POST(req) {
           title: `🚨 Alerta de Cuidador: ${medName}`,
           body: `${patientName} não confirmou a dose de ${medName}${hora ? ` (${hora})` : ''}.`,
           tag: `cg-alert-${Date.now()}`,
-          url: '/?tab=profile&view=caregiver_dash&cgTab=history',
+          url: '/cuidador',
         });
 
         for (const sub of subsRes.rows) {

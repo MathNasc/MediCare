@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
 import { forwardToOracleBackend } from '@/lib/oracleProxy';
+import { notifyCaregiversOfDoseRequest } from '@/lib/caregiverNotifications';
+import { ensureOverdueCaregiverScheduler } from '@/lib/reminderWorker';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -378,6 +380,8 @@ export async function POST(request) {
   if (!pool) {
     return forwardToOracleBackend(request, '/api/v1/sync');
   }
+
+  ensureOverdueCaregiverScheduler();
 
   let body;
   try {
@@ -1044,7 +1048,8 @@ export async function POST(request) {
           .query('SELECT status, updated_at FROM approval_requests WHERE id = $1 LIMIT 1', [reqUuid])
           .catch(() => ({ rows: [] }));
         const alreadyExists = existingReq.rows.length > 0;
-        if (alreadyExists && existingReq.rows[0].status !== 'pending') {
+        const isReopened = alreadyExists && existingReq.rows[0].status !== 'pending';
+        if (isReopened) {
           // Se o cliente enviou um created_at mais recente (nova solicitação para o mesmo horário), reabre
           const clientCreatedMs = reqItem.created_at_ms ? Number(reqItem.created_at_ms) : 0;
           const serverUpdatedMs = existingReq.rows[0].updated_at
@@ -1054,6 +1059,7 @@ export async function POST(request) {
             continue;
           }
         }
+        const isNewOrReopened = !alreadyExists || isReopened;
 
         const primaryCaregiverId = cgLinksRes.rows.find(r => r.caregiver_id)?.caregiver_id || null;
         const metaObj = {
@@ -1126,22 +1132,23 @@ export async function POST(request) {
           )
           .catch(() => {});
 
-        // Notificação e nota para cada cuidador ativo vinculado ao paciente
+        // Notificação persistente + Web Push para cada cuidador ativo vinculado
+        await notifyCaregiversOfDoseRequest(client, {
+          patientId: userId,
+          patientName,
+          caregiverRows: cgLinksRes.rows,
+          reqUuid,
+          medNome,
+          hora,
+          doseDate,
+          reason,
+          isUndo,
+          isNewOrReopened,
+        }).catch(() => {});
+
+        // Nota clínica vinculada para cada cuidador ativo
         for (const cgRow of cgLinksRes.rows) {
           if (!cgRow.caregiver_id) continue;
-          const cgNotifId = toDeterministicUuid(`notif:cg:${cgRow.caregiver_id}:${reqUuid}`, `notif:${cgRow.caregiver_id}`);
-          await client
-            .query(
-              `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
-               VALUES ($1,$2,'cuidador',$3,$4,false)
-               ON CONFLICT (id) DO UPDATE SET
-                 titulo = EXCLUDED.titulo,
-                 mensagem = EXCLUDED.mensagem,
-                 lida = false`,
-              [cgNotifId, cgRow.caregiver_id, notifTitle, notifMsg]
-            )
-            .catch(() => {});
-
           const cgNoteId = toDeterministicUuid(`cgnote:${cgRow.caregiver_id}:${reqUuid}`, `cgnote:${userId}`);
           await client
             .query(

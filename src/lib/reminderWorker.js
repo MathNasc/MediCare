@@ -1,17 +1,11 @@
 import crypto from 'crypto';
 import webpush from 'web-push';
 import { getPgPool, ensureOraclePostgresSchema } from './oraclePostgres';
-
-function configureWebPush() {
-  const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY;
-  const priv = process.env.VAPID_PRIVATE_KEY;
-  const email = process.env.VAPID_CONTACT_EMAIL || 'suporte@medicare.app';
-  if (pub && priv) {
-    webpush.setVapidDetails(`mailto:${email}`, pub, priv);
-    return true;
-  }
-  return false;
-}
+import {
+  checkOverdueDosesForCaregivers,
+  configureWebPush,
+  getLocalDateAndMinutes,
+} from './caregiverNotifications';
 
 /**
  * Worker de Agendamento e Lembretes (Substituto nativo do pg_cron + Edge Function send-medication-reminders)
@@ -30,11 +24,11 @@ export async function runMedicationReminderWorker() {
   let sent = 0;
   let failed = 0;
   let ignored = 0;
+  let caregiverOverdueAlerts = 0;
 
   try {
     await ensureOraclePostgresSchema(client);
-    const now = new Date();
-    const todayIso = now.toISOString().slice(0, 10);
+    const { todayIso, currentMinutes } = getLocalDateAndMinutes('America/Sao_Paulo');
 
     // 1. Encerrar automaticamente tratamentos temporários vencidos
     const expRes = await client.query(
@@ -50,18 +44,27 @@ export async function runMedicationReminderWorker() {
     );
     expiredFinished = expRes.rowCount || 0;
 
+    // 2. Verificar doses não tomadas após 1h (+60 min) e gerar notificações + push para cuidadores
+    const cgOverdue = await checkOverdueDosesForCaregivers(client, { timeZone: 'America/Sao_Paulo' }).catch(() => ({
+      alertsCreated: 0,
+      pushSent: 0,
+    }));
+    caregiverOverdueAlerts = cgOverdue.alertsCreated || 0;
+    sent += cgOverdue.pushSent || 0;
+
     if (!pushEnabled) {
       return {
         ok: true,
         expiredFinished,
-        sent: 0,
+        caregiverOverdueAlerts,
+        sent,
         failed: 0,
         ignored: 0,
-        note: 'VAPID keys não configuradas; encerramento de tratamentos temporários executado.',
+        note: 'VAPID keys não configuradas; alertas persistentes de cuidador e encerramento de tratamentos executados.',
       };
     }
 
-    // 2. Buscar medicamentos ativos, assinaturas push e vínculos de cuidadores
+    // 3. Buscar medicamentos ativos, assinaturas push e vínculos de cuidadores para lembretes de dose
     const medsRes = await client.query(
       `SELECT id, user_id, nome, dosagem, unidade, quantidade, horarios, dias_semana, treatment_type, start_date, end_date
        FROM medicamentos
@@ -101,12 +104,11 @@ export async function runMedicationReminderWorker() {
 
       const horarios = Array.isArray(med.horarios) ? med.horarios : [];
       for (const hora of horarios) {
-        const [h, m] = String(hora).split(':').map(Number);
-        if (isNaN(h) || isNaN(m)) continue;
+        const match = String(hora || '').trim().slice(0, 5).match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+        if (!match) continue;
 
-        const doseTime = new Date(now);
-        doseTime.setHours(h, m, 0, 0);
-        const diffMin = Math.floor((now.getTime() - doseTime.getTime()) / 60000);
+        const scheduledMinutes = Number(match[1]) * 60 + Number(match[2]);
+        const diffMin = currentMinutes - scheduledMinutes;
 
         let targetType = null;
         if (diffMin >= 0 && diffMin <= 4) targetType = 'DOSE';
@@ -115,24 +117,23 @@ export async function runMedicationReminderWorker() {
 
         if (!targetType) continue;
 
-        // Verifica se a dose já foi confirmada hoje
+        const cleanHora = `${match[1]}:${match[2]}`;
         const histCheck = await client.query(
           `SELECT id FROM historico_doses
-           WHERE med_id = $1 AND hora = $2 AND dose_date = $3 AND status IN ('confirmed', 'tomado')
+           WHERE med_id::text = $1::text AND LEFT(COALESCE(hora, ''), 5) = $2 AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $3 AND status IN ('confirmed', 'tomado', 'late', 'missed')
            LIMIT 1`,
-          [med.id, hora, todayIso]
+          [String(med.id), cleanHora, todayIso]
         );
         if (histCheck.rowCount > 0) {
           ignored++;
           continue;
         }
 
-        // Verifica idempotência em notification_logs
         const logCheck = await client.query(
           `SELECT id FROM notification_logs
-           WHERE med_id = $1 AND dose_hora = $2 AND data_referencia = $3 AND tipo = $4
+           WHERE med_id::text = $1::text AND dose_hora = $2 AND data_referencia = $3 AND tipo = $4
            LIMIT 1`,
-          [med.id, hora, todayIso, targetType]
+          [String(med.id), cleanHora, todayIso, targetType]
         );
         if (logCheck.rowCount > 0) {
           ignored++;
@@ -140,23 +141,23 @@ export async function runMedicationReminderWorker() {
         }
 
         let title = `💊 ${med.nome}`;
-        let body = `${med.dosagem || ''} · Horário: ${hora}`;
+        let body = `${med.dosagem || ''} · Horário: ${cleanHora}`;
         if (targetType === 'REMINDER_1') {
           title = `⚠️ Lembrete de Dose: ${med.nome}`;
-          body = `Você esqueceu? Dose agendada para ${hora}.`;
+          body = `Você esqueceu? Dose agendada para ${cleanHora}.`;
         } else if (targetType === 'REMINDER_2') {
           title = `🚨 Último Lembrete: ${med.nome}`;
-          body = `Não esqueça de tomar o seu medicamento! (${hora})`;
+          body = `Não esqueça de tomar o seu medicamento! (${cleanHora})`;
         }
 
         const payload = JSON.stringify({
           title,
           body,
-          tag: `dose-${med.id}-${hora}`,
+          tag: `dose-${med.id}-${cleanHora}`,
           medId: med.id,
-          hora,
-          doseId: `${med.id}-${hora.replace(':', '')}`,
-          url: `/?action=confirm&medId=${med.id}&hora=${hora}`,
+          hora: cleanHora,
+          doseId: `${med.id}-${cleanHora.replace(':', '')}`,
+          url: `/?action=confirm&medId=${med.id}&hora=${cleanHora}`,
         });
 
         let anySent = false;
@@ -172,7 +173,7 @@ export async function runMedicationReminderWorker() {
           } catch (err) {
             failed++;
             if (err?.statusCode === 404 || err?.statusCode === 410) {
-              await client.query(`DELETE FROM push_subscriptions WHERE id = $1`, [sub.id]);
+              await client.query(`DELETE FROM push_subscriptions WHERE id = $1`, [sub.id]).catch(() => {});
             }
           }
         }
@@ -180,10 +181,10 @@ export async function runMedicationReminderWorker() {
         if (targetType === 'REMINDER_2') {
           const patientName = patientNames.get(med.user_id) || 'Seu paciente';
           const cgPayload = JSON.stringify({
-            title: `🚨 Paciente Atrasado: ${med.nome}`,
-            body: `${patientName} esqueceu a dose das ${hora}.`,
-            tag: `cg-dose-${med.id}-${hora}`,
-            url: `/?tab=profile&view=caregiver_dash&cgTab=history`,
+            title: `⚠️ Dose Atrasada: ${med.nome}`,
+            body: `${patientName} ainda não confirmou a dose das ${cleanHora}.`,
+            tag: `cg-dose-${med.id}-${cleanHora}`,
+            url: '/cuidador',
           });
 
           for (const cgId of caregiverIds) {
@@ -199,7 +200,7 @@ export async function runMedicationReminderWorker() {
               } catch (err) {
                 failed++;
                 if (err?.statusCode === 404 || err?.statusCode === 410) {
-                  await client.query(`DELETE FROM push_subscriptions WHERE id = $1`, [cgSub.id]);
+                  await client.query(`DELETE FROM push_subscriptions WHERE id = $1`, [cgSub.id]).catch(() => {});
                 }
               }
             }
@@ -207,17 +208,43 @@ export async function runMedicationReminderWorker() {
         }
 
         if (anySent || userSubs.length === 0) {
-          await client.query(
-            `INSERT INTO notification_logs (id, user_id, med_id, dose_hora, data_referencia, tipo)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [crypto.randomUUID(), med.user_id, med.id, hora, todayIso, targetType]
-          );
+          await client
+            .query(
+              `INSERT INTO notification_logs (id, user_id, med_id, dose_hora, data_referencia, tipo)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               ON CONFLICT DO NOTHING`,
+              [crypto.randomUUID(), med.user_id, med.id, cleanHora, todayIso, targetType]
+            )
+            .catch(() => {});
         }
       }
     }
 
-    return { ok: true, expiredFinished, sent, failed, ignored, timestamp: now.toISOString() };
+    return {
+      ok: true,
+      expiredFinished,
+      caregiverOverdueAlerts,
+      sent,
+      failed,
+      ignored,
+      timestamp: new Date().toISOString(),
+    };
   } finally {
     client.release();
+  }
+}
+
+export function ensureOverdueCaregiverScheduler() {
+  if (typeof globalThis === 'undefined' || globalThis.__medicareReminderIntervalStarted) {
+    return;
+  }
+  if (process.env.NODE_ENV === 'test') return;
+  globalThis.__medicareReminderIntervalStarted = true;
+
+  const timer = setInterval(() => {
+    runMedicationReminderWorker().catch(() => {});
+  }, 180_000);
+  if (typeof timer?.unref === 'function') {
+    timer.unref();
   }
 }

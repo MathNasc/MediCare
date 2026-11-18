@@ -38,7 +38,10 @@ import {
   RefreshCw,
   Smartphone,
   Copy,
+  Bell,
 } from 'lucide-react';
+import { formatAuditLogEntry } from '@/lib/auditFormatter';
+import { subscribeToPush } from '@/lib/webPush';
 
 function readCookieValue(name) {
   if (typeof document === 'undefined') return '';
@@ -154,6 +157,13 @@ export default function CuidadorWebPage() {
   const [pairingModalData, setPairingModalData] = useState(null);
   const [pairingLoading, setPairingLoading] = useState(false);
   const [copiedPairingCode, setCopiedPairingCode] = useState(false);
+  const [notificationsList, setNotificationsList] = useState([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [vapidPublicKey, setVapidPublicKey] = useState('');
+  const [pushConfigured, setPushConfigured] = useState(false);
+  const [pushPermission, setPushPermission] = useState('default');
+  const [pushLoading, setPushLoading] = useState(false);
 
   // Form states (sem valores clínicos pré-definidos)
   const [inviteTokenInput, setInviteTokenInput] = useState('');
@@ -191,6 +201,9 @@ export default function CuidadorWebPage() {
   const ignoringPopRef = useRef(0);
   const lastBackPressAtRef = useRef(0);
   const toastTimerRef = useRef(null);
+  const seenNotifIdsRef = useRef(null);
+  const pushSubscribedRef = useRef(false);
+  const loadDataRef = useRef(null);
 
   const hasAnyOverlay =
     showRecoverModal ||
@@ -203,7 +216,8 @@ export default function CuidadorWebPage() {
     showStockModal ||
     showMobileMenuSheet ||
     showPatientPickerSheet ||
-    Boolean(pairingModalData);
+    Boolean(pairingModalData) ||
+    showNotificationsModal;
 
   currentTabRef.current = currentTab;
   isAuthenticatedRef.current = isAuthenticated;
@@ -233,6 +247,7 @@ export default function CuidadorWebPage() {
     setShowMobileMenuSheet(false);
     setShowPatientPickerSheet(false);
     setPairingModalData(null);
+    setShowNotificationsModal(false);
   }, []);
 
   const navigateToTab = useCallback(
@@ -466,6 +481,10 @@ export default function CuidadorWebPage() {
     setAppointments([]);
     setAuditLogs([]);
     setApprovalRequests([]);
+    setNotificationsList([]);
+    setUnreadNotifCount(0);
+    seenNotifIdsRef.current = null;
+    pushSubscribedRef.current = false;
     setSelectedPatientId(null);
     try {
       localStorage.removeItem('medicare_cuidador_jwt');
@@ -727,6 +746,184 @@ export default function CuidadorWebPage() {
     showToast('Sessão encerrada com segurança.');
   };
 
+  const savePushSubscriptionToServer = useCallback(
+    async (sub) => {
+      if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth || !currentUser?.id) return false;
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
+        const res = await apiFetch('/api/rest/v1/push_subscriptions?on_conflict=endpoint', {
+          method: 'POST',
+          body: JSON.stringify({
+            user_id: currentUser.id,
+            endpoint: sub.endpoint,
+            p256dh: sub.keys.p256dh,
+            auth: sub.keys.auth,
+            timezone: tz,
+            user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : 'caregiver-web',
+          }),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    [apiFetch, currentUser]
+  );
+
+  const showNativeBrowserAlert = useCallback(async (notifItem) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    const title = notifItem?.titulo || 'MediCare Cuidador';
+    const options = {
+      body: notifItem?.mensagem || 'Nova atualização de acompanhamento.',
+      icon: '/icon-192.png?v=5',
+      badge: '/icon-96.png?v=5',
+      tag: `medicare-cg-${notifItem?.id || Date.now()}`,
+      data: { url: '/cuidador' },
+    };
+    try {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        if (reg?.showNotification) {
+          await reg.showNotification(title, options);
+          return;
+        }
+      }
+    } catch {
+      // fallback to window Notification
+    }
+    try {
+      new Notification(title, options);
+    } catch {
+      // ignore notification fallback errors
+    }
+  }, []);
+
+  const fetchNotifications = useCallback(
+    async ({ fromPoll = false } = {}) => {
+      if (!isAuthenticated) return;
+      try {
+        const res = await apiFetch('/api/v1/caregiver/notifications');
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        const rows = Array.isArray(data.notifications) ? data.notifications : [];
+        const unread = typeof data.unreadCount === 'number'
+          ? data.unreadCount
+          : rows.filter((n) => !n.lida).length;
+
+        setNotificationsList(rows);
+        setUnreadNotifCount(unread);
+        if (data.vapidPublicKey) setVapidPublicKey(data.vapidPublicKey);
+        setPushConfigured(Boolean(data.pushConfigured));
+
+        if (seenNotifIdsRef.current === null) {
+          seenNotifIdsRef.current = new Set(rows.map((n) => String(n.id)));
+        } else {
+          const newlyArrived = rows.filter(
+            (n) => !n.lida && !seenNotifIdsRef.current.has(String(n.id))
+          );
+          rows.forEach((n) => seenNotifIdsRef.current.add(String(n.id)));
+
+          if (newlyArrived.length > 0) {
+            const top = newlyArrived[0];
+            showToast(top.titulo || 'Nova notificação de acompanhamento', top.tipo === 'atraso' ? 'error' : 'success', 5500);
+            showNativeBrowserAlert(top);
+            if (fromPoll && newlyArrived.some((n) => n.tipo === 'cuidador')) {
+              loadDataRef.current?.();
+            }
+          }
+        }
+
+        if (
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          Notification.permission === 'granted' &&
+          data.vapidPublicKey &&
+          !pushSubscribedRef.current
+        ) {
+          pushSubscribedRef.current = true;
+          subscribeToPush(data.vapidPublicKey)
+            .then((sub) => {
+              if (sub) return savePushSubscriptionToServer(sub);
+              return false;
+            })
+            .catch(() => {});
+        }
+      } catch {
+        // ignore transient polling failure
+      }
+    },
+    [isAuthenticated, apiFetch, showToast, showNativeBrowserAlert, savePushSubscriptionToServer]
+  );
+
+  const handleEnablePushNotifications = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      showToast('Seu navegador não suporta notificações.', 'error');
+      return;
+    }
+    setPushLoading(true);
+    try {
+      const perm = await Notification.requestPermission();
+      setPushPermission(perm);
+      if (perm !== 'granted') {
+        showToast('Permissão de notificação não concedida neste navegador.', 'error');
+        return;
+      }
+      if (vapidPublicKey) {
+        const sub = await subscribeToPush(vapidPublicKey);
+        if (sub) {
+          const saved = await savePushSubscriptionToServer(sub);
+          if (saved) {
+            pushSubscribedRef.current = true;
+          }
+        }
+      }
+      showToast('Notificações ativadas para este dispositivo!');
+    } catch {
+      showToast('Não foi possível ativar notificações neste dispositivo.', 'error');
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleMarkNotificationRead = async (notifId, navigateToDashboard = false) => {
+    setNotificationsList((prev) => prev.map((n) => (n.id === notifId ? { ...n, lida: true } : n)));
+    setUnreadNotifCount((prev) => Math.max(0, prev - 1));
+    try {
+      await apiFetch('/api/v1/caregiver/notifications', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: notifId }),
+      });
+    } catch {
+      // ignore network error
+    }
+    if (navigateToDashboard) {
+      setShowNotificationsModal(false);
+      navigateToTab('dashboard');
+      loadDataRef.current?.();
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    setNotificationsList((prev) => prev.map((n) => ({ ...n, lida: true })));
+    setUnreadNotifCount(0);
+    try {
+      await apiFetch('/api/v1/caregiver/notifications', {
+        method: 'PATCH',
+        body: JSON.stringify({ markAll: true }),
+      });
+      showToast('Notificações marcadas como lidas.');
+    } catch {
+      showToast('Erro ao atualizar notificações.', 'error');
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setPushPermission(Notification.permission);
+    }
+  }, [isAuthenticated]);
+
   // Carrega dados do cuidador e pacientes autorizados (somente vínculos ativos!)
   const loadData = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -806,11 +1003,32 @@ export default function CuidadorWebPage() {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, selectedPatientId, apiFetch]);
+    fetchNotifications({ fromPoll: false });
+  }, [isAuthenticated, selectedPatientId, apiFetch, fetchNotifications]);
+
+  loadDataRef.current = loadData;
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Verificação periódica de solicitações de confirmação e doses atrasadas (+1h)
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    const intervalId = setInterval(() => {
+      fetchNotifications({ fromPoll: true });
+    }, 30000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications({ fromPoll: true });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [isAuthenticated, fetchNotifications]);
 
   // Aceitar convite
   const handleAcceptInvite = async (e) => {
@@ -1945,6 +2163,24 @@ export default function CuidadorWebPage() {
 
             <button
               type="button"
+              onClick={() => {
+                fetchNotifications({ fromPoll: false });
+                setShowNotificationsModal(true);
+              }}
+              title="Notificações e alertas"
+              aria-label="Notificações e alertas"
+              className="relative inline-flex items-center justify-center min-w-[40px] min-h-[40px] px-2.5 rounded-xl bg-[#131d31] md:bg-slate-800/70 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <Bell size={16} className={`w-4 h-4 ${unreadNotifCount > 0 ? 'text-amber-300' : ''}`} />
+              {unreadNotifCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center border border-[#0b1120] tabular-nums">
+                  {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={loadData}
               title="Atualizar dados"
               aria-label="Atualizar dados"
@@ -2735,19 +2971,57 @@ export default function CuidadorWebPage() {
                 </div>
               ) : (
                 <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 divide-y divide-slate-800/80">
-                  {auditLogs.map((log) => (
-                    <div key={log.id} className="p-4 sm:p-5 text-xs space-y-1">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-bold text-blue-400">{log.action}</span>
-                        <span className="text-slate-400 tabular-nums">
-                          {new Date(log.created_at).toLocaleString('pt-BR')}
-                        </span>
+                  {auditLogs.map((log) => {
+                    const formatted = formatAuditLogEntry(log);
+                    const toneClasses =
+                      formatted.tone === 'emerald'
+                        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                        : formatted.tone === 'amber'
+                        ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                        : formatted.tone === 'rose'
+                        ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                        : formatted.tone === 'indigo'
+                        ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                        : formatted.tone === 'blue'
+                        ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+                        : 'bg-slate-800 text-slate-300 border-slate-700';
+
+                    return (
+                      <div key={log.id} className="p-4 sm:p-5 text-xs space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2 min-w-0">
+                            <span className={`px-2 py-0.5 rounded-md border text-[11px] font-semibold ${toneClasses}`}>
+                              {formatted.category}
+                            </span>
+                            <span className="font-bold text-white text-sm leading-snug">
+                              {formatted.title}
+                            </span>
+                          </div>
+                          <span className="text-slate-400 tabular-nums shrink-0">
+                            {new Date(log.created_at).toLocaleString('pt-BR')}
+                          </span>
+                        </div>
+
+                        {(formatted.contextSummary || formatted.actorLabel) && (
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-slate-300">
+                            {formatted.contextSummary && <span>{formatted.contextSummary}</span>}
+                            {formatted.contextSummary && formatted.actorLabel && (
+                              <span aria-hidden="true" className="text-slate-600">·</span>
+                            )}
+                            {formatted.actorLabel && (
+                              <span className="text-slate-400">
+                                Por: <strong className="text-slate-200 font-medium">{formatted.actorLabel}</strong>
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="text-slate-400 leading-relaxed">
+                          Motivo: <strong className="text-slate-200 font-medium">{formatted.reason}</strong>
+                        </div>
                       </div>
-                      <div className="text-slate-300">
-                        Motivo: <strong className="text-white font-medium">{log.reason || 'Ajuste registrado'}</strong>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -3691,6 +3965,139 @@ export default function CuidadorWebPage() {
               >
                 Concluir
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────── */}
+      {/* MODAL: CENTRAL DE NOTIFICAÇÕES DO CUIDADOR                 */}
+      {/* ─────────────────────────────────────────────────────────── */}
+      {showNotificationsModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setShowNotificationsModal(false)}
+        >
+          <div
+            className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-5 sm:p-6 max-w-lg w-full shadow-2xl max-h-[88vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden shrink-0" />
+            <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-300 shrink-0">
+                  <Bell size={18} className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-white truncate">Notificações e Alertas</h3>
+                  <p className="text-[11px] text-slate-400">
+                    {unreadNotifCount > 0
+                      ? `${unreadNotifCount} alerta(s) não lido(s)`
+                      : 'Todos os alertas visualizados'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {unreadNotifCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllNotificationsRead}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-300 text-[11px] font-semibold transition-colors"
+                  >
+                    Marcar todas
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowNotificationsModal(false)}
+                  aria-label="Fechar notificações"
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  <X size={16} className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {typeof window !== 'undefined' && 'Notification' in window && pushPermission !== 'granted' && (
+              <div className="mb-4 p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-semibold text-blue-200">
+                    {pushPermission === 'denied'
+                      ? 'Notificações bloqueadas no navegador'
+                      : 'Receba alertas na barra do aparelho'}
+                  </p>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    {pushPermission === 'denied'
+                      ? 'Libere a permissão de notificações nas configurações do navegador para ser avisado quando uma dose atrasar.'
+                      : pushConfigured
+                      ? 'Ative para receber avisos quando o paciente pedir confirmação ou passar de 1 hora sem tomar o remédio.'
+                      : 'Ative para receber avisos em tempo real sempre que o painel estiver em segundo plano.'}
+                  </p>
+                </div>
+                {pushPermission !== 'denied' && (
+                  <button
+                    type="button"
+                    disabled={pushLoading}
+                    onClick={handleEnablePushNotifications}
+                    className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    {pushLoading ? 'Ativando...' : 'Ativar Alertas'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="overflow-y-auto space-y-2.5 pr-1 flex-1">
+              {notificationsList.length === 0 ? (
+                <div className="text-center py-10 px-4 rounded-xl bg-[#0b1120] border border-slate-800/80 text-slate-400 text-xs leading-relaxed">
+                  Nenhuma notificação recente. Você será avisado automaticamente quando o paciente solicitar confirmação de dose ou ficar mais de 1 hora sem registrar a medicação.
+                </div>
+              ) : (
+                notificationsList.map((notif) => {
+                  const isOverdue = notif.tipo === 'atraso';
+                  const isCaregiverReq = notif.tipo === 'cuidador';
+                  return (
+                    <button
+                      key={notif.id}
+                      type="button"
+                      onClick={() => handleMarkNotificationRead(notif.id, true)}
+                      className={`w-full text-left p-3.5 rounded-xl border transition-colors space-y-1.5 ${
+                        notif.lida
+                          ? 'bg-[#0b1120]/70 border-slate-800/80 opacity-80 hover:opacity-100'
+                          : isOverdue
+                          ? 'bg-rose-950/25 border-rose-500/40 hover:border-rose-400/60'
+                          : 'bg-amber-950/20 border-amber-500/40 hover:border-amber-400/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                            isOverdue
+                              ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                              : isCaregiverReq
+                              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                              : 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+                          }`}
+                        >
+                          {isOverdue
+                            ? 'Atraso (+1h)'
+                            : isCaregiverReq
+                            ? 'Solicitação do paciente'
+                            : 'Aviso'}
+                        </span>
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 tabular-nums">
+                          {!notif.lida && (
+                            <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" aria-label="Não lida" />
+                          )}
+                          <span>{new Date(notif.created_at).toLocaleString('pt-BR')}</span>
+                        </div>
+                      </div>
+                      <p className="text-xs font-bold text-white leading-snug">{notif.titulo}</p>
+                      <p className="text-xs text-slate-300 leading-relaxed">{notif.mensagem}</p>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

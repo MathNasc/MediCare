@@ -293,6 +293,8 @@ async function handleRpcCall(client, fnName, args, userId) {
         };
       }
 
+      const medName = medRes.rows[0]?.nome || 'Medicamento';
+
       // 3. Se for marcação como não tomada ('missed'), exige justificativa clínica
       if (requestedStatus === 'missed' && (!reason || reason.length < 3)) {
         return {
@@ -330,7 +332,16 @@ async function handleRpcCall(client, fnName, args, userId) {
                 patientId,
                 actor,
                 JSON.stringify(existing.rows[0]),
-                JSON.stringify({ status: 'pending', scheduled_time: hora, scheduled_date: doseDate, actor_role: actorRole, origin: actionOrigin }),
+                JSON.stringify({
+                  status: 'pending',
+                  med_id: medId,
+                  med_nome: medName,
+                  scheduled_time: hora,
+                  scheduled_date: doseDate,
+                  actor_name: actorName,
+                  actor_role: actorRole,
+                  origin: actionOrigin,
+                }),
                 reason || 'Dose revertida para pendente',
               ]
             );
@@ -418,6 +429,8 @@ async function handleRpcCall(client, fnName, args, userId) {
               JSON.stringify(primaryRow),
               JSON.stringify({
                 status: finalStatus,
+                med_id: medId,
+                med_nome: medName,
                 scheduled_date: timing.cleanDate,
                 scheduled_time: timing.cleanScheduled,
                 actual_administration_time: timing.cleanActual,
@@ -521,6 +534,8 @@ async function handleRpcCall(client, fnName, args, userId) {
             auditAction,
             JSON.stringify({
               status: finalStatus,
+              med_id: medId,
+              med_nome: medName,
               scheduled_date: timing.cleanDate,
               scheduled_time: timing.cleanScheduled,
               actual_administration_time: timing.cleanActual,
@@ -645,6 +660,36 @@ async function handleRpcCall(client, fnName, args, userId) {
               .catch(() => {});
           }
         }
+        const actorRes = await client
+          .query(`SELECT nome FROM profiles WHERE id::text = $1::text LIMIT 1`, [String(actor)])
+          .catch(() => ({ rows: [] }));
+        const approverName = actorRes.rows[0]?.nome || 'Cuidador';
+        await client
+          .query(
+            `INSERT INTO audit_logs (id, patient_id, performed_by, action, old_value, new_value, reason)
+             VALUES ($1, $2, $3, $4, NULL, $5::jsonb, $6)`,
+            [
+              crypto.randomUUID(),
+              reqRow.patient_id,
+              actor,
+              finalStatus === 'approved' ? 'dose_approval_approved' : 'dose_approval_rejected',
+              JSON.stringify({
+                med_id: reqRow.med_id,
+                med_nome: reqRow.med_nome || 'Medicamento',
+                scheduled_time: reqRow.hora,
+                scheduled_date: reqRow.dose_date,
+                actor_name: approverName,
+                actor_role: 'cuidador',
+                origin: 'caregiver_web',
+              }),
+              reqRow.reason ||
+                (finalStatus === 'approved'
+                  ? 'Solicitação aprovada pelo cuidador'
+                  : 'Solicitação recusada pelo cuidador'),
+            ]
+          )
+          .catch(() => {});
+
         await client.query('COMMIT');
         return { status: 200, body: { success: true, id: reqRow.id, status: finalStatus } };
       } catch (err) {
@@ -661,9 +706,14 @@ async function handleRpcCall(client, fnName, args, userId) {
       }
       const limit = Math.max(1, Math.min(200, Number(args.p_limit) || 50));
       const res = await client.query(
-        `SELECT * FROM audit_logs
-         WHERE patient_id::text = $1::text
-         ORDER BY created_at DESC
+        `SELECT a.*,
+                p.nome AS actor_name,
+                COALESCE(a.new_value->>'med_nome', a.new_value->>'med_name', a.old_value->>'med_nome', m.nome) AS med_name
+         FROM audit_logs a
+         LEFT JOIN profiles p ON p.id::text = a.performed_by::text
+         LEFT JOIN medicamentos m ON m.id::text = COALESCE(a.new_value->>'med_id', a.old_value->>'med_id')
+         WHERE a.patient_id::text = $1::text
+         ORDER BY a.created_at DESC
          LIMIT $2`,
         [String(patientId), limit]
       );
