@@ -116,6 +116,7 @@ export default function CuidadorWebPage() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
   const [showNewMedModal, setShowNewMedModal] = useState(false);
+  const [medToDelete, setMedToDelete] = useState(null);
   const [showDoseModal, setShowDoseModal] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
@@ -162,6 +163,7 @@ export default function CuidadorWebPage() {
     showInviteModal ||
     showNewPatientModal ||
     showNewMedModal ||
+    Boolean(medToDelete) ||
     showDoseModal ||
     showAppointmentModal ||
     showStockModal ||
@@ -189,6 +191,7 @@ export default function CuidadorWebPage() {
     setShowInviteModal(false);
     setShowNewPatientModal(false);
     setShowNewMedModal(false);
+    setMedToDelete(null);
     setShowDoseModal(false);
     setShowAppointmentModal(false);
     setShowStockModal(false);
@@ -939,6 +942,32 @@ export default function CuidadorWebPage() {
       setShowNewMedModal(false);
       setNewMedForm(EMPTY_MED_FORM);
       setConfirmMedSave(false);
+      loadData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Desativar / Remover Medicamento da prescrição ativa (preserva histórico de doses)
+  const handleDeleteMedication = async () => {
+    if (!medToDelete || !selectedPatientId) return;
+    setActionLoading(true);
+    try {
+      const res = await apiFetch(`/api/rest/v1/medicamentos?id=eq.${medToDelete.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ativo: false,
+          status: 'cancelado',
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Falha ao remover medicamento');
+      }
+      showToast('Medicamento removido da prescrição ativa!');
+      setMedToDelete(null);
       loadData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -2390,6 +2419,16 @@ export default function CuidadorWebPage() {
                               </p>
                             </div>
                           </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setMedToDelete(med)}
+                            aria-label={`Remover ${med.nome}`}
+                            title="Remover da prescrição ativa"
+                            className="min-w-[36px] min-h-[36px] rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 hover:text-rose-300 flex items-center justify-center shrink-0 transition-colors"
+                          >
+                            <Trash2 size={15} className="w-4 h-4" />
+                          </button>
                         </div>
 
                         <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -3261,6 +3300,50 @@ export default function CuidadorWebPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────── */}
+      {/* MODAL: CONFIRMAR REMOÇÃO DE MEDICAMENTO                    */}
+      {/* ─────────────────────────────────────────────────────────── */}
+      {medToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
+                <Trash2 size={18} className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Remover Medicamento?</h3>
+                <p className="text-xs text-slate-400">
+                  {medToDelete.nome} ({medToDelete.dosagem})
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed mb-5">
+              O medicamento será desativado das prescrições de <strong>{selectedPatient?.nome}</strong> (Estoque atual:{' '}
+              <strong>{medToDelete.quantidade} un</strong>). O histórico de doses já registradas será preservado.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={() => setMedToDelete(null)}
+                className="min-h-[42px] px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={handleDeleteMedication}
+                className="min-h-[42px] px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
+              >
+                {actionLoading ? 'Removendo...' : 'Confirmar Remoção'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -218,7 +218,10 @@ export async function GET(request) {
     const [profileRes, medsRes, histRes, eventsRes, notesRes, algRes, condRes, contRes, profRes, cgRes, stockRes, approvalRes, notifRes] =
       await Promise.all([
         client.query('SELECT * FROM profiles WHERE id = $1 LIMIT 1', [userId]),
-        client.query('SELECT * FROM medicamentos WHERE user_id = $1 ORDER BY created_at ASC', [userId]),
+        client.query(
+          "SELECT * FROM medicamentos WHERE user_id = $1 AND COALESCE(ativo, true) = true AND COALESCE(status, 'ativo') <> 'cancelado' ORDER BY created_at ASC",
+          [userId]
+        ),
         client.query('SELECT * FROM historico_doses WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500', [userId]),
         client.query(
           "SELECT * FROM health_events WHERE user_id = $1 AND COALESCE(type, '') <> 'estoque' AND COALESCE(title, '') NOT ILIKE 'Reposição:%' AND COALESCE(title, '') NOT ILIKE 'Ajuste:%' ORDER BY date ASC",
@@ -439,6 +442,7 @@ export async function POST(request) {
   const deletedRecordIds = Array.isArray(body.deleted_record_ids)
     ? body.deleted_record_ids.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
     : [];
+  const syncAuthoritativeMeds = body.sync_authoritative_meds === true;
   const pendingDoseRequests = Array.isArray(body.pending_dose_requests)
     ? body.pending_dose_requests
     : Array.isArray(body.approval_requests)
@@ -512,12 +516,71 @@ export async function POST(request) {
       ]
     );
 
+    // Consolida todos os IDs excluídos (brutos e UUIDs determinísticos) antes dos upserts
+    const deletedSet = new Set(deletedRecordIds);
+    const deletedMedIdsToMatch = new Set(deletedRecordIds);
+    for (const rawDelId of deletedRecordIds) {
+      const medDetUuid = toDeterministicUuid(rawDelId, `med:${userId}`).toLowerCase();
+      deletedMedIdsToMatch.add(medDetUuid);
+      deletedSet.add(medDetUuid);
+      for (const pfx of ['event', 'note', 'alg', 'cond', 'ct', 'pr', 'sm', 'cg']) {
+        deletedSet.add(toDeterministicUuid(rawDelId, `${pfx}:${userId}`).toLowerCase());
+      }
+    }
+
+    if (deletedMedIdsToMatch.size > 0) {
+      const delMedArr = Array.from(deletedMedIdsToMatch);
+      await client
+        .query(
+          `UPDATE medicamentos
+           SET ativo = false, status = 'cancelado', updated_at = NOW()
+           WHERE user_id = $1
+             AND LOWER(id::text) = ANY($2::text[])
+             AND (COALESCE(ativo, true) = true OR COALESCE(status, 'ativo') <> 'cancelado')`,
+          [userId, delMedArr]
+        )
+        .catch(() => {});
+    }
+
+    if (deletedSet.size > 0) {
+      const allDelArr = Array.from(deletedSet);
+      await client
+        .query(`DELETE FROM health_events WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+        .catch(() => {});
+      await client
+        .query(`DELETE FROM notes WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+        .catch(() => {});
+      await client
+        .query(`DELETE FROM calendar_notes WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+        .catch(() => {});
+      await client
+        .query(`DELETE FROM allergies WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+        .catch(() => {});
+      await client
+        .query(`DELETE FROM health_conditions WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+        .catch(() => {});
+      await client
+        .query(`DELETE FROM emergency_contacts WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+        .catch(() => {});
+      await client
+        .query(`DELETE FROM healthcare_professionals WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+        .catch(() => {});
+    }
+
     // Mapa de IDs de medicamentos (ex: "med-123" -> UUID determinístico) para manter integridade com historico_doses e stock_movements
     const medIdMap = new Map();
 
     for (const m of meds) {
       const rawMedId = m.id || `med-${m.nome || Date.now()}`;
       const medUuid = toDeterministicUuid(rawMedId, `med:${userId}`);
+      if (
+        deletedSet.has(String(rawMedId).trim().toLowerCase()) ||
+        deletedSet.has(medUuid.toLowerCase()) ||
+        m.ativo === false ||
+        m.status === 'cancelado'
+      ) {
+        continue;
+      }
       medIdMap.set(rawMedId, medUuid);
 
       const horariosArr = Array.isArray(m.horarios)
@@ -609,6 +672,32 @@ export async function POST(request) {
         } else {
           throw medErr;
         }
+      }
+    }
+
+    if (syncAuthoritativeMeds) {
+      const activeMedUuids = Array.from(medIdMap.values()).map((id) => String(id).toLowerCase());
+      if (activeMedUuids.length > 0) {
+        await client.query(
+          `UPDATE medicamentos
+           SET ativo = false, status = 'cancelado', updated_at = NOW()
+           WHERE user_id = $1
+             AND COALESCE(ativo, true) = true
+             AND NOT (LOWER(id::text) = ANY($2::text[]))
+             AND COALESCE(created_at, NOW()) < NOW() - interval '15 seconds'
+             AND COALESCE(updated_at, NOW()) < NOW() - interval '15 seconds'`,
+          [userId, activeMedUuids]
+        );
+      } else {
+        await client.query(
+          `UPDATE medicamentos
+           SET ativo = false, status = 'cancelado', updated_at = NOW()
+           WHERE user_id = $1
+             AND COALESCE(ativo, true) = true
+             AND COALESCE(created_at, NOW()) < NOW() - interval '15 seconds'
+             AND COALESCE(updated_at, NOW()) < NOW() - interval '15 seconds'`,
+          [userId]
+        );
       }
     }
 
@@ -728,6 +817,9 @@ export async function POST(request) {
       }
       const evDate = parsePgDate(ev.date || ev.data) || new Date().toISOString().slice(0, 10);
       const evUuid = toDeterministicUuid(ev.id || `${evTitle}:${evDate}`, `event:${userId}`);
+      if (deletedSet.has(String(ev.id || '').trim().toLowerCase()) || deletedSet.has(evUuid.toLowerCase())) {
+        continue;
+      }
       await client.query(
         `INSERT INTO health_events (id, user_id, type, title, description, date, time, doctor, location)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -757,6 +849,9 @@ export async function POST(request) {
       if (!content) continue;
       const noteDate = parsePgDate(n.date || n.data) || new Date().toISOString().slice(0, 10);
       const noteUuid = toDeterministicUuid(n.id || `note:${noteDate}:${content.slice(0, 20)}`, `note:${userId}`);
+      if (deletedSet.has(String(n.id || '').trim().toLowerCase()) || deletedSet.has(noteUuid.toLowerCase())) {
+        continue;
+      }
 
       await client
         .query(
@@ -781,6 +876,7 @@ export async function POST(request) {
       const algName = a.name || a.nome || a.substancia || '';
       if (!algName) continue;
       const algUuid = toDeterministicUuid(a.id || algName, `alg:${userId}`);
+      if (deletedSet.has(String(a.id || '').trim().toLowerCase()) || deletedSet.has(algUuid.toLowerCase())) continue;
       await client.query(
         `INSERT INTO allergies (id, user_id, name, reaction, severity)
          VALUES ($1,$2,$3,$4,$5)
@@ -793,6 +889,7 @@ export async function POST(request) {
       const condName = c.name || c.nome || '';
       if (!condName) continue;
       const condUuid = toDeterministicUuid(c.id || condName, `cond:${userId}`);
+      if (deletedSet.has(String(c.id || '').trim().toLowerCase()) || deletedSet.has(condUuid.toLowerCase())) continue;
       await client.query(
         `INSERT INTO health_conditions (id, user_id, name, notes, diagnosed_at)
          VALUES ($1,$2,$3,$4,$5)
@@ -811,6 +908,7 @@ export async function POST(request) {
       const ctName = ct.name || ct.nome || '';
       if (!ctName) continue;
       const ctUuid = toDeterministicUuid(ct.id || `${ctName}:${ct.phone || ct.telefone}`, `ct:${userId}`);
+      if (deletedSet.has(String(ct.id || '').trim().toLowerCase()) || deletedSet.has(ctUuid.toLowerCase())) continue;
       const rel = ct.relationship || ct.relation || ct.relacao || 'Familiar';
       await client.query(
         `INSERT INTO emergency_contacts (id, user_id, name, relationship, relation, phone, priority)
@@ -824,6 +922,7 @@ export async function POST(request) {
       const prName = pr.name || pr.nome || '';
       if (!prName) continue;
       const prUuid = toDeterministicUuid(pr.id || `${prName}:${pr.crm || ''}`, `pr:${userId}`);
+      if (deletedSet.has(String(pr.id || '').trim().toLowerCase()) || deletedSet.has(prUuid.toLowerCase())) continue;
       const clinicVal = pr.clinic || pr.location || pr.clinica || null;
       await client.query(
         `INSERT INTO healthcare_professionals (id, user_id, name, specialty, phone, crm, clinic, location)
@@ -1088,7 +1187,6 @@ export async function POST(request) {
     }
 
     // Processa revogações explícitas de convites/cuidadores enviadas pelo app
-    const deletedSet = new Set(deletedRecordIds);
     for (const rawDelId of deletedRecordIds) {
       const delUuid = toDeterministicUuid(rawDelId, `cg:${userId}`);
       deletedSet.add(delUuid.toLowerCase());

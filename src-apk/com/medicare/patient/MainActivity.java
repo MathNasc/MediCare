@@ -170,6 +170,7 @@ public class MainActivity extends Activity {
     private String lastSyncTimestamp = "Sincronização automática ativa";
     private boolean backendStatusOk = true;
     private volatile boolean hasUnsyncedLocalChanges = false;
+    private volatile boolean lastPullSucceeded = false;
     private volatile long localMutationVersion = 0L;
     private final Object syncNetworkLock = new Object();
     private boolean isActivityResumed = false;
@@ -12998,7 +12999,7 @@ public class MainActivity extends Activity {
                 return pi.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "2.8.5";
+        return "2.8.6";
     }
 
     private int getCurrentAppVersionCode() {
@@ -13011,7 +13012,7 @@ public class MainActivity extends Activity {
                 return pi.versionCode;
             }
         } catch (Exception ignored) {}
-        return 285;
+        return 286;
     }
 
     private void checkForAppUpdate() {
@@ -15516,21 +15517,32 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                try {
-                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/rest/v1/" + table + "?id=eq." + Uri.encode(resolvedUuid));
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("DELETE");
-                    conn.setConnectTimeout(8000);
-                    conn.setReadTimeout(8000);
-                    if (!bearerToken.isEmpty()) {
-                        conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+                String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+                for (String base : baseCandidates) {
+                    if (base == null || base.trim().isEmpty()) continue;
+                    HttpURLConnection conn = null;
+                    try {
+                        URL url = new URL(base + "/api/rest/v1/" + table + "?id=eq." + Uri.encode(resolvedUuid));
+                        conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("DELETE");
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(8000);
+                        if (!bearerToken.isEmpty()) {
+                            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+                        }
+                        int code = conn.getResponseCode();
+                        if (code >= 200 && code < 300) {
+                            removeDeletedRecordId(rawId);
+                            removeDeletedRecordId(resolvedUuid);
+                            break;
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (conn != null) {
+                            try { conn.disconnect(); } catch (Exception ignored) {}
+                        }
                     }
-                    int code = conn.getResponseCode();
-                    if (code >= 200 && code < 300) {
-                        removeDeletedRecordId(rawId);
-                        removeDeletedRecordId(resolvedUuid);
-                    }
-                } catch (Exception ignored) {}
+                }
             }
         }).start();
     }
@@ -15642,6 +15654,9 @@ public class MainActivity extends Activity {
                 JSONObject rmRaw = remoteMeds.optJSONObject(r);
                 if (rmRaw == null) continue;
                 JSONObject rm = normalizeRemoteMed(rmRaw);
+                if (!rm.optBoolean("ativo", true) || "cancelado".equalsIgnoreCase(rm.optString("status", ""))) {
+                    continue;
+                }
                 String rId = rm.optString("id", "").trim();
                 if (rId.isEmpty()) continue;
                 if (deletedIds.contains(rId.toLowerCase(Locale.ROOT))) {
@@ -16102,22 +16117,39 @@ public class MainActivity extends Activity {
             if (!this.isLoggedIn) return false;
             final String patId = resolveCurrentAccountUserId();
             final String myEmail = this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
-            URL url = new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync?userId=" + Uri.encode(patId) + "&email=" + Uri.encode(myEmail));
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(8000);
-            int code = conn.getResponseCode();
-            if (code != 200) return false;
-            BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) {
-                sb.append(line);
+            String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+            JSONObject resp = null;
+            for (String base : baseCandidates) {
+                if (base == null || base.trim().isEmpty()) continue;
+                HttpURLConnection conn = null;
+                try {
+                    URL url = new URL(base + "/api/v1/sync?userId=" + Uri.encode(patId) + "&email=" + Uri.encode(myEmail));
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+                    int code = conn.getResponseCode();
+                    if (code != 200) continue;
+                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    br.close();
+                    JSONObject candidate = new JSONObject(sb.toString());
+                    if (candidate.optBoolean("ok", false)) {
+                        resp = candidate;
+                        break;
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (conn != null) {
+                        try { conn.disconnect(); } catch (Exception ignored) {}
+                    }
+                }
             }
-            br.close();
-            final JSONObject resp = new JSONObject(sb.toString());
-            if (!resp.optBoolean("ok", false)) return false;
+            if (resp == null || !resp.optBoolean("ok", false)) return false;
             if (!this.isLoggedIn) return false;
 
             String respUserId = resp.optString("userId", "").trim();
@@ -16129,6 +16161,8 @@ public class MainActivity extends Activity {
                     return false;
                 }
             }
+
+            this.lastPullSucceeded = true;
 
             JSONArray mArr = resp.optJSONArray("meds");
 
@@ -16313,19 +16347,11 @@ public class MainActivity extends Activity {
             try {
                 if (!this.isLoggedIn) return;
                 final long syncVersionAtStart = this.localMutationVersion;
+                this.lastPullSucceeded = false;
                 // First pull and merge any caregiver additions/updates so we never overwrite them
                 final boolean pulledChanges = pullAndMergeFromBackendSync();
 
-                HttpURLConnection httpURLConnection = (HttpURLConnection) new URL(EMBEDDED_BACKEND_URL + "/api/v1/sync").openConnection();
-                httpURLConnection.setRequestMethod("POST");
-                httpURLConnection.setConnectTimeout(8000);
-                httpURLConnection.setReadTimeout(8000);
                 boolean z2 = true;
-                httpURLConnection.setDoOutput(true);
-                httpURLConnection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-                if (!EMBEDDED_API_KEY.isEmpty()) {
-                    httpURLConnection.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
-                }
                 String patId = resolveCurrentAccountUserId();
                 JSONObject syncProfile = new JSONObject(this.profile.toString());
                 syncProfile.put("id", patId);
@@ -16403,30 +16429,58 @@ public class MainActivity extends Activity {
                 jSONObject.put("caregiver_relationships", this.caregivers);
                 jSONObject.put("caregivers", this.caregivers);
                 jSONObject.put("deleted_record_ids", new JSONArray(getDeletedRecordIds()));
+                jSONObject.put("sync_authoritative_meds", this.lastPullSucceeded);
                 jSONObject.put("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
                 jSONObject.put("approval_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
                 String syncBearer = this.prefs != null ? this.prefs.getString("auth_access_token", "").trim() : "";
-                if (!syncBearer.isEmpty()) {
-                    httpURLConnection.setRequestProperty("Authorization", "Bearer " + syncBearer);
-                }
                 byte[] bytes = jSONObject.toString().getBytes(StandardCharsets.UTF_8);
-                OutputStream outputStream = httpURLConnection.getOutputStream();
-                outputStream.write(bytes);
-                outputStream.close();
-                int responseCode = httpURLConnection.getResponseCode();
-                InputStream respStream = (responseCode < 200 || responseCode >= 400)
-                    ? httpURLConnection.getErrorStream()
-                    : httpURLConnection.getInputStream();
-                StringBuilder sb = new StringBuilder();
-                if (respStream != null) {
-                    BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(respStream, StandardCharsets.UTF_8));
-                    String readLine;
-                    while ((readLine = bufferedReader.readLine()) != null) {
-                        sb.append(readLine);
+
+                int responseCode = -1;
+                JSONObject jSONObject2 = new JSONObject();
+                String[] postCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+                for (String base : postCandidates) {
+                    if (base == null || base.trim().isEmpty()) continue;
+                    HttpURLConnection httpURLConnection = null;
+                    try {
+                        httpURLConnection = (HttpURLConnection) new URL(base + "/api/v1/sync").openConnection();
+                        httpURLConnection.setRequestMethod("POST");
+                        httpURLConnection.setConnectTimeout(8000);
+                        httpURLConnection.setReadTimeout(8000);
+                        httpURLConnection.setDoOutput(true);
+                        httpURLConnection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                        if (!EMBEDDED_API_KEY.isEmpty()) {
+                            httpURLConnection.setRequestProperty("x-api-key", EMBEDDED_API_KEY);
+                        }
+                        if (!syncBearer.isEmpty()) {
+                            httpURLConnection.setRequestProperty("Authorization", "Bearer " + syncBearer);
+                        }
+                        OutputStream outputStream = httpURLConnection.getOutputStream();
+                        outputStream.write(bytes);
+                        outputStream.close();
+                        responseCode = httpURLConnection.getResponseCode();
+                        InputStream respStream = (responseCode < 200 || responseCode >= 400)
+                            ? httpURLConnection.getErrorStream()
+                            : httpURLConnection.getInputStream();
+                        StringBuilder sb = new StringBuilder();
+                        if (respStream != null) {
+                            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(respStream, StandardCharsets.UTF_8));
+                            String readLine;
+                            while ((readLine = bufferedReader.readLine()) != null) {
+                                sb.append(readLine);
+                            }
+                            bufferedReader.close();
+                        }
+                        jSONObject2 = sb.length() > 0 ? new JSONObject(sb.toString()) : new JSONObject();
+                        if (responseCode >= 200 && responseCode < 300) {
+                            break;
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (httpURLConnection != null) {
+                            try { httpURLConnection.disconnect(); } catch (Exception ignored) {}
+                        }
                     }
-                    bufferedReader.close();
                 }
-                JSONObject jSONObject2 = sb.length() > 0 ? new JSONObject(sb.toString()) : new JSONObject();
                 if (responseCode < 200 || responseCode >= 300) {
                     z2 = false;
                 }
