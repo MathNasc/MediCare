@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="br.com.medicare.paciente"
-    android:versionCode="281"
-    android:versionName="2.8.1">
+    android:versionCode="282"
+    android:versionName="2.8.2">
 
     <uses-sdk
         android:minSdkVersion="24"
@@ -20,6 +20,7 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:label="MediCare Paciente"

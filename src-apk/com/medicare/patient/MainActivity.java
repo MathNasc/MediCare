@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
+import android.app.DownloadManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -14,6 +15,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -33,6 +35,7 @@ import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -168,6 +171,14 @@ public class MainActivity extends Activity {
     private final Object syncNetworkLock = new Object();
     private boolean isActivityResumed = false;
     private long lastHandledNotifConfirmMs = 0L;
+    private boolean isCheckingApkUpdate = false;
+    private String apkUpdateStatusText = "";
+    private boolean apkUpdateAvailable = false;
+    private int remoteApkVersionCode = 0;
+    private String remoteApkVersionName = "";
+    private String remoteApkDownloadUrl = "";
+    private long activeApkDownloadId = -1L;
+    private BroadcastReceiver apkDownloadCompleteReceiver = null;
     private final BroadcastReceiver notifActionUiReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -299,6 +310,17 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
         this.syncPollHandler.removeCallbacks(this.syncPollRunnable);
         super.onPause();
+    }
+
+    @Override // android.app.Activity
+    protected void onDestroy() {
+        if (this.apkDownloadCompleteReceiver != null) {
+            try {
+                unregisterReceiver(this.apkDownloadCompleteReceiver);
+            } catch (Exception ignored) {}
+            this.apkDownloadCompleteReceiver = null;
+        }
+        super.onDestroy();
     }
 
     private void ensureNotificationChannel() {
@@ -2595,8 +2617,65 @@ public class MainActivity extends Activity {
             });
             container.addView(dobBox);
 
-            final EditText sangueInput = createInput("Tipo Sanguíneo (Ex: O+, A+, B+)", this.profile.optString("tipo_sanguineo", ""));
-            container.addView(sangueInput);
+            final String[] bloodOptions = {"Não informar / Pular", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"};
+            String curBlood = this.profile.optString("tipo_sanguineo", this.profile.optString("blood_type", "")).trim();
+            int initBloodIdx = 0;
+            for (int i = 1; i < bloodOptions.length; i++) {
+                if (bloodOptions[i].equalsIgnoreCase(curBlood)) {
+                    initBloodIdx = i;
+                    break;
+                }
+            }
+            final int[] selectedBloodIdx = {initBloodIdx};
+
+            LinearLayout bloodBox = new LinearLayout(this);
+            bloodBox.setOrientation(0);
+            bloodBox.setGravity(16);
+            bloodBox.setBackground(shape(this.cBgMain, 12, this.cBorder, 1));
+            bloodBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout.LayoutParams bloodLp = new LinearLayout.LayoutParams(-1, -2);
+            bloodLp.bottomMargin = dp(10);
+            bloodBox.setLayoutParams(bloodLp);
+
+            final TextView bloodValueTv = new TextView(this);
+            bloodValueTv.setText(selectedBloodIdx[0] > 0
+                ? "🩸  Tipo Sanguíneo: " + bloodOptions[selectedBloodIdx[0]]
+                : "🩸  Tipo Sanguíneo (opcional)");
+            bloodValueTv.setTextColor(selectedBloodIdx[0] > 0 ? this.cTextMain : this.cTextLight);
+            bloodValueTv.setTextSize(sp(14.0f));
+            bloodValueTv.setSingleLine(true);
+            bloodValueTv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+            bloodBox.addView(bloodValueTv);
+
+            final TextView bloodCueTv = new TextView(this);
+            bloodCueTv.setText(selectedBloodIdx[0] > 0 ? "Alterar ⌄" : "Selecionar ⌄");
+            bloodCueTv.setTextColor(this.cPrimary);
+            bloodCueTv.setTextSize(sp(12.0f));
+            bloodCueTv.setTypeface(null, 1);
+            bloodCueTv.setPadding(dp(8), 0, 0, 0);
+            bloodBox.addView(bloodCueTv);
+
+            bloodBox.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showStyledSelectDialog("Tipo Sanguíneo", bloodOptions, selectedBloodIdx[0], new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int which) {
+                            selectedBloodIdx[0] = which;
+                            if (which > 0) {
+                                bloodValueTv.setText("🩸  Tipo Sanguíneo: " + bloodOptions[which]);
+                                bloodValueTv.setTextColor(MainActivity.this.cTextMain);
+                                bloodCueTv.setText("Alterar ⌄");
+                            } else {
+                                bloodValueTv.setText("🩸  Tipo Sanguíneo (opcional)");
+                                bloodValueTv.setTextColor(MainActivity.this.cTextLight);
+                                bloodCueTv.setText("Selecionar ⌄");
+                            }
+                        }
+                    });
+                }
+            });
+            container.addView(bloodBox);
 
             LinearLayout btnRow = new LinearLayout(this);
             btnRow.setOrientation(0);
@@ -2624,7 +2703,7 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     String n = nomeInput.getText().toString().trim();
                     String d = selectedDobIso[0] != null ? selectedDobIso[0].trim() : "";
-                    String s = sangueInput.getText().toString().trim();
+                    String s = selectedBloodIdx[0] > 0 ? bloodOptions[selectedBloodIdx[0]] : "";
                     if (!n.isEmpty()) try {
                         MainActivity.this.profile.put("nome", n);
                         MainActivity.this.profile.put("full_name", n);
@@ -2636,7 +2715,7 @@ public class MainActivity extends Activity {
                             MainActivity.this.profile.put("dob", isoDob);
                         } catch (Exception ignored) {}
                     }
-                    if (!s.isEmpty()) try {
+                    try {
                         MainActivity.this.profile.put("tipo_sanguineo", s);
                         MainActivity.this.profile.put("blood_type", s);
                     } catch (Exception ignored) {}
@@ -3266,7 +3345,7 @@ public class MainActivity extends Activity {
                                         .putBoolean("onboarding_completed", false)
                                         .putString("active_user_email", cleanEmail)
                                         .apply();
-                                    MainActivity.this.saveAll();
+                                    MainActivity.this.saveLocalStateOnly();
                                     Toast.makeText(MainActivity.this, "✓ Conta criada com sucesso! Bem-vindo(a), " + cleanNome, 1).show();
                                     MainActivity.this.render();
                                 } catch (Exception ignored) {}
@@ -3302,7 +3381,7 @@ public class MainActivity extends Activity {
                                 .putBoolean("onboarding_completed", false)
                                 .putString("active_user_email", cleanEmail)
                                 .apply();
-                            MainActivity.this.saveAll();
+                            MainActivity.this.saveLocalStateOnly();
                             MainActivity.this.render();
                             Toast.makeText(MainActivity.this, "Conta criada localmente! Sincronização pendente.", 1).show();
                         }
@@ -12919,7 +12998,277 @@ public class MainActivity extends Activity {
         rBat.addView(btnBatToggle);
         card.addView(rBat);
 
+        View div5 = new View(this);
+        div5.setBackgroundColor(this.cBorder);
+        div5.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        card.addView(div5);
+
+        // Row 6: Versão do Aplicativo & Atualização
+        String localVerName = getCurrentAppVersionName();
+        int localVerCode = getCurrentAppVersionCode();
+
+        LinearLayout rVer = new LinearLayout(this);
+        rVer.setOrientation(0);
+        rVer.setGravity(16);
+        rVer.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        TextView tvVerIcon = new TextView(this);
+        tvVerIcon.setText("📦");
+        tvVerIcon.setTextSize(sp(22.0f));
+        tvVerIcon.setPadding(0, 0, dp(14), 0);
+        rVer.addView(tvVerIcon);
+
+        LinearLayout verCol = new LinearLayout(this);
+        verCol.setOrientation(1);
+        verCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvVerTitle = new TextView(this);
+        tvVerTitle.setText("Versão do Aplicativo");
+        tvVerTitle.setTextColor(this.cTextMain);
+        tvVerTitle.setTextSize(sp(16.0f));
+        tvVerTitle.setTypeface(null, 1);
+        verCol.addView(tvVerTitle);
+
+        TextView tvVerSub = new TextView(this);
+        String verSubtitle = "Versão " + localVerName + " (Build " + localVerCode + ")";
+        if (this.apkUpdateAvailable && !this.remoteApkVersionName.isEmpty()) {
+            verSubtitle += "\nNova versão v" + this.remoteApkVersionName + " disponível!";
+        } else if (this.apkUpdateStatusText != null && !this.apkUpdateStatusText.isEmpty()) {
+            verSubtitle += "\n" + this.apkUpdateStatusText;
+        }
+        tvVerSub.setText(verSubtitle);
+        tvVerSub.setTextColor(this.apkUpdateAvailable ? this.cSuccess : this.cTextMuted);
+        tvVerSub.setTextSize(sp(13.0f));
+        tvVerSub.setPadding(0, dp(2), 0, 0);
+        verCol.addView(tvVerSub);
+
+        rVer.addView(verCol);
+
+        TextView btnCheckUpdate = new TextView(this);
+        if (this.isCheckingApkUpdate) {
+            btnCheckUpdate.setText("Verificando...");
+            btnCheckUpdate.setTextColor(this.cTextMuted);
+            btnCheckUpdate.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
+        } else if (this.apkUpdateAvailable) {
+            btnCheckUpdate.setText("Baixar v" + (this.remoteApkVersionName.isEmpty() ? "Nova" : this.remoteApkVersionName));
+            btnCheckUpdate.setTextColor(Color.WHITE);
+            btnCheckUpdate.setBackground(shape(this.cSuccess, 12, 0, 0));
+        } else {
+            btnCheckUpdate.setText("Verificar atualizações");
+            btnCheckUpdate.setTextColor(Color.WHITE);
+            btnCheckUpdate.setBackground(shape(this.cPrimary, 12, 0, 0));
+        }
+        btnCheckUpdate.setTextSize(sp(13.0f));
+        btnCheckUpdate.setTypeface(null, 1);
+        btnCheckUpdate.setGravity(17);
+        btnCheckUpdate.setPadding(dp(12), dp(10), dp(12), dp(10));
+        btnCheckUpdate.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (MainActivity.this.isCheckingApkUpdate) return;
+                if (MainActivity.this.apkUpdateAvailable) {
+                    MainActivity.this.showAppUpdateAvailableDialog();
+                } else {
+                    MainActivity.this.checkForAppUpdate();
+                }
+            }
+        });
+        rVer.addView(btnCheckUpdate);
+        card.addView(rVer);
+
         linearLayout.addView(card);
+    }
+
+    private String getCurrentAppVersionName() {
+        try {
+            PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (pi != null && pi.versionName != null && !pi.versionName.trim().isEmpty()) {
+                return pi.versionName.trim();
+            }
+        } catch (Exception ignored) {}
+        return "2.8.2";
+    }
+
+    private int getCurrentAppVersionCode() {
+        try {
+            PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (pi != null) {
+                if (Build.VERSION.SDK_INT >= 28) {
+                    return (int) pi.getLongVersionCode();
+                }
+                return pi.versionCode;
+            }
+        } catch (Exception ignored) {}
+        return 282;
+    }
+
+    private void checkForAppUpdate() {
+        this.isCheckingApkUpdate = true;
+        this.apkUpdateStatusText = "Consultando servidor...";
+        render();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/apk/version");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+                    int code = conn.getResponseCode();
+                    if (code != 200) {
+                        throw new Exception("HTTP " + code);
+                    }
+                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    br.close();
+                    JSONObject json = new JSONObject(sb.toString());
+                    final int remoteCode = json.optInt("versionCode", 0);
+                    final String remoteName = json.optString("versionName", "").trim();
+                    final boolean apkAvail = json.optBoolean("apkAvailable", true);
+                    String dlPath = json.optString("downloadUrl", "/api/apk").trim();
+                    if (dlPath.isEmpty()) dlPath = "/api/apk";
+                    final String fullDownloadUrl = dlPath.startsWith("http") ? dlPath : (EMBEDDED_BACKEND_URL + (dlPath.startsWith("/") ? dlPath : "/" + dlPath));
+
+                    final int localCode = getCurrentAppVersionCode();
+                    final String localName = getCurrentAppVersionName();
+                    final boolean hasNewer = apkAvail && (remoteCode > localCode || (remoteCode == localCode && !remoteName.isEmpty() && !remoteName.equals(localName)));
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            MainActivity.this.isCheckingApkUpdate = false;
+                            MainActivity.this.remoteApkVersionCode = remoteCode;
+                            MainActivity.this.remoteApkVersionName = remoteName;
+                            MainActivity.this.remoteApkDownloadUrl = fullDownloadUrl;
+                            MainActivity.this.apkUpdateAvailable = hasNewer;
+                            if (hasNewer) {
+                                MainActivity.this.apkUpdateStatusText = "Nova versão v" + remoteName + " disponível!";
+                                render();
+                                showAppUpdateAvailableDialog();
+                            } else {
+                                MainActivity.this.apkUpdateStatusText = "Atualizado ✓ (última versão instalada)";
+                                render();
+                                Toast.makeText(MainActivity.this, "✓ Aplicativo já está na versão mais recente (" + localName + ").", 0).show();
+                            }
+                        }
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            MainActivity.this.isCheckingApkUpdate = false;
+                            MainActivity.this.apkUpdateStatusText = "Não foi possível verificar agora";
+                            render();
+                            Toast.makeText(MainActivity.this, "Erro ao verificar atualizações. Tente novamente.", 1).show();
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    private void showAppUpdateAvailableDialog() {
+        String localVer = getCurrentAppVersionName() + " (Build " + getCurrentAppVersionCode() + ")";
+        String remoteVer = (this.remoteApkVersionName.isEmpty() ? "Nova" : this.remoteApkVersionName)
+            + (this.remoteApkVersionCode > 0 ? " (Build " + this.remoteApkVersionCode + ")" : "");
+        final String dlUrl = !this.remoteApkDownloadUrl.isEmpty()
+            ? this.remoteApkDownloadUrl
+            : (EMBEDDED_BACKEND_URL + "/api/apk");
+        final String verLabel = !this.remoteApkVersionName.isEmpty() ? this.remoteApkVersionName : "nova";
+
+        showStyledConfirmDialog(
+            "📦 Nova atualização disponível",
+            "Versão atual: " + localVer + "\nNova versão: " + remoteVer + "\n\nDeseja baixar e instalar o APK atualizado agora?",
+            "⬇️ Baixar e Atualizar",
+            "Agora não",
+            this.cPrimary,
+            new Runnable() {
+                @Override
+                public void run() {
+                    startApkUpdateDownload(dlUrl, verLabel);
+                }
+            }
+        );
+    }
+
+    private void startApkUpdateDownload(final String downloadUrl, final String versionLabel) {
+        try {
+            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)));
+                return;
+            }
+
+            if (this.apkDownloadCompleteReceiver != null) {
+                try {
+                    unregisterReceiver(this.apkDownloadCompleteReceiver);
+                } catch (Exception ignored) {}
+                this.apkDownloadCompleteReceiver = null;
+            }
+
+            DownloadManager.Request req = new DownloadManager.Request(Uri.parse(downloadUrl));
+            req.setTitle("MediCare Paciente v" + versionLabel);
+            req.setDescription("Baixando atualização do aplicativo...");
+            req.setMimeType("application/vnd.android.package-archive");
+            req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            String fileName = "MediCare-Paciente-v" + versionLabel.replaceAll("[^0-9A-Za-z._-]", "") + ".apk";
+            req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+
+            final long downloadId = dm.enqueue(req);
+            this.activeApkDownloadId = downloadId;
+            Toast.makeText(this, "⬇️ Baixando MediCare v" + versionLabel + "... Aguarde a conclusão.", 1).show();
+
+            this.apkDownloadCompleteReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    long completedId = intent != null ? intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) : -1L;
+                    if (completedId != downloadId) return;
+                    try {
+                        unregisterReceiver(this);
+                    } catch (Exception ignored) {}
+                    if (MainActivity.this.apkDownloadCompleteReceiver == this) {
+                        MainActivity.this.apkDownloadCompleteReceiver = null;
+                    }
+                    try {
+                        DownloadManager mgr = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+                        Uri apkUri = mgr != null ? mgr.getUriForDownloadedFile(downloadId) : null;
+                        if (apkUri != null) {
+                            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+                            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+                            installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            startActivity(installIntent);
+                        } else {
+                            startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                        }
+                    } catch (Exception ex) {
+                        try {
+                            startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                        } catch (Exception ignored) {
+                            Toast.makeText(MainActivity.this, "Download concluído! Abra o arquivo na pasta Downloads para instalar.", 1).show();
+                        }
+                    }
+                }
+            };
+
+            IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(this.apkDownloadCompleteReceiver, filter, 2);
+            } else {
+                registerReceiver(this.apkDownloadCompleteReceiver, filter);
+            }
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)));
+            } catch (Exception ignored) {
+                Toast.makeText(this, "Não foi possível iniciar o download da atualização.", 1).show();
+            }
+        }
     }
 
     private TextView makePersonalFieldLabel(String text) {
@@ -15770,8 +16119,12 @@ public class MainActivity extends Activity {
                 return false;
             }
 
+            final long pullStartMutationVersion = this.localMutationVersion;
+            final boolean allowOverwriteProfileFromServer = !this.hasUnsyncedLocalChanges && this.localMutationVersion == pullStartMutationVersion;
+            final boolean onboardingDone = this.prefs.getBoolean("onboarding_completed", false);
+
             boolean changed = false;
-            if (u != null) {
+            if (u != null && allowOverwriteProfileFromServer) {
                 if (!respUserId.isEmpty() && !respUserId.equals(this.profile.optString("id", ""))) {
                     this.profile.put("id", respUserId);
                     changed = true;
@@ -15844,10 +16197,14 @@ public class MainActivity extends Activity {
                 }
                 String uRole = optCleanString(u, "role", "");
                 if (!uRole.isEmpty()) {
-                    String prevRole = this.profile.optString("role", "");
-                    setProfileRoleValue(uRole);
-                    if (!prevRole.equals(this.profile.optString("role", ""))) {
-                        changed = true;
+                    boolean uIsPatient = "paciente".equalsIgnoreCase(uRole) || "patient".equalsIgnoreCase(uRole);
+                    boolean allowRoleOverwrite = onboardingDone || !isPatientProfileRole() || uIsPatient;
+                    if (allowRoleOverwrite) {
+                        String prevRole = this.profile.optString("role", "");
+                        setProfileRoleValue(uRole);
+                        if (!prevRole.equals(this.profile.optString("role", ""))) {
+                            changed = true;
+                        }
                     }
                 }
             }

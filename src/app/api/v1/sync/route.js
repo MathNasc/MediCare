@@ -419,10 +419,19 @@ export async function POST(request) {
     await client.query('BEGIN');
 
     // 1. Atualiza ou insere o perfil do paciente preservando campos existentes caso não venham preenchidos
+    const rawIncomingRole = String(user.role || user.user_role || '')
+      .trim()
+      .toLowerCase();
+    const mappedRole =
+      rawIncomingRole === 'patient'
+        ? 'paciente'
+        : rawIncomingRole === 'independent'
+        ? 'independente'
+        : rawIncomingRole;
     const cleanRole = ['paciente', 'cuidador', 'independente', 'medico', 'enfermeiro', 'clinica', 'farmacia', 'admin_sistema'].includes(
-      user.role || user.user_role
+      mappedRole
     )
-      ? user.role || user.user_role
+      ? mappedRole
       : 'independente';
 
     await client.query(
