@@ -548,7 +548,10 @@ export async function POST(request) {
         treatType,
         parsePgDate(m.start_date || m.startDate || m.data_inicio),
         parsePgDate(m.end_date || m.endDate || m.data_fim),
-        parsePgNumeric(m.treatment_days ?? m.treatmentDays ?? m.duracao_dias),
+        (() => {
+          const td = parsePgNumeric(m.treatment_days ?? m.treatmentDays ?? m.duracao_dias);
+          return td !== null ? Math.round(td) : null;
+        })(),
         importantForEmergency,
       ];
 
@@ -664,7 +667,7 @@ export async function POST(request) {
           h.confirmed_by || h.confirmedByName || user.nome || 'Paciente',
           h.confirmed_by_role || (cleanRole === 'cuidador' ? 'cuidador' : 'paciente'),
           h.origin || 'android_sync',
-          parsePgNumeric(h.atraso_minutos ?? h.delay_minutes) ?? 0,
+          Math.round(parsePgNumeric(h.atraso_minutos ?? h.delay_minutes) ?? 0),
           h.administered_at || null,
         ]
       );

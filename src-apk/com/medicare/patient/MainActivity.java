@@ -1888,6 +1888,11 @@ public class MainActivity extends Activity {
         this.aiSubView = "main";
         this.stockAuditFilterMedId = "";
         this.tabHistory.clear();
+        this.hasUnsyncedLocalChanges = false;
+        this.localMutationVersion++;
+        if (this.prefs != null) {
+            this.prefs.edit().putBoolean("has_unsynced_local_changes", false).apply();
+        }
     }
 
     private boolean isOriginalMatheusAccount(String id, String email, String nome) {
@@ -1897,32 +1902,6 @@ public class MainActivity extends Activity {
             return cleanNome.isEmpty() || cleanNome.startsWith("matheus");
         }
         return cleanNome.equals("matheus do nascimento araujo");
-    }
-
-    private boolean hasLeakedOldProfileData(JSONObject prof, JSONArray medsArr) {
-        if (prof == null) return false;
-        String id = prof.optString("id", "");
-        String email = prof.optString("email", "");
-        String nome = prof.optString("nome", "");
-        if (isOriginalMatheusAccount(id, email, nome)) {
-            return false;
-        }
-        if (medsArr != null) {
-            boolean hasSertralina = false;
-            boolean hasHidantalOrVenvanse = false;
-            for (int i = 0; i < medsArr.length(); i++) {
-                JSONObject m = medsArr.optJSONObject(i);
-                if (m != null) {
-                    String mn = m.optString("nome", "").trim().toLowerCase(Locale.ROOT);
-                    if (mn.contains("sertralina")) hasSertralina = true;
-                    if (mn.contains("hidantal") || mn.contains("venvanse")) hasHidantalOrVenvanse = true;
-                }
-            }
-            if (hasSertralina && hasHidantalOrVenvanse) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private String resolveCurrentAccountUserId() {
@@ -1959,7 +1938,6 @@ public class MainActivity extends Activity {
             if (this.profile == null) return;
             String emailKey = this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
             if (emailKey.isEmpty()) return;
-            if (hasLeakedOldProfileData(this.profile, this.meds)) return;
             JSONObject snap = new JSONObject();
             snap.put("profile", new JSONObject(this.profile.toString()));
             snap.put("meds", this.meds != null ? new JSONArray(this.meds.toString()) : new JSONArray());
@@ -1996,10 +1974,6 @@ public class MainActivity extends Activity {
                 return false;
             }
             JSONArray snapMeds = snap.optJSONArray("meds");
-            if (hasLeakedOldProfileData(snapProf, snapMeds)) {
-                this.prefs.edit().remove("user_snapshot_" + emailKey).apply();
-                return false;
-            }
             this.profile = snapProf;
             this.meds = snapMeds != null ? snapMeds : new JSONArray();
             this.doseLogs = snap.optJSONArray("dose_logs") != null ? snap.optJSONArray("dose_logs") : new JSONArray();
@@ -2016,82 +1990,12 @@ public class MainActivity extends Activity {
             this.pendingDoseRequests = snap.optJSONArray("pending_dose_requests") != null ? snap.optJSONArray("pending_dose_requests") : new JSONArray();
             sanitizeAllInMemoryData();
             deduplicateStockMovements();
-            this.prefs.edit().putBoolean("onboarding_completed", snap.optBoolean("onboarding_completed", true)).apply();
+            boolean snapOnboard = snap.optBoolean("onboarding_completed", true) || this.meds.length() > 0;
+            this.prefs.edit().putBoolean("onboarding_completed", snapOnboard).commit();
             return true;
         } catch (Exception e) {
             return false;
         }
-    }
-
-    private void wipeRemoteLeakedDataForUser(final String targetUserId, final String keepName, final String keepEmail, final String keepRole) {
-        if (targetUserId == null || targetUserId.trim().isEmpty()) return;
-        final String uid = targetUserId.trim();
-        if ("98e5cdc4-7866-43e5-9c90-ebb712ecd816".equalsIgnoreCase(uid)) {
-            return;
-        }
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String[][] deleteTargets = {
-                        {"historico_doses", "user_id"},
-                        {"stock_movements", "user_id"},
-                        {"medicamentos", "user_id"},
-                        {"health_events", "user_id"},
-                        {"notes", "user_id"},
-                        {"calendar_notes", "user_id"},
-                        {"allergies", "user_id"},
-                        {"health_conditions", "user_id"},
-                        {"emergency_contacts", "user_id"},
-                        {"healthcare_professionals", "user_id"},
-                        {"caregiver_relationships", "patient_id"}
-                    };
-                    for (int i = 0; i < deleteTargets.length; i++) {
-                        try {
-                            URL delUrl = new URL(EMBEDDED_BACKEND_URL + "/api/rest/v1/" + deleteTargets[i][0] + "?" + deleteTargets[i][1] + "=eq." + Uri.encode(uid));
-                            HttpURLConnection delConn = (HttpURLConnection) delUrl.openConnection();
-                            delConn.setRequestMethod("DELETE");
-                            delConn.setConnectTimeout(6000);
-                            delConn.setReadTimeout(6000);
-                            delConn.getResponseCode();
-                            delConn.disconnect();
-                        } catch (Exception ignored) {}
-                    }
-                    try {
-                        URL upsertUrl = new URL(EMBEDDED_BACKEND_URL + "/api/rest/v1/profiles");
-                        HttpURLConnection upsertConn = (HttpURLConnection) upsertUrl.openConnection();
-                        upsertConn.setRequestMethod("POST");
-                        upsertConn.setConnectTimeout(6000);
-                        upsertConn.setReadTimeout(6000);
-                        upsertConn.setDoOutput(true);
-                        upsertConn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-                        upsertConn.setRequestProperty("Prefer", "resolution=merge-duplicates");
-                        JSONObject cleanProf = new JSONObject();
-                        cleanProf.put("id", uid);
-                        cleanProf.put("nome", keepName != null && !keepName.isEmpty() ? keepName : "Paciente");
-                        if (keepEmail != null && !keepEmail.isEmpty()) cleanProf.put("email", keepEmail);
-                        cleanProf.put("role", keepRole != null && !keepRole.isEmpty() ? keepRole : "independente");
-                        cleanProf.put("social_name", JSONObject.NULL);
-                        cleanProf.put("dob", JSONObject.NULL);
-                        cleanProf.put("sex", JSONObject.NULL);
-                        cleanProf.put("cpf", JSONObject.NULL);
-                        cleanProf.put("phone", JSONObject.NULL);
-                        cleanProf.put("address", JSONObject.NULL);
-                        cleanProf.put("weight", JSONObject.NULL);
-                        cleanProf.put("height", JSONObject.NULL);
-                        cleanProf.put("blood_type", JSONObject.NULL);
-                        cleanProf.put("foto_url", JSONObject.NULL);
-                        byte[] bodyBytes = cleanProf.toString().getBytes(StandardCharsets.UTF_8);
-                        OutputStream os = upsertConn.getOutputStream();
-                        os.write(bodyBytes);
-                        os.close();
-                        upsertConn.getResponseCode();
-                        upsertConn.disconnect();
-                    } catch (Exception ignored) {}
-                    MainActivity.this.prefs.edit().putBoolean("v257_remote_cleaned_" + uid, true).apply();
-                } catch (Exception ignored) {}
-            }
-        }).start();
     }
 
     private void loadOrInitData() {
@@ -2132,40 +2036,17 @@ public class MainActivity extends Activity {
                 if ("maria.silva@email.com".equalsIgnoreCase(this.profile.optString("email", ""))) {
                     this.isLoggedIn = false;
                     resetActiveSessionData();
-                    this.prefs.edit().putBoolean("is_logged_in", false).putBoolean("onboarding_completed", false).apply();
+                    this.prefs.edit().putBoolean("is_logged_in", false).putBoolean("onboarding_completed", false).commit();
                     saveLocalStateOnly();
                     return;
                 }
 
-                String curId = this.profile.optString("id", "").trim();
-                String curEmail = this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
-                String curNome = this.profile.optString("nome", "").trim();
-                boolean notOriginalUser = !isOriginalMatheusAccount(curId, curEmail, curNome);
-                boolean needsCleanup = hasLeakedOldProfileData(this.profile, this.meds)
-                    || (notOriginalUser && !this.prefs.getBoolean("v257_account_isolation_cleaned", false));
-
-                if (needsCleanup) {
-                    String cleanId = resolveCurrentAccountUserId();
-                    String cleanRole = isPatientProfileRole() ? "paciente" : "independente";
-                    if (!curEmail.isEmpty()) {
-                        this.prefs.edit().remove("user_snapshot_" + curEmail).apply();
-                    }
-                    resetActiveSessionData();
-                    this.profile.put("id", cleanId);
-                    this.profile.put("nome", curNome);
-                    this.profile.put("full_name", curNome);
-                    this.profile.put("email", curEmail);
-                    setProfileRoleValue(cleanRole);
-                    this.prefs.edit()
-                        .putBoolean("onboarding_completed", false)
-                        .putBoolean("v257_account_isolation_cleaned", true)
-                        .apply();
-                    saveLocalStateOnly();
-                    wipeRemoteLeakedDataForUser(cleanId, curNome, curEmail, cleanRole);
-                } else {
-                    this.prefs.edit().putBoolean("v257_account_isolation_cleaned", true).apply();
-                    saveUserSnapshot();
+                this.hasUnsyncedLocalChanges = this.prefs.getBoolean("has_unsynced_local_changes", false);
+                if (!this.prefs.getBoolean("onboarding_completed", false) && this.meds != null && this.meds.length() > 0) {
+                    this.prefs.edit().putBoolean("onboarding_completed", true).commit();
                 }
+                this.prefs.edit().putBoolean("v257_account_isolation_cleaned", true).apply();
+                saveUserSnapshot();
             } else {
                 this.isLoggedIn = false;
                 resetActiveSessionData();
@@ -2180,6 +2061,7 @@ public class MainActivity extends Activity {
     private void saveLocalStateOnly() {
         this.prefs.edit()
             .putBoolean("is_logged_in", this.isLoggedIn)
+            .putBoolean("has_unsynced_local_changes", this.hasUnsyncedLocalChanges)
             .putBoolean("dark_mode", this.isDarkMode)
             .putBoolean("high_contrast", this.isHighContrast)
             .putBoolean("accessibility_mode", this.isAccessibilityMode)
@@ -2199,7 +2081,7 @@ public class MainActivity extends Activity {
             .putString("caregivers", this.caregivers.toString())
             .putString("ai_messages", this.aiMessages.toString())
             .putString("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests.toString() : "[]")
-            .apply();
+            .commit();
         if (this.isLoggedIn) {
             saveUserSnapshot();
         }
@@ -2214,7 +2096,7 @@ public class MainActivity extends Activity {
         this.isRegisterMode = false;
         scheduleAllMedicationAlarms();
         resetActiveSessionData();
-        this.prefs.edit().putBoolean("onboarding_completed", false).remove("active_user_email").apply();
+        this.prefs.edit().putBoolean("onboarding_completed", false).remove("active_user_email").commit();
         saveLocalStateOnly();
         render();
     }
@@ -2852,7 +2734,7 @@ public class MainActivity extends Activity {
             addMedBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
+                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).commit();
                     MainActivity.this.saveAll();
                     MainActivity.this.activeTab = "meds";
                     MainActivity.this.render();
@@ -2869,7 +2751,7 @@ public class MainActivity extends Activity {
             finishBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
+                    MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).commit();
                     MainActivity.this.saveAll();
                     MainActivity.this.render();
                 }
@@ -3217,15 +3099,19 @@ public class MainActivity extends Activity {
                                     }
                                     if (!restored) {
                                         MainActivity.this.setProfileRoleValue(userRole);
-                                        MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).apply();
+                                        MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).commit();
                                     }
+                                    MainActivity.this.hasUnsyncedLocalChanges = false;
                                     MainActivity.this.isLoggedIn = true;
                                     MainActivity.this.isRegisterMode = false;
-                                    MainActivity.this.prefs.edit().putString("active_user_email", cleanEmail).apply();
+                                    MainActivity.this.prefs.edit()
+                                        .putString("active_user_email", cleanEmail)
+                                        .putBoolean("has_unsynced_local_changes", false)
+                                        .commit();
                                     MainActivity.this.saveLocalStateOnly();
                                     Toast.makeText(MainActivity.this, "✓ Bem-vindo de volta!", 0).show();
                                     MainActivity.this.render();
-                                    MainActivity.this.pullFromBackendIfEmptyOrUpdated();
+                                    MainActivity.this.pullFromBackendIfEmptyOrUpdated(true);
                                 } catch (Exception ignored) {}
                             }
                         });
@@ -3338,13 +3224,15 @@ public class MainActivity extends Activity {
                                     MainActivity.this.profile.put("nome", cleanNome);
                                     MainActivity.this.profile.put("full_name", cleanNome);
                                     MainActivity.this.setProfileRoleValue("independente");
+                                    MainActivity.this.hasUnsyncedLocalChanges = false;
                                     MainActivity.this.isLoggedIn = true;
                                     MainActivity.this.isRegisterMode = false;
                                     MainActivity.this.onboardingStep = 0;
                                     MainActivity.this.prefs.edit()
                                         .putBoolean("onboarding_completed", false)
+                                        .putBoolean("has_unsynced_local_changes", false)
                                         .putString("active_user_email", cleanEmail)
-                                        .apply();
+                                        .commit();
                                     MainActivity.this.saveLocalStateOnly();
                                     Toast.makeText(MainActivity.this, "✓ Conta criada com sucesso! Bem-vindo(a), " + cleanNome, 1).show();
                                     MainActivity.this.render();
@@ -3374,13 +3262,15 @@ public class MainActivity extends Activity {
                                 MainActivity.this.profile.put("full_name", cleanNome);
                                 MainActivity.this.setProfileRoleValue("independente");
                             } catch (Exception ignored) {}
+                            MainActivity.this.hasUnsyncedLocalChanges = false;
                             MainActivity.this.isLoggedIn = true;
                             MainActivity.this.isRegisterMode = false;
                             MainActivity.this.onboardingStep = 0;
                             MainActivity.this.prefs.edit()
                                 .putBoolean("onboarding_completed", false)
+                                .putBoolean("has_unsynced_local_changes", false)
                                 .putString("active_user_email", cleanEmail)
-                                .apply();
+                                .commit();
                             MainActivity.this.saveLocalStateOnly();
                             MainActivity.this.render();
                             Toast.makeText(MainActivity.this, "Conta criada localmente! Sincronização pendente.", 1).show();
@@ -13086,7 +12976,7 @@ public class MainActivity extends Activity {
                 return pi.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "2.8.2";
+        return "2.8.3";
     }
 
     private int getCurrentAppVersionCode() {
@@ -13099,7 +12989,7 @@ public class MainActivity extends Activity {
                 return pi.versionCode;
             }
         } catch (Exception ignored) {}
-        return 282;
+        return 283;
     }
 
     private void checkForAppUpdate() {
@@ -16109,15 +15999,6 @@ public class MainActivity extends Activity {
             }
 
             JSONArray mArr = resp.optJSONArray("meds");
-            if (hasLeakedOldProfileData(this.profile, mArr)) {
-                wipeRemoteLeakedDataForUser(
-                    patId,
-                    this.profile.optString("nome", ""),
-                    myEmail,
-                    this.profile.optString("role", "independente")
-                );
-                return false;
-            }
 
             final long pullStartMutationVersion = this.localMutationVersion;
             final boolean allowOverwriteProfileFromServer = !this.hasUnsyncedLocalChanges && this.localMutationVersion == pullStartMutationVersion;
@@ -16396,27 +16277,28 @@ public class MainActivity extends Activity {
                 outputStream.write(bytes);
                 outputStream.close();
                 int responseCode = httpURLConnection.getResponseCode();
-                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader((responseCode < 200 || responseCode >= 400) ? httpURLConnection.getErrorStream() : httpURLConnection.getInputStream(), StandardCharsets.UTF_8));
+                InputStream respStream = (responseCode < 200 || responseCode >= 400)
+                    ? httpURLConnection.getErrorStream()
+                    : httpURLConnection.getInputStream();
                 StringBuilder sb = new StringBuilder();
-                while (true) {
-                    String readLine = bufferedReader.readLine();
-                    if (readLine == null) {
-                        break;
-                    } else {
+                if (respStream != null) {
+                    BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(respStream, StandardCharsets.UTF_8));
+                    String readLine;
+                    while ((readLine = bufferedReader.readLine()) != null) {
                         sb.append(readLine);
                     }
+                    bufferedReader.close();
                 }
-                bufferedReader.close();
-                JSONObject jSONObject2 = new JSONObject(sb.toString());
-                if (responseCode != 200) {
+                JSONObject jSONObject2 = sb.length() > 0 ? new JSONObject(sb.toString()) : new JSONObject();
+                if (responseCode < 200 || responseCode >= 300) {
                     z2 = false;
                 }
                 String returnedUserId = jSONObject2.optString("userId", "").trim();
-                if (!returnedUserId.isEmpty() && patId.equalsIgnoreCase(returnedUserId)) {
+                if (!returnedUserId.isEmpty() && !returnedUserId.equalsIgnoreCase(patId)) {
                     this.profile.put("id", returnedUserId);
                     this.prefs.edit().putString("profile", this.profile.toString()).apply();
                 }
-                final boolean optBoolean = jSONObject2.optBoolean("ok", z2);
+                final boolean optBoolean = (responseCode >= 200 && responseCode < 300) && jSONObject2.optBoolean("ok", z2);
                 final boolean noNewerLocalMutation = (this.localMutationVersion == syncVersionAtStart);
                 if (optBoolean && noNewerLocalMutation) {
                     this.hasUnsyncedLocalChanges = false;
@@ -16428,15 +16310,18 @@ public class MainActivity extends Activity {
                         JSONObject dl = this.doseLogs.optJSONObject(i);
                         if (dl != null) dl.remove("_local_unsynced");
                     }
+                    if (this.prefs != null) {
+                        this.prefs.edit().putBoolean("has_unsynced_local_changes", false).commit();
+                    }
                 }
                 final String format = new SimpleDateFormat(getDeviceDatePattern() + " HH:mm", getDeviceLocale()).format(new Date());
                 runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda8
                     @Override // java.lang.Runnable
                     public final void run() {
-                        if (pulledChanges && MainActivity.this.localMutationVersion == syncVersionAtStart) {
+                        if ((pulledChanges || optBoolean) && MainActivity.this.localMutationVersion == syncVersionAtStart) {
                             MainActivity.this.saveLocalStateOnly();
                             MainActivity.this.scheduleAllMedicationAlarms();
-                            if (!("ai".equals(MainActivity.this.activeTab) && "chat".equals(MainActivity.this.aiSubView))) {
+                            if (pulledChanges && !("ai".equals(MainActivity.this.activeTab) && "chat".equals(MainActivity.this.aiSubView))) {
                                 MainActivity.this.render();
                             }
                         }
@@ -16455,9 +16340,18 @@ public class MainActivity extends Activity {
     }
 
     private void pullFromBackendIfEmptyOrUpdated() {
+        pullFromBackendIfEmptyOrUpdated(false);
+    }
+
+    private void pullFromBackendIfEmptyOrUpdated(final boolean notifyOnRestore) {
         if (!this.isLoggedIn) {
             return;
         }
+        if (this.hasUnsyncedLocalChanges) {
+            syncWithBackendSilently(false);
+            return;
+        }
+        final int medsCountBefore = this.meds != null ? this.meds.length() : 0;
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -16480,6 +16374,9 @@ public class MainActivity extends Activity {
                                     MainActivity.this.scheduleAllMedicationAlarms();
                                     if (!("ai".equals(MainActivity.this.activeTab) && "chat".equals(MainActivity.this.aiSubView))) {
                                         MainActivity.this.render();
+                                    }
+                                    if (notifyOnRestore && medsCountBefore == 0 && MainActivity.this.meds != null && MainActivity.this.meds.length() > 0) {
+                                        Toast.makeText(MainActivity.this, "✓ Dados e medicamentos restaurados da nuvem!", 0).show();
                                     }
                                 }
                             });
