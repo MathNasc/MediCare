@@ -235,7 +235,17 @@ export async function GET(request) {
           .catch(() => ({ rows: [] })),
         client.query('SELECT * FROM healthcare_professionals WHERE user_id = $1', [userId]).catch(() => ({ rows: [] })),
         client
-          .query('SELECT * FROM caregiver_relationships WHERE patient_id = $1', [userId])
+          .query(
+            `SELECT cr.*,
+                    cp.nome AS caregiver_profile_name,
+                    cp.email AS caregiver_profile_email
+             FROM caregiver_relationships cr
+             LEFT JOIN profiles cp ON cp.id = cr.caregiver_id
+             WHERE cr.patient_id = $1
+               AND cr.status IN ('pending', 'active')
+             ORDER BY cr.created_at DESC`,
+            [userId]
+          )
           .catch(() => ({ rows: [] })),
         client
           .query('SELECT * FROM stock_movements WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200', [userId])
@@ -296,6 +306,28 @@ export async function GET(request) {
       notes: cleanNullableText(row.notes),
     }));
 
+    const cleanCaregivers = cgRes.rows.map((row) => {
+      const isActive = row.status === 'active';
+      const resolvedName =
+        cleanNullableText(row.caregiver_profile_name) ||
+        cleanNullableText(row.invite_email) ||
+        (isActive ? 'Cuidador Vinculado' : 'Novo Cuidador (Aguardando vínculo)');
+      const resolvedStatus = isActive ? 'Ativo' : 'Pendente';
+      const resolvedRel =
+        cleanNullableText(row.relationship_label) || (isActive ? 'Familiar' : 'Pendente');
+      return {
+        ...row,
+        nome: resolvedName,
+        caregiver_name: resolvedName,
+        relacao: resolvedRel,
+        relationship: resolvedRel,
+        codigo_convite: row.invite_token || '',
+        invite_code: row.invite_token || '',
+        status: resolvedStatus,
+        raw_status: row.status,
+      };
+    });
+
     return NextResponse.json(
       {
         ok: true,
@@ -319,8 +351,8 @@ export async function GET(request) {
         emergency_contacts: contRes.rows,
         professionals: profRes.rows,
         healthcare_professionals: profRes.rows,
-        caregivers: cgRes.rows,
-        caregiver_relationships: cgRes.rows,
+        caregivers: cleanCaregivers,
+        caregiver_relationships: cleanCaregivers,
         stock_movements: cleanStockMovements,
         approval_requests: approvalRes.rows,
         pending_dose_requests: approvalRes.rows.filter(r => r.status === 'pending'),
@@ -399,6 +431,14 @@ export async function POST(request) {
     ? body.healthcare_professionals
     : [];
   const stockMovements = Array.isArray(body.stock_movements) ? body.stock_movements : [];
+  const caregiverRelationships = Array.isArray(body.caregiver_relationships)
+    ? body.caregiver_relationships
+    : Array.isArray(body.caregivers)
+    ? body.caregivers
+    : [];
+  const deletedRecordIds = Array.isArray(body.deleted_record_ids)
+    ? body.deleted_record_ids.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
+    : [];
   const pendingDoseRequests = Array.isArray(body.pending_dose_requests)
     ? body.pending_dose_requests
     : Array.isArray(body.approval_requests)
@@ -1047,6 +1087,109 @@ export async function POST(request) {
       }
     }
 
+    // Processa revogações explícitas de convites/cuidadores enviadas pelo app
+    const deletedSet = new Set(deletedRecordIds);
+    for (const rawDelId of deletedRecordIds) {
+      const delUuid = toDeterministicUuid(rawDelId, `cg:${userId}`);
+      deletedSet.add(delUuid.toLowerCase());
+      const revokedRows = await client
+        .query(
+          `UPDATE caregiver_relationships
+           SET status = 'revoked', revoked_at = COALESCE(revoked_at, NOW()), updated_at = NOW()
+           WHERE patient_id = $1 AND (id::text = $2::text OR id::text = $3::text) AND status <> 'revoked'
+           RETURNING caregiver_id`,
+          [userId, rawDelId, delUuid]
+        )
+        .catch(() => ({ rows: [] }));
+      for (const r of revokedRows.rows) {
+        if (r.caregiver_id) {
+          await client
+            .query(
+              `UPDATE cuidadores SET status = 'recusado' WHERE paciente_id = $1 AND cuidador_id = $2`,
+              [userId, r.caregiver_id]
+            )
+            .catch(() => {});
+        }
+      }
+    }
+
+    // Sincroniza convites e vínculos de cuidadores gerados pelo paciente
+    for (const cg of caregiverRelationships) {
+      if (!cg || typeof cg !== 'object') continue;
+      const rawCgId = String(cg.id || cg.codigo_convite || cg.invite_code || cg.invite_token || '').trim();
+      if (!rawCgId) continue;
+      const cgUuid = toDeterministicUuid(rawCgId, `cg:${userId}`);
+      if (deletedSet.has(rawCgId.toLowerCase()) || deletedSet.has(cgUuid.toLowerCase())) {
+        continue;
+      }
+      const rawToken = cleanNullableText(cg.invite_token || cg.invite_code || cg.codigo_convite);
+      const cleanToken = rawToken ? rawToken.toUpperCase() : null;
+      const rawSt = String(cg.raw_status || cg.status || '').trim().toLowerCase();
+      let dbStatus = 'pending';
+      if (rawSt === 'active' || rawSt === 'ativo') dbStatus = 'active';
+      else if (rawSt === 'revoked' || rawSt === 'revogado') dbStatus = 'revoked';
+      else if (rawSt === 'declined' || rawSt === 'recusado') dbStatus = 'declined';
+
+      const cleanCaregiverId = isValidUuid(cg.caregiver_id) ? cg.caregiver_id.trim() : null;
+      if (dbStatus === 'active' && !cleanCaregiverId) {
+        dbStatus = 'pending';
+      }
+
+      const cleanPerm = ['viewer', 'caregiver', 'admin'].includes(String(cg.permission_level || '').toLowerCase())
+        ? String(cg.permission_level).toLowerCase()
+        : 'caregiver';
+      const cleanRelLabel = cleanNullableText(cg.relationship_label || cg.relacao || cg.relationship);
+      const cleanInviteEmail = cleanNullableText(cg.invite_email || cg.email);
+
+      let targetCgId = cgUuid;
+      if (cleanToken) {
+        const existingByToken = await client
+          .query('SELECT id FROM caregiver_relationships WHERE UPPER(TRIM(invite_token)) = $1 LIMIT 1', [cleanToken])
+          .catch(() => ({ rows: [] }));
+        if (existingByToken.rows[0]?.id) {
+          targetCgId = existingByToken.rows[0].id;
+        }
+      }
+
+      await client.query(
+        `INSERT INTO caregiver_relationships (
+           id, patient_id, caregiver_id, permission_level, status,
+           invite_token, invite_email, invite_expires_at, relationship_label, updated_at
+         )
+         VALUES (
+           $1, $2, $3, $4, $5,
+           COALESCE($6, encode(gen_random_bytes(24), 'hex')),
+           $7,
+           NOW() + interval '7 days',
+           $8,
+           NOW()
+         )
+         ON CONFLICT (id) DO UPDATE SET
+           invite_token = COALESCE(caregiver_relationships.invite_token, EXCLUDED.invite_token),
+           invite_expires_at = CASE
+             WHEN caregiver_relationships.status = 'pending'
+             THEN GREATEST(COALESCE(caregiver_relationships.invite_expires_at, NOW() + interval '7 days'), NOW() + interval '7 days')
+             ELSE caregiver_relationships.invite_expires_at
+           END,
+           relationship_label = CASE
+             WHEN caregiver_relationships.relationship_label IS NULL OR LOWER(caregiver_relationships.relationship_label) = 'pendente'
+             THEN COALESCE(EXCLUDED.relationship_label, caregiver_relationships.relationship_label)
+             ELSE caregiver_relationships.relationship_label
+           END,
+           updated_at = NOW()`,
+        [
+          targetCgId,
+          userId,
+          cleanCaregiverId,
+          cleanPerm,
+          dbStatus,
+          cleanToken,
+          cleanInviteEmail,
+          cleanRelLabel,
+        ]
+      );
+    }
+
     await client.query('COMMIT');
 
     return NextResponse.json(
@@ -1063,6 +1206,7 @@ export async function POST(request) {
           conditions: conditions.length,
           contacts: contacts.length,
           professionals: professionals.length,
+          caregivers: caregiverRelationships.length,
           stock_movements: stockMovements.length,
         },
       },

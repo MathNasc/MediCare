@@ -781,7 +781,7 @@ export default function CuidadorWebPage() {
     try {
       const res = await apiFetch('/api/rest/v1/rpc/accept_caregiver_invite', {
         method: 'POST',
-        body: JSON.stringify({ p_token: inviteTokenInput.trim() }),
+        body: JSON.stringify({ p_token: inviteTokenInput.trim().toUpperCase() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.success === false) {
@@ -2763,8 +2763,8 @@ export default function CuidadorWebPage() {
                 required
                 value={inviteTokenInput}
                 onChange={(e) => setInviteTokenInput(e.target.value)}
-                placeholder="Código de convite"
-                className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3.5 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                placeholder="Ex: MED-123456"
+                className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3.5 py-2.5 min-h-[44px] text-sm text-white placeholder-slate-500 uppercase focus:outline-none focus:border-blue-500"
               />
               <div className="flex justify-end gap-2">
                 <button

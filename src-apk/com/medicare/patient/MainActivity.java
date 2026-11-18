@@ -10,6 +10,8 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.TimePickerDialog;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -2096,7 +2098,7 @@ public class MainActivity extends Activity {
         this.isRegisterMode = false;
         scheduleAllMedicationAlarms();
         resetActiveSessionData();
-        this.prefs.edit().putBoolean("onboarding_completed", false).remove("active_user_email").commit();
+        this.prefs.edit().putBoolean("onboarding_completed", false).remove("active_user_email").remove("auth_access_token").commit();
         saveLocalStateOnly();
         render();
     }
@@ -3101,13 +3103,19 @@ public class MainActivity extends Activity {
                                         MainActivity.this.setProfileRoleValue(userRole);
                                         MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).commit();
                                     }
+                                    String accessToken = respObj.optString("access_token", "").trim();
                                     MainActivity.this.hasUnsyncedLocalChanges = false;
                                     MainActivity.this.isLoggedIn = true;
                                     MainActivity.this.isRegisterMode = false;
-                                    MainActivity.this.prefs.edit()
+                                    SharedPreferences.Editor loginEd = MainActivity.this.prefs.edit()
                                         .putString("active_user_email", cleanEmail)
-                                        .putBoolean("has_unsynced_local_changes", false)
-                                        .commit();
+                                        .putBoolean("has_unsynced_local_changes", false);
+                                    if (!accessToken.isEmpty()) {
+                                        loginEd.putString("auth_access_token", accessToken);
+                                    } else {
+                                        loginEd.remove("auth_access_token");
+                                    }
+                                    loginEd.commit();
                                     MainActivity.this.saveLocalStateOnly();
                                     Toast.makeText(MainActivity.this, "✓ Bem-vindo de volta!", 0).show();
                                     MainActivity.this.render();
@@ -3224,15 +3232,21 @@ public class MainActivity extends Activity {
                                     MainActivity.this.profile.put("nome", cleanNome);
                                     MainActivity.this.profile.put("full_name", cleanNome);
                                     MainActivity.this.setProfileRoleValue("independente");
+                                    String accessToken = respObj.optString("access_token", "").trim();
                                     MainActivity.this.hasUnsyncedLocalChanges = false;
                                     MainActivity.this.isLoggedIn = true;
                                     MainActivity.this.isRegisterMode = false;
                                     MainActivity.this.onboardingStep = 0;
-                                    MainActivity.this.prefs.edit()
+                                    SharedPreferences.Editor regEd = MainActivity.this.prefs.edit()
                                         .putBoolean("onboarding_completed", false)
                                         .putBoolean("has_unsynced_local_changes", false)
-                                        .putString("active_user_email", cleanEmail)
-                                        .commit();
+                                        .putString("active_user_email", cleanEmail);
+                                    if (!accessToken.isEmpty()) {
+                                        regEd.putString("auth_access_token", accessToken);
+                                    } else {
+                                        regEd.remove("auth_access_token");
+                                    }
+                                    regEd.commit();
                                     MainActivity.this.saveLocalStateOnly();
                                     Toast.makeText(MainActivity.this, "✓ Conta criada com sucesso! Bem-vindo(a), " + cleanNome, 1).show();
                                     MainActivity.this.render();
@@ -12976,7 +12990,7 @@ public class MainActivity extends Activity {
                 return pi.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "2.8.3";
+        return "2.8.4";
     }
 
     private int getCurrentAppVersionCode() {
@@ -12989,7 +13003,7 @@ public class MainActivity extends Activity {
                 return pi.versionCode;
             }
         } catch (Exception ignored) {}
-        return 283;
+        return 284;
     }
 
     private void checkForAppUpdate() {
@@ -14769,12 +14783,33 @@ public class MainActivity extends Activity {
                 col.addView(tvN);
 
                 TextView tvCode = new TextView(this);
-                tvCode.setText("Status: " + cg.optString("status", "Ativo") + " • Código: " + cg.optString("codigo_convite", "MED-883921"));
+                final String inviteCodeVal = optCleanString(cg, "codigo_convite", optCleanString(cg, "invite_token", ""));
+                String cgStatusLabel = optCleanString(cg, "status", "Ativo");
+                if (!inviteCodeVal.isEmpty()) {
+                    tvCode.setText("Status: " + cgStatusLabel + " • Código: " + inviteCodeVal);
+                } else {
+                    tvCode.setText("Status: " + cgStatusLabel);
+                }
                 tvCode.setTextColor(this.cTextMuted);
                 tvCode.setTextSize(sp(12.0f));
                 col.addView(tvCode);
 
                 row.addView(col);
+
+                if (!inviteCodeVal.isEmpty() && !"Ativo".equalsIgnoreCase(cgStatusLabel)) {
+                    TextView btnCopy = createButton("Copiar", this.cInfoBg, this.cPrimary);
+                    btnCopy.setPadding(dp(10), dp(6), dp(10), dp(6));
+                    LinearLayout.LayoutParams cpLp = new LinearLayout.LayoutParams(-2, -2);
+                    cpLp.rightMargin = dp(6);
+                    btnCopy.setLayoutParams(cpLp);
+                    btnCopy.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            copyCaregiverInviteCode(inviteCodeVal);
+                        }
+                    });
+                    row.addView(btnCopy);
+                }
 
                 TextView btnRevoke = createButton("Revogar", this.cDangerBg, this.cDanger);
                 btnRevoke.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -14796,31 +14831,68 @@ public class MainActivity extends Activity {
         linearLayout.addView(card);
     }
 
+    private void copyCaregiverInviteCode(String code) {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null && code != null && !code.trim().isEmpty()) {
+                cm.setPrimaryClip(ClipData.newPlainText("Código MediCare", code.trim()));
+                Toast.makeText(this, "✓ Código copiado: " + code.trim(), 0).show();
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void generateCaregiverInviteCode() {
         if (!isPatientProfileRole()) {
             Toast.makeText(this, "Você é independente, vire paciente para continuar", 1).show();
             return;
         }
-        int code = (int) (100000 + Math.random() * 900000);
-        String token = "MED-" + code;
+        String token = "";
+        for (int attempt = 0; attempt < 10; attempt++) {
+            int code = (int) (100000 + Math.random() * 900000);
+            String candidate = "MED-" + code;
+            boolean exists = false;
+            for (int i = 0; i < this.caregivers.length(); i++) {
+                JSONObject existing = this.caregivers.optJSONObject(i);
+                if (existing != null && candidate.equalsIgnoreCase(optCleanString(existing, "codigo_convite", optCleanString(existing, "invite_token", "")))) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                token = candidate;
+                break;
+            }
+        }
+        if (token.isEmpty()) {
+            token = "MED-" + (int) (100000 + Math.random() * 900000);
+        }
+        final String finalToken = token;
         try {
             JSONObject newCg = new JSONObject();
             newCg.put("id", "cg-" + System.currentTimeMillis());
             newCg.put("nome", "Novo Cuidador (Aguardando vínculo)");
             newCg.put("relacao", "Pendente");
-            newCg.put("codigo_convite", token);
+            newCg.put("codigo_convite", finalToken);
+            newCg.put("invite_token", finalToken);
+            newCg.put("permission_level", "caregiver");
             newCg.put("status", "Pendente");
+            newCg.put("raw_status", "pending");
             this.caregivers.put(newCg);
             saveAll();
             render();
 
             showStyledConfirmDialog(
                 "🔑 Código de Convite Criado!",
-                "Compartilhe este código com seu cuidador para que ele acompanhe seus medicamentos:\n\nCÓDIGO: " + token + "\n\nO cuidador deverá digitar este código na plataforma Web do MediCare Cuidador.",
-                "Entendi",
-                null,
+                "Compartilhe este código com seu cuidador para que ele acompanhe seus medicamentos:\n\nCÓDIGO: " + finalToken + "\n\nO cuidador deverá digitar este código na plataforma Web do MediCare Cuidador.",
+                "Copiar Código",
+                "Fechar",
                 this.cPrimary,
-                null
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        copyCaregiverInviteCode(finalToken);
+                    }
+                }
             );
         } catch (Exception e) {}
     }
@@ -15391,6 +15463,7 @@ public class MainActivity extends Activity {
     private void deleteRemoteRecord(final String table, final String rawId, final String idPrefix) {
         if (rawId == null || rawId.trim().isEmpty()) return;
         final String resolvedUuid = toDeterministicServerUuid(rawId, idPrefix);
+        final String bearerToken = this.prefs != null ? this.prefs.getString("auth_access_token", "").trim() : "";
         addDeletedRecordId(rawId);
         addDeletedRecordId(resolvedUuid);
         new Thread(new Runnable() {
@@ -15402,6 +15475,9 @@ public class MainActivity extends Activity {
                     conn.setRequestMethod("DELETE");
                     conn.setConnectTimeout(8000);
                     conn.setReadTimeout(8000);
+                    if (!bearerToken.isEmpty()) {
+                        conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+                    }
                     int code = conn.getResponseCode();
                     if (code >= 200 && code < 300) {
                         removeDeletedRecordId(rawId);
@@ -15902,14 +15978,23 @@ public class MainActivity extends Activity {
                     ro.put("telefone", ph);
                     ro.put("phone", ph);
                 } else if ("caregivers".equals(targetField)) {
-                    String nm = optCleanString(ro, "nome", optCleanString(ro, "caregiver_name", "Cuidador"));
+                    String rawSt = optCleanString(ro, "raw_status", optCleanString(ro, "status", "active")).toLowerCase(Locale.ROOT);
+                    if ("revoked".equals(rawSt) || "revogado".equals(rawSt) || "declined".equals(rawSt) || "recusado".equals(rawSt)) {
+                        continue;
+                    }
+                    boolean isPending = "pending".equals(rawSt) || "pendente".equals(rawSt);
+                    String nm = optCleanString(ro, "nome", optCleanString(ro, "caregiver_name", isPending ? "Novo Cuidador (Aguardando vínculo)" : "Cuidador"));
                     ro.put("nome", nm);
-                    String rl = optCleanString(ro, "relacao", optCleanString(ro, "relationship", "Familiar"));
+                    String rl = optCleanString(ro, "relacao", optCleanString(ro, "relationship", optCleanString(ro, "relationship_label", isPending ? "Pendente" : "Familiar")));
                     ro.put("relacao", rl);
-                    String st = optCleanString(ro, "status", "Ativo");
+                    String st = isPending ? "Pendente" : "Ativo";
                     ro.put("status", st);
-                    String cd = optCleanString(ro, "codigo_convite", optCleanString(ro, "invite_code", ""));
-                    if (!cd.isEmpty()) ro.put("codigo_convite", cd);
+                    ro.put("raw_status", isPending ? "pending" : "active");
+                    String cd = optCleanString(ro, "codigo_convite", optCleanString(ro, "invite_code", optCleanString(ro, "invite_token", "")));
+                    if (!cd.isEmpty()) {
+                        ro.put("codigo_convite", cd);
+                        ro.put("invite_token", cd);
+                    }
                 }
 
                 if (!rId.isEmpty()) {
@@ -16270,8 +16355,13 @@ public class MainActivity extends Activity {
                 jSONObject.put("professionals", this.professionals);
                 jSONObject.put("caregiver_relationships", this.caregivers);
                 jSONObject.put("caregivers", this.caregivers);
+                jSONObject.put("deleted_record_ids", new JSONArray(getDeletedRecordIds()));
                 jSONObject.put("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
                 jSONObject.put("approval_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
+                String syncBearer = this.prefs != null ? this.prefs.getString("auth_access_token", "").trim() : "";
+                if (!syncBearer.isEmpty()) {
+                    httpURLConnection.setRequestProperty("Authorization", "Bearer " + syncBearer);
+                }
                 byte[] bytes = jSONObject.toString().getBytes(StandardCharsets.UTF_8);
                 OutputStream outputStream = httpURLConnection.getOutputStream();
                 outputStream.write(bytes);

@@ -863,31 +863,117 @@ async function handleRpcCall(client, fnName, args, userId) {
     }
 
     case 'accept_caregiver_invite': {
-      const token = String(args.p_token || '').trim();
-      if (!token) {
+      if (!userId) {
+        return { status: 401, body: { success: false, error: 'Autenticação necessária para aceitar o convite.' } };
+      }
+      const rawToken = String(args.p_token || '').trim().toUpperCase();
+      if (!rawToken) {
         return { status: 400, body: { success: false, error: 'Informe o código de convite.' } };
       }
+      const bareToken = rawToken.replace(/^MED[-\s]?/i, '').trim();
+      const candidateTokens = Array.from(
+        new Set([rawToken, bareToken ? `MED-${bareToken}` : rawToken].filter(Boolean))
+      );
+
       const relRes = await client.query(
         `SELECT * FROM caregiver_relationships
-         WHERE invite_token = $1
-           AND status = 'pending'
-           AND (invite_expires_at IS NULL OR invite_expires_at > NOW())
+         WHERE UPPER(TRIM(invite_token)) = ANY($1::text[])
+         ORDER BY created_at DESC
          LIMIT 1`,
-        [token]
+        [candidateTokens]
       );
       if (relRes.rowCount === 0) {
-        return { status: 400, body: { success: false, error: 'Convite inválido ou expirado.' } };
+        return {
+          status: 400,
+          body: {
+            success: false,
+            error: 'Código de convite não encontrado. Verifique se o paciente gerou o código com internet ativa no aplicativo.',
+          },
+        };
       }
       const rel = relRes.rows[0];
+      if (rel.status === 'active') {
+        if (String(rel.caregiver_id) === String(userId)) {
+          return { status: 200, body: { success: true, relationship_id: rel.id, patient_id: rel.patient_id } };
+        }
+        return { status: 400, body: { success: false, error: 'Este código de convite já foi utilizado por outro cuidador.' } };
+      }
+      if (rel.status === 'revoked') {
+        return { status: 400, body: { success: false, error: 'Este código de convite foi revogado pelo paciente.' } };
+      }
+      if (rel.status !== 'pending') {
+        return { status: 400, body: { success: false, error: 'Convite inválido ou expirado.' } };
+      }
+      if (rel.invite_expires_at && new Date(rel.invite_expires_at).getTime() <= Date.now()) {
+        return {
+          status: 400,
+          body: { success: false, error: 'Este código de convite expirou. Peça ao paciente para gerar um novo código.' },
+        };
+      }
       if (String(rel.patient_id) === String(userId)) {
         return { status: 400, body: { success: false, error: 'Você não pode aceitar seu próprio convite.' } };
       }
-      await client.query(
-        `UPDATE caregiver_relationships
-         SET caregiver_id = $1, status = 'active', accepted_at = NOW()
-         WHERE id = $2`,
-        [userId, rel.id]
-      );
+
+      await client.query('BEGIN');
+      try {
+        const existingPairRes = await client.query(
+          `SELECT id, status FROM caregiver_relationships
+           WHERE patient_id = $1 AND caregiver_id = $2 AND id <> $3
+           LIMIT 1`,
+          [rel.patient_id, userId, rel.id]
+        );
+        if (existingPairRes.rowCount > 0) {
+          const existingPair = existingPairRes.rows[0];
+          if (existingPair.status === 'active') {
+            await client.query(`DELETE FROM caregiver_relationships WHERE id = $1`, [rel.id]);
+            await client.query('COMMIT');
+            return { status: 200, body: { success: true, relationship_id: existingPair.id, patient_id: rel.patient_id } };
+          }
+          await client.query(`DELETE FROM caregiver_relationships WHERE id = $1`, [existingPair.id]);
+        }
+
+        const effectivePerm = rel.permission_level === 'viewer' ? 'caregiver' : (rel.permission_level || 'caregiver');
+        const effectiveLabel =
+          rel.relationship_label && rel.relationship_label.toLowerCase() !== 'pendente'
+            ? rel.relationship_label
+            : 'Familiar';
+
+        await client.query(
+          `UPDATE caregiver_relationships
+           SET caregiver_id = $1,
+               status = 'active',
+               permission_level = $2,
+               relationship_label = $3,
+               accepted_at = NOW(),
+               updated_at = NOW()
+           WHERE id = $4`,
+          [userId, effectivePerm, effectiveLabel, rel.id]
+        );
+
+        await client
+          .query(
+            `INSERT INTO cuidadores (paciente_id, cuidador_id, nivel_acesso, status)
+             VALUES ($1, $2, $3, 'ativo')
+             ON CONFLICT (paciente_id, cuidador_id) DO UPDATE
+               SET status = 'ativo', nivel_acesso = EXCLUDED.nivel_acesso`,
+            [rel.patient_id, userId, effectivePerm === 'admin' ? 'total' : 'leitura']
+          )
+          .catch(() => {});
+
+        await client
+          .query(
+            `INSERT INTO caregiver_audit_log (relationship_id, actor_id, action, details)
+             VALUES ($1, $2, 'invite_accepted', $3::jsonb)`,
+            [rel.id, userId, JSON.stringify({ patient_id: rel.patient_id, token: rel.invite_token })]
+          )
+          .catch(() => {});
+
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
+
       return { status: 200, body: { success: true, relationship_id: rel.id, patient_id: rel.patient_id } };
     }
 
