@@ -62,6 +62,17 @@ function sanitizeIdentifier(ident) {
   return clean;
 }
 
+const PAIRING_CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+function generatePairingCode() {
+  const bytes = crypto.randomBytes(6);
+  let suffix = '';
+  for (let i = 0; i < 6; i += 1) {
+    suffix += PAIRING_CODE_CHARS[bytes[i] % PAIRING_CODE_CHARS.length];
+  }
+  return `PAC-${suffix}`;
+}
+
 function getOwnerColumnForTable(table) {
   if (table === 'profiles') return 'id';
   if (PATIENT_ID_OWNER_TABLES.has(table)) return 'patient_id';
@@ -1017,26 +1028,41 @@ async function handleRpcCall(client, fnName, args, userId) {
 
       const patientId = crypto.randomUUID();
       const fakeEmail = `paciente-${patientId.slice(0, 8)}@medicare.local`;
+      const pairingCode = generatePairingCode();
+      const pairingExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
       await client.query('BEGIN');
       try {
         await client.query(
           `INSERT INTO app_users (id, email, password_hash, raw_user_meta_data)
            VALUES ($1, $2, 'managed_account_no_password', $3::jsonb)`,
-          [patientId, fakeEmail, JSON.stringify({ nome, role: 'paciente', is_managed: true, managed_by: userId })]
+          [
+            patientId,
+            fakeEmail,
+            JSON.stringify({
+              nome,
+              role: 'paciente',
+              is_managed: true,
+              managed_by: userId,
+              pairing_code: pairingCode,
+              pairing_expires_at: pairingExpiresAt,
+            }),
+          ]
         );
 
         await client.query(
-          `INSERT INTO profiles (id, nome, email, role, blood_type, dob, sex, phone)
-           VALUES ($1, $2, $3, 'paciente', $4, $5, $6, $7)
+          `INSERT INTO profiles (id, nome, email, role, blood_type, dob, sex, phone, is_managed, managed_by)
+           VALUES ($1, $2, $3, 'paciente', $4, $5, $6, $7, TRUE, $8)
            ON CONFLICT (id) DO UPDATE SET
              nome = EXCLUDED.nome,
              role = 'paciente',
              blood_type = EXCLUDED.blood_type,
              dob = EXCLUDED.dob,
              sex = EXCLUDED.sex,
-             phone = EXCLUDED.phone`,
-          [patientId, nome, fakeEmail, cleanBloodType, cleanDob, cleanSex, cleanPhone]
+             phone = EXCLUDED.phone,
+             is_managed = TRUE,
+             managed_by = EXCLUDED.managed_by`,
+          [patientId, nome, fakeEmail, cleanBloodType, cleanDob, cleanSex, cleanPhone, userId]
         );
 
         const relId = crypto.randomUUID();
@@ -1059,7 +1085,120 @@ async function handleRpcCall(client, fnName, args, userId) {
         );
         await client.query('COMMIT');
 
-        return { status: 200, body: { success: true, patient_id: patientId, relationship_id: relId } };
+        return {
+          status: 200,
+          body: {
+            success: true,
+            patient_id: patientId,
+            relationship_id: relId,
+            pairing_code: pairingCode,
+            pairing_expires_at: pairingExpiresAt,
+          },
+        };
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      }
+    }
+
+    case 'generate_patient_pairing_code': {
+      const patientId = String(args.p_patient_id || '').trim();
+      if (!patientId) {
+        return { status: 400, body: { success: false, error: 'Identificador do paciente não informado.' } };
+      }
+
+      const allowed = await canAccessPatientData(client, userId, patientId, 'caregiver');
+      if (!allowed) {
+        return {
+          status: 403,
+          body: { success: false, error: 'Acesso negado: apenas cuidadores autorizados podem gerar o código deste paciente.' },
+        };
+      }
+
+      const profRes = await client.query(
+        `SELECT p.id, p.nome, p.email, p.role
+         FROM profiles p
+         WHERE p.id::text = $1::text
+         LIMIT 1`,
+        [patientId]
+      );
+      if (profRes.rowCount === 0) {
+        return { status: 404, body: { success: false, error: 'Perfil do paciente não encontrado.' } };
+      }
+      const profRow = profRes.rows[0];
+
+      const pairingCode = generatePairingCode();
+      const pairingExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      await client.query('BEGIN');
+      try {
+        const userRes = await client.query(
+          `SELECT id, is_active FROM app_users WHERE id::text = $1::text LIMIT 1`,
+          [patientId]
+        );
+
+        if (userRes.rowCount === 0) {
+          const fallbackEmail =
+            (profRow.email || '').trim().toLowerCase() || `paciente-${patientId.slice(0, 8)}@medicare.local`;
+          await client.query(
+            `INSERT INTO app_users (id, email, password_hash, raw_user_meta_data)
+             VALUES ($1, $2, 'managed_account_no_password', $3::jsonb)`,
+            [
+              patientId,
+              fallbackEmail,
+              JSON.stringify({
+                nome: profRow.nome || 'Paciente',
+                role: profRow.role || 'paciente',
+                is_managed: true,
+                managed_by: userId,
+                pairing_code: pairingCode,
+                pairing_expires_at: pairingExpiresAt,
+              }),
+            ]
+          );
+        } else {
+          if (userRes.rows[0].is_active === false) {
+            await client.query('ROLLBACK').catch(() => {});
+            return { status: 403, body: { success: false, error: 'A conta deste paciente está desativada.' } };
+          }
+          await client.query(
+            `UPDATE app_users
+             SET raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || $2::jsonb
+             WHERE id::text = $1::text`,
+            [
+              patientId,
+              JSON.stringify({
+                pairing_code: pairingCode,
+                pairing_expires_at: pairingExpiresAt,
+              }),
+            ]
+          );
+        }
+
+        await client.query(
+          `INSERT INTO audit_logs (id, patient_id, performed_by, action, old_value, new_value, reason)
+           VALUES ($1, $2, $3, 'patient_pairing_code_generated', NULL, $4::jsonb, $5)`,
+          [
+            crypto.randomUUID(),
+            patientId,
+            userId,
+            JSON.stringify({ pairing_expires_at: pairingExpiresAt }),
+            'Código de ativação para celular do paciente gerado pelo cuidador',
+          ]
+        );
+
+        await client.query('COMMIT');
+
+        return {
+          status: 200,
+          body: {
+            success: true,
+            patient_id: patientId,
+            patient_name: profRow.nome || 'Paciente',
+            pairing_code: pairingCode,
+            pairing_expires_at: pairingExpiresAt,
+          },
+        };
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         throw err;

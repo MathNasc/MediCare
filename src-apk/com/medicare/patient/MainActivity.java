@@ -2890,7 +2890,7 @@ public class MainActivity extends Activity {
         linearLayout.addView(textView);
 
         TextView versionBadge = new TextView(this);
-        versionBadge.setText("Versão 2.6.4 • Produção");
+        versionBadge.setText("Versão " + getCurrentAppVersionName() + " • Produção");
         versionBadge.setTextColor(this.cPrimary);
         versionBadge.setTextSize(sp(11.0f));
         versionBadge.setTypeface(null, 1);
@@ -2957,6 +2957,18 @@ public class MainActivity extends Activity {
                 }
             });
             cardLayout.addView(switchRegister);
+
+            TextView claimCodeBtn = createButton("📱 Já fui cadastrado pelo cuidador (Código)", this.cSurfaceHover, this.cTextMain);
+            LinearLayout.LayoutParams claimLp = new LinearLayout.LayoutParams(-1, -2);
+            claimLp.topMargin = dp(10);
+            claimCodeBtn.setLayoutParams(claimLp);
+            claimCodeBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public final void onClick(View view) {
+                    showClaimManagedPatientDialog();
+                }
+            });
+            cardLayout.addView(claimCodeBtn);
 
         } else {
             // ==================== TELA DE CADASTRO ====================
@@ -3293,6 +3305,278 @@ public class MainActivity extends Activity {
                         }
                     });
                 }
+            }
+        }).start();
+    }
+
+    private void showClaimManagedPatientDialog() {
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        ScrollView sv = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(1);
+        root.setBackground(shape(this.cSurface, 22, this.cBorder, 1));
+        root.setPadding(dp(22), dp(22), dp(22), dp(20));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("Vincular Perfil Pré-Cadastrado");
+        tvTitle.setTextColor(this.cTextMain);
+        tvTitle.setTextSize(sp(18.0f));
+        tvTitle.setTypeface(null, 1);
+        root.addView(tvTitle);
+
+        TextView tvDesc = new TextView(this);
+        tvDesc.setText("Digite o código gerado no painel do seu cuidador (ex: PAC-A3K9M2). Seus dados, medicamentos e agenda serão baixados na hora.");
+        tvDesc.setTextColor(this.cTextMuted);
+        tvDesc.setTextSize(sp(13.0f));
+        tvDesc.setLineSpacing(dp(2), 1.08f);
+        tvDesc.setPadding(0, dp(8), 0, dp(14));
+        root.addView(tvDesc);
+
+        final EditText codeInput = createInput("Código de Ativação (ex: PAC-A3K9M2)", "");
+        codeInput.setSingleLine(true);
+        codeInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        root.addView(codeInput);
+
+        TextView tvOptLabel = new TextView(this);
+        tvOptLabel.setText("Opcional: defina e-mail e senha pessoais para futuros logins");
+        tvOptLabel.setTextColor(this.cTextMuted);
+        tvOptLabel.setTextSize(sp(11.5f));
+        tvOptLabel.setPadding(0, dp(4), 0, dp(8));
+        root.addView(tvOptLabel);
+
+        final EditText optEmailInput = createInput("E-mail pessoal (opcional)", "");
+        optEmailInput.setSingleLine(true);
+        optEmailInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        root.addView(optEmailInput);
+
+        final EditText optPassInput = createInput("Nova senha — mín. 6 dígitos (opcional)", "");
+        optPassInput.setSingleLine(true);
+        optPassInput.setInputType(129);
+        root.addView(optPassInput);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(0);
+        btnRow.setGravity(16);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
+        rowLp.topMargin = dp(8);
+        btnRow.setLayoutParams(rowLp);
+
+        TextView btnCancel = new TextView(this);
+        btnCancel.setText("Cancelar");
+        btnCancel.setTextColor(this.cTextMain);
+        btnCancel.setTextSize(sp(14.0f));
+        btnCancel.setTypeface(null, 1);
+        btnCancel.setGravity(17);
+        btnCancel.setBackground(shape(this.cSurfaceHover, 13, this.cBorder, 1));
+        btnCancel.setPadding(dp(12), dp(13), dp(12), dp(13));
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 0.9f);
+        cLp.rightMargin = dp(10);
+        btnCancel.setLayoutParams(cLp);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        btnRow.addView(btnCancel);
+
+        TextView btnConfirm = new TextView(this);
+        btnConfirm.setText("Ativar e Baixar");
+        btnConfirm.setTextColor(Color.WHITE);
+        btnConfirm.setTextSize(sp(14.0f));
+        btnConfirm.setTypeface(null, 1);
+        btnConfirm.setGravity(17);
+        btnConfirm.setBackground(shape(this.cPrimary, 13, 0, 0));
+        btnConfirm.setPadding(dp(12), dp(13), dp(12), dp(13));
+        btnConfirm.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.25f));
+        btnConfirm.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                performClaimManagedPatient(
+                    codeInput.getText().toString().trim(),
+                    optEmailInput.getText().toString().trim(),
+                    optPassInput.getText().toString().trim(),
+                    dialog
+                );
+            }
+        });
+        btnRow.addView(btnConfirm);
+
+        root.addView(btnRow);
+        sv.addView(root);
+        dialog.setView(sv);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    private void performClaimManagedPatient(final String rawCode, final String optEmail, final String optPassword, final AlertDialog hostDialog) {
+        final String cleanSuffix = rawCode.toUpperCase(Locale.ROOT).replaceAll("^PAC[-\\s]?", "").replaceAll("[^A-Z0-9]", "");
+        if (cleanSuffix.length() < 6) {
+            Toast.makeText(this, "Informe o código completo no formato PAC-XXXXXX.", 1).show();
+            return;
+        }
+        final String normalizedCode = "PAC-" + cleanSuffix;
+        final String cleanEmail = optEmail != null ? optEmail.trim().toLowerCase(Locale.ROOT) : "";
+        final String cleanPass = optPassword != null ? optPassword.trim() : "";
+
+        if (!cleanEmail.isEmpty() && (!cleanEmail.contains("@") || !cleanEmail.contains("."))) {
+            Toast.makeText(this, "O e-mail informado não é válido.", 1).show();
+            return;
+        }
+        if (!cleanPass.isEmpty() && cleanPass.length() < 6) {
+            Toast.makeText(this, "A senha opcional deve ter no mínimo 6 caracteres.", 1).show();
+            return;
+        }
+
+        if (hostDialog != null && hostDialog.isShowing()) {
+            try {
+                hostDialog.dismiss();
+            } catch (Exception ignored) {}
+        }
+        Toast.makeText(this, "Ativando perfil e baixando seus dados...", 0).show();
+
+        new Thread(new Runnable() {
+            @Override
+            public final void run() {
+                String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+                JSONObject successObj = null;
+                String lastErrorMsg = "";
+                boolean gotHttpError = false;
+
+                for (String base : baseCandidates) {
+                    if (base == null || base.trim().isEmpty()) continue;
+                    HttpURLConnection conn = null;
+                    try {
+                        URL url = new URL(base + "/api/auth/v1/claim-patient");
+                        conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("POST");
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(8000);
+                        conn.setDoOutput(true);
+                        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                        JSONObject reqBody = new JSONObject();
+                        reqBody.put("code", normalizedCode);
+                        if (!cleanEmail.isEmpty()) {
+                            reqBody.put("email", cleanEmail);
+                        }
+                        if (!cleanPass.isEmpty()) {
+                            reqBody.put("password", cleanPass);
+                        }
+
+                        byte[] postData = reqBody.toString().getBytes(StandardCharsets.UTF_8);
+                        OutputStream os = conn.getOutputStream();
+                        os.write(postData);
+                        os.close();
+
+                        int responseCode = conn.getResponseCode();
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(
+                            (responseCode < 200 || responseCode >= 400) ? conn.getErrorStream() : conn.getInputStream(),
+                            StandardCharsets.UTF_8
+                        ));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
+                        reader.close();
+
+                        JSONObject respObj = new JSONObject(sb.toString());
+                        if (responseCode == 200) {
+                            successObj = respObj;
+                            break;
+                        } else {
+                            gotHttpError = true;
+                            lastErrorMsg = respObj.optString("error", "Código inválido ou expirado.");
+                            if (responseCode >= 400 && responseCode < 500) {
+                                break;
+                            }
+                        }
+                    } catch (Exception e) {
+                        if (!gotHttpError && lastErrorMsg.isEmpty()) {
+                            lastErrorMsg = "Não foi possível conectar ao servidor. Verifique sua internet.";
+                        }
+                    } finally {
+                        if (conn != null) {
+                            try { conn.disconnect(); } catch (Exception ignored) {}
+                        }
+                    }
+                }
+
+                final JSONObject finalResp = successObj;
+                final String finalError = lastErrorMsg.isEmpty() ? "Não foi possível validar o código." : lastErrorMsg;
+
+                MainActivity.this.runOnUiThread(new Runnable() {
+                    @Override
+                    public final void run() {
+                        if (finalResp == null) {
+                            Toast.makeText(MainActivity.this, "Erro: " + finalError, 1).show();
+                            return;
+                        }
+                        try {
+                            JSONObject userObj = finalResp.optJSONObject("user");
+                            String userId = userObj != null ? userObj.optString("id", "").trim() : "";
+                            String resolvedEmail = userObj != null ? userObj.optString("email", "").trim().toLowerCase(Locale.ROOT) : cleanEmail;
+                            if (resolvedEmail.isEmpty()) {
+                                resolvedEmail = cleanEmail;
+                            }
+                            JSONObject meta = userObj != null ? userObj.optJSONObject("user_metadata") : null;
+                            String userName = "";
+                            if (meta != null && !meta.optString("nome", "").trim().isEmpty()) {
+                                userName = meta.optString("nome", "").trim();
+                            } else if (userObj != null && !userObj.optString("nome", "").trim().isEmpty()) {
+                                userName = userObj.optString("nome", "").trim();
+                            }
+                            String userRole = "paciente";
+                            if (userObj != null && !userObj.optString("role", "").trim().isEmpty()) {
+                                userRole = userObj.optString("role", "").trim();
+                            } else if (meta != null && !meta.optString("role", "").trim().isEmpty()) {
+                                userRole = meta.optString("role", "").trim();
+                            }
+
+                            MainActivity.this.resetActiveSessionData();
+                            if (!resolvedEmail.isEmpty()) {
+                                MainActivity.this.prefs.edit().remove("user_snapshot_" + resolvedEmail).apply();
+                            }
+                            MainActivity.this.prefs.edit().remove("deleted_record_ids").apply();
+
+                            if (!userId.isEmpty()) {
+                                MainActivity.this.profile.put("id", userId);
+                            }
+                            if (!resolvedEmail.isEmpty()) {
+                                MainActivity.this.profile.put("email", resolvedEmail);
+                            }
+                            if (!userName.isEmpty()) {
+                                MainActivity.this.profile.put("nome", userName);
+                                MainActivity.this.profile.put("full_name", userName);
+                            }
+                            MainActivity.this.setProfileRoleValue(userRole);
+
+                            String accessToken = finalResp.optString("access_token", "").trim();
+                            MainActivity.this.hasUnsyncedLocalChanges = false;
+                            MainActivity.this.isLoggedIn = true;
+                            MainActivity.this.isRegisterMode = false;
+
+                            SharedPreferences.Editor claimEd = MainActivity.this.prefs.edit()
+                                .putBoolean("onboarding_completed", true)
+                                .putBoolean("has_unsynced_local_changes", false)
+                                .putString("active_user_email", resolvedEmail);
+                            if (!accessToken.isEmpty()) {
+                                claimEd.putString("auth_access_token", accessToken);
+                            } else {
+                                claimEd.remove("auth_access_token");
+                            }
+                            claimEd.commit();
+
+                            MainActivity.this.saveLocalStateOnly();
+                            Toast.makeText(MainActivity.this, "✓ Conta vinculada! Baixando seus medicamentos...", 1).show();
+                            MainActivity.this.render();
+                            MainActivity.this.pullFromBackendIfEmptyOrUpdated(true);
+                        } catch (Exception ignored) {
+                            Toast.makeText(MainActivity.this, "Erro ao finalizar ativação local.", 1).show();
+                        }
+                    }
+                });
             }
         }).start();
     }

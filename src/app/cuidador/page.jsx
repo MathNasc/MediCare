@@ -36,6 +36,8 @@ import {
   ChevronRight,
   LayoutGrid,
   RefreshCw,
+  Smartphone,
+  Copy,
 } from 'lucide-react';
 
 function readCookieValue(name) {
@@ -149,6 +151,9 @@ export default function CuidadorWebPage() {
   const [showStockModal, setShowStockModal] = useState(false);
   const [showMobileMenuSheet, setShowMobileMenuSheet] = useState(false);
   const [showPatientPickerSheet, setShowPatientPickerSheet] = useState(false);
+  const [pairingModalData, setPairingModalData] = useState(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [copiedPairingCode, setCopiedPairingCode] = useState(false);
 
   // Form states (sem valores clínicos pré-definidos)
   const [inviteTokenInput, setInviteTokenInput] = useState('');
@@ -197,7 +202,8 @@ export default function CuidadorWebPage() {
     showAppointmentModal ||
     showStockModal ||
     showMobileMenuSheet ||
-    showPatientPickerSheet;
+    showPatientPickerSheet ||
+    Boolean(pairingModalData);
 
   currentTabRef.current = currentTab;
   isAuthenticatedRef.current = isAuthenticated;
@@ -226,6 +232,7 @@ export default function CuidadorWebPage() {
     setShowStockModal(false);
     setShowMobileMenuSheet(false);
     setShowPatientPickerSheet(false);
+    setPairingModalData(null);
   }, []);
 
   const navigateToTab = useCallback(
@@ -853,12 +860,13 @@ export default function CuidadorWebPage() {
       return;
     }
 
+    const createdName = newPatientForm.nome.trim();
     setActionLoading(true);
     try {
       const res = await apiFetch('/api/rest/v1/rpc/create_managed_patient', {
         method: 'POST',
         body: JSON.stringify({
-          p_nome: newPatientForm.nome.trim(),
+          p_nome: createdName,
           p_relationship_label: newPatientForm.relationship_label.trim(),
           p_blood_type: newPatientForm.blood_type || null,
           p_dob: newPatientForm.dob || null,
@@ -873,11 +881,50 @@ export default function CuidadorWebPage() {
       setShowNewPatientModal(false);
       setNewPatientForm(EMPTY_PATIENT_FORM);
       setConfirmPatientSave(false);
+      if (data.patient_id) {
+        setSelectedPatientId(data.patient_id);
+      }
+      if (data.pairing_code) {
+        setCopiedPairingCode(false);
+        setPairingModalData({
+          patientId: data.patient_id,
+          nome: createdName,
+          code: data.pairing_code,
+          expiresAt: data.pairing_expires_at || null,
+        });
+      }
       loadData();
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Gerar ou renovar código de ativação para o celular Android do paciente
+  const handleOpenPatientPairing = async (patient) => {
+    if (!patient?.patient_id) return;
+    setPairingLoading(true);
+    setCopiedPairingCode(false);
+    try {
+      const res = await apiFetch('/api/rest/v1/rpc/generate_patient_pairing_code', {
+        method: 'POST',
+        body: JSON.stringify({ p_patient_id: patient.patient_id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false || !data.pairing_code) {
+        throw new Error(data.error || 'Não foi possível gerar o código de vinculação.');
+      }
+      setPairingModalData({
+        patientId: patient.patient_id,
+        nome: data.patient_name || patient.nome,
+        code: data.pairing_code,
+        expiresAt: data.pairing_expires_at || null,
+      });
+    } catch (err) {
+      showToast(err.message || 'Erro ao gerar código de vinculação', 'error');
+    } finally {
+      setPairingLoading(false);
     }
   };
 
@@ -2369,18 +2416,34 @@ export default function CuidadorWebPage() {
                             </div>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRevokeRelationship(p.relationship_id);
-                            }}
-                            title="Revogar acompanhamento"
-                            aria-label={`Revogar vínculo com ${p.nome}`}
-                            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
-                          >
-                            <Trash2 size={16} className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={pairingLoading}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenPatientPairing(p);
+                              }}
+                              title="Vincular celular Android do paciente"
+                              aria-label={`Vincular celular de ${p.nome}`}
+                              className="min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-blue-300 text-[11px] font-semibold transition-colors whitespace-nowrap"
+                            >
+                              <Smartphone size={14} className="w-3.5 h-3.5 shrink-0" />
+                              <span>Vincular</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRevokeRelationship(p.relationship_id);
+                              }}
+                              title="Revogar acompanhamento"
+                              aria-label={`Revogar vínculo com ${p.nome}`}
+                              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
+                            >
+                              <Trash2 size={16} className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -3545,6 +3608,88 @@ export default function CuidadorWebPage() {
                 className="min-h-[42px] px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold transition-colors"
               >
                 {actionLoading ? 'Removendo...' : 'Confirmar Remoção'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────── */}
+      {/* MODAL: VINCULAR CELULAR DO PACIENTE (CÓDIGO DE ATIVAÇÃO)   */}
+      {/* ─────────────────────────────────────────────────────────── */}
+      {pairingModalData && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                <Smartphone size={20} className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-white truncate">Vincular Celular do Paciente</h3>
+                <p className="text-xs text-slate-400 truncate">{pairingModalData.nome}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#0b1120] border border-slate-700/80 text-center space-y-3 mb-4">
+              <span className="block text-[11px] uppercase tracking-wider font-semibold text-slate-400">
+                Código de Ativação (uso único · válido por 7 dias)
+              </span>
+              <div className="text-2xl sm:text-3xl font-mono font-extrabold tracking-widest text-blue-400 select-all py-1">
+                {pairingModalData.code}
+              </div>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      if (navigator?.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(pairingModalData.code);
+                        setCopiedPairingCode(true);
+                        showToast('Código copiado!');
+                      }
+                    } catch (_) {
+                      showToast('Selecione e copie o código manualmente.', 'error');
+                    }
+                  }}
+                  className="min-h-[38px] px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  {copiedPairingCode ? <Check size={14} className="w-3.5 h-3.5" /> : <Copy size={14} className="w-3.5 h-3.5" />}
+                  <span>{copiedPairingCode ? 'Copiado!' : 'Copiar Código'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={pairingLoading}
+                  onClick={() =>
+                    handleOpenPatientPairing({
+                      patient_id: pairingModalData.patientId,
+                      nome: pairingModalData.nome,
+                    })
+                  }
+                  className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={13} className={`w-3.5 h-3.5 ${pairingLoading ? 'animate-spin' : ''}`} />
+                  <span>Novo Código</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-slate-300 space-y-1.5 mb-5 leading-relaxed">
+              <p className="font-semibold text-blue-300">Como conectar no celular do paciente:</p>
+              <p>1. Instale e abra o app <strong>MediCare Paciente</strong> no celular da pessoa.</p>
+              <p>2. Na tela de login, toque em <strong>&quot;Já fui cadastrado pelo cuidador (Código)&quot;</strong>.</p>
+              <p>
+                3. Informe o código <strong>{pairingModalData.code}</strong>. O perfil pré-criado, os medicamentos e o vínculo com você serão baixados na hora.
+              </p>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPairingModalData(null)}
+                className="min-h-[42px] px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-colors"
+              >
+                Concluir
               </button>
             </div>
           </div>

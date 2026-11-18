@@ -373,6 +373,149 @@ export async function POST(req, { params }) {
       return clearAuthCookies(response, req);
     }
 
+    // 6. ATIVAÇÃO DE PACIENTE PRÉ-CADASTRADO VIA CÓDIGO DO CUIDADOR (POST /api/auth/v1/claim-patient)
+    if (action === 'claim-patient') {
+      const body = await req.json().catch(() => ({}));
+      const rawCode = String(body.code || body.pairing_code || '').trim().toUpperCase();
+      const cleanSuffix = rawCode.replace(/^PAC[-\s]?/i, '').replace(/[^A-Z0-9]/g, '');
+      if (cleanSuffix.length < 6) {
+        return NextResponse.json(
+          { error: 'Código de ativação inválido. Informe o código no formato PAC-XXXXXX.' },
+          { status: 400, headers: corsHeaders }
+        );
+      }
+      const normalizedCode = `PAC-${cleanSuffix}`;
+
+      const optionalEmail = String(body.email || '').trim().toLowerCase();
+      const optionalPassword = String(body.password || '');
+
+      if (optionalEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(optionalEmail)) {
+        return NextResponse.json(
+          { error: 'O e-mail informado não é válido.' },
+          { status: 400, headers: corsHeaders }
+        );
+      }
+      if (optionalPassword && optionalPassword.length < 6) {
+        return NextResponse.json(
+          { error: 'A senha opcional deve ter no mínimo 6 caracteres.' },
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const foundRes = await client.query(
+        `SELECT u.id, u.email, u.raw_user_meta_data, u.created_at, u.is_active, p.nome, p.role
+         FROM app_users u
+         LEFT JOIN profiles p ON p.id::text = u.id::text
+         WHERE upper(COALESCE(u.raw_user_meta_data->>'pairing_code', '')) = $1
+            OR upper(regexp_replace(COALESCE(u.raw_user_meta_data->>'pairing_code', ''), '^PAC-?', '', 'i')) = $2
+         LIMIT 1`,
+        [normalizedCode, cleanSuffix]
+      );
+
+      if (foundRes.rowCount === 0) {
+        return NextResponse.json(
+          { error: 'Código de ativação não encontrado ou já utilizado. Peça um novo código ao cuidador.' },
+          { status: 404, headers: corsHeaders }
+        );
+      }
+
+      const targetUser = foundRes.rows[0];
+      if (targetUser.is_active === false) {
+        return NextResponse.json(
+          { error: 'Esta conta de paciente está inativa.' },
+          { status: 403, headers: corsHeaders }
+        );
+      }
+
+      const expiresAtRaw = targetUser.raw_user_meta_data?.pairing_expires_at;
+      if (expiresAtRaw && new Date(expiresAtRaw).getTime() < Date.now()) {
+        return NextResponse.json(
+          { error: 'Este código de ativação expirou. Peça ao cuidador para gerar um novo código.' },
+          { status: 410, headers: corsHeaders }
+        );
+      }
+
+      if (optionalEmail) {
+        const dupRes = await client.query(
+          `SELECT id FROM app_users WHERE lower(email) = $1 AND id::text <> $2::text LIMIT 1`,
+          [optionalEmail, String(targetUser.id)]
+        );
+        if (dupRes.rowCount > 0) {
+          return NextResponse.json(
+            { error: 'Este e-mail já está em uso por outra conta.' },
+            { status: 409, headers: corsHeaders }
+          );
+        }
+      }
+
+      const finalEmail = optionalEmail || targetUser.email;
+      const resolvedNome = targetUser.nome || targetUser.raw_user_meta_data?.nome || 'Paciente';
+      const resolvedRole = targetUser.role || targetUser.raw_user_meta_data?.role || 'paciente';
+      const claimedAtIso = new Date().toISOString();
+
+      await client.query('BEGIN');
+      if (optionalEmail && optionalPassword) {
+        await client.query(
+          `UPDATE app_users
+           SET email = $2,
+               password_hash = crypt($3, gen_salt('bf', 10)),
+               raw_user_meta_data = (COALESCE(raw_user_meta_data, '{}'::jsonb) - 'pairing_code' - 'pairing_expires_at') || $4::jsonb,
+               last_sign_in_at = NOW()
+           WHERE id::text = $1::text`,
+          [String(targetUser.id), finalEmail, optionalPassword, JSON.stringify({ claimed_at: claimedAtIso })]
+        );
+      } else if (optionalEmail) {
+        await client.query(
+          `UPDATE app_users
+           SET email = $2,
+               raw_user_meta_data = (COALESCE(raw_user_meta_data, '{}'::jsonb) - 'pairing_code' - 'pairing_expires_at') || $3::jsonb,
+               last_sign_in_at = NOW()
+           WHERE id::text = $1::text`,
+          [String(targetUser.id), finalEmail, JSON.stringify({ claimed_at: claimedAtIso })]
+        );
+      } else if (optionalPassword) {
+        await client.query(
+          `UPDATE app_users
+           SET password_hash = crypt($2, gen_salt('bf', 10)),
+               raw_user_meta_data = (COALESCE(raw_user_meta_data, '{}'::jsonb) - 'pairing_code' - 'pairing_expires_at') || $3::jsonb,
+               last_sign_in_at = NOW()
+           WHERE id::text = $1::text`,
+          [String(targetUser.id), optionalPassword, JSON.stringify({ claimed_at: claimedAtIso })]
+        );
+      } else {
+        await client.query(
+          `UPDATE app_users
+           SET raw_user_meta_data = (COALESCE(raw_user_meta_data, '{}'::jsonb) - 'pairing_code' - 'pairing_expires_at') || $2::jsonb,
+               last_sign_in_at = NOW()
+           WHERE id::text = $1::text`,
+          [String(targetUser.id), JSON.stringify({ claimed_at: claimedAtIso })]
+        );
+      }
+
+      if (optionalEmail) {
+        await client.query(
+          `UPDATE profiles SET email = $2, updated_at = NOW() WHERE id::text = $1::text`,
+          [String(targetUser.id), finalEmail]
+        );
+      }
+
+      const sessionData = await issueSessionTokens(
+        client,
+        {
+          ...targetUser,
+          email: finalEmail,
+          nome: resolvedNome,
+          role: resolvedRole,
+        },
+        req.headers.get('user-agent') || '',
+        ip
+      );
+      await client.query('COMMIT');
+
+      const response = NextResponse.json(sessionData, { status: 200, headers: corsHeaders });
+      return attachAuthCookies(response, sessionData, req);
+    }
+
     return NextResponse.json({ error: 'Ação de autenticação desconhecida.' }, { status: 404, headers: corsHeaders });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
