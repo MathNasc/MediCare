@@ -42,6 +42,13 @@ import {
 } from 'lucide-react';
 import { formatAuditLogEntry } from '@/lib/auditFormatter';
 import { subscribeToPush } from '@/lib/webPush';
+import {
+  getBrazilDateIso,
+  addDaysBrazilDateIso,
+  getBrazilMinutesOfDay,
+  formatBrazilDateTime,
+  formatBrazilTime,
+} from '@/lib/brazilTime';
 
 function readCookieValue(name) {
   if (typeof document === 'undefined') return '';
@@ -1067,7 +1074,7 @@ export default function CuidadorWebPage() {
       return;
     }
     if (newPatientForm.dob) {
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = getBrazilDateIso();
       if (newPatientForm.dob > todayIso) {
         showToast('A data de nascimento não pode ser no futuro.', 'error');
         return;
@@ -1225,9 +1232,9 @@ export default function CuidadorWebPage() {
     }
 
     const sortedHorarios = Array.from(new Set(horariosArr)).sort((a, b) => a.localeCompare(b));
-    const startIso = new Date().toISOString().slice(0, 10);
+    const startIso = getBrazilDateIso();
     const endIso = isTemp
-      ? new Date(Date.now() + Math.max(0, Math.round(daysNum) - 1) * 86400000).toISOString().slice(0, 10)
+      ? addDaysBrazilDateIso(Math.max(0, Math.round(daysNum) - 1), startIso)
       : null;
 
     setActionLoading(true);
@@ -1316,7 +1323,7 @@ export default function CuidadorWebPage() {
 
     setActionLoading(true);
     try {
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = getBrazilDateIso();
       const res = await apiFetch('/api/rest/v1/rpc/confirm_dose_retroactive', {
         method: 'POST',
         body: JSON.stringify({
@@ -1471,8 +1478,8 @@ export default function CuidadorWebPage() {
   // Doses do dia com distinção semântica precisa entre os 5 estados
   const todayDoses = [];
   const nowObj = new Date();
-  const todayIso = nowObj.toISOString().slice(0, 10);
-  const currentMinutesOfDay = nowObj.getHours() * 60 + nowObj.getMinutes();
+  const todayIso = getBrazilDateIso(nowObj);
+  const currentMinutesOfDay = getBrazilMinutesOfDay(nowObj);
 
   medications.forEach((med) => {
     const horarios = Array.isArray(med.horarios) && med.horarios.length > 0 ? med.horarios : [];
@@ -1486,7 +1493,7 @@ export default function CuidadorWebPage() {
         const hHora = String(h.hora || h.horario || '').trim().slice(0, 5);
         const hDate = h.dose_date
           ? String(h.dose_date).slice(0, 10)
-          : String(h.created_at || '').slice(0, 10);
+          : getBrazilDateIso(h.created_at);
         return h.med_id === med.id && hHora === hora && hDate === todayIso;
       });
 
@@ -2452,16 +2459,10 @@ export default function CuidadorWebPage() {
                       .filter((d) => doseStatusFilter === 'all' || d.status === doseStatusFilter)
                       .map((dose) => {
                         const administeredTimeStr = dose.administered_at
-                          ? new Date(dose.administered_at).toLocaleTimeString('pt-BR', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
+                          ? formatBrazilTime(dose.administered_at)
                           : null;
                         const recordedTimeStr = dose.recorded_at
-                          ? new Date(dose.recorded_at).toLocaleTimeString('pt-BR', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
+                          ? formatBrazilTime(dose.recorded_at)
                           : null;
 
                         return (
@@ -2998,7 +2999,7 @@ export default function CuidadorWebPage() {
                             </span>
                           </div>
                           <span className="text-slate-400 tabular-nums shrink-0">
-                            {new Date(log.created_at).toLocaleString('pt-BR')}
+                            {formatBrazilDateTime(log.created_at)}
                           </span>
                         </div>
 
@@ -4089,7 +4090,7 @@ export default function CuidadorWebPage() {
                           {!notif.lida && (
                             <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" aria-label="Não lida" />
                           )}
-                          <span>{new Date(notif.created_at).toLocaleString('pt-BR')}</span>
+                          <span>{formatBrazilDateTime(notif.created_at)}</span>
                         </div>
                       </div>
                       <p className="text-xs font-bold text-white leading-snug">{notif.titulo}</p>

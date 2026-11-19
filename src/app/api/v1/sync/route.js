@@ -76,16 +76,17 @@ function cleanNullableText(val) {
   return s;
 }
 
-function getLocalTodayIso(tz = 'America/Sao_Paulo') {
+function getLocalTodayIso(tz = 'America/Sao_Paulo', dateRef = new Date()) {
+  const target = dateRef instanceof Date ? dateRef : new Date(dateRef);
   try {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: tz || 'America/Sao_Paulo',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(new Date());
+    }).format(target);
   } catch {
-    const d = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const d = new Date(target.getTime() - 3 * 60 * 60 * 1000);
     return d.toISOString().slice(0, 10);
   }
 }
@@ -271,9 +272,7 @@ export async function GET(request) {
           ? row.dose_date.toISOString().slice(0, 10)
           : String(row.dose_date).slice(0, 10)
         : row.created_at
-        ? row.created_at instanceof Date
-          ? row.created_at.toISOString().slice(0, 10)
-          : String(row.created_at).slice(0, 10)
+        ? getLocalTodayIso('America/Sao_Paulo', row.created_at)
         : '';
       const rawHora = String(row.hora || row.horario || '').trim();
       const normHora = rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora;
@@ -819,7 +818,7 @@ export async function POST(request) {
       if (evType === 'estoque' || /^reposi[cç][aã]o:/i.test(evTitle) || /^ajuste:/i.test(evTitle)) {
         continue;
       }
-      const evDate = parsePgDate(ev.date || ev.data) || new Date().toISOString().slice(0, 10);
+      const evDate = parsePgDate(ev.date || ev.data) || getLocalTodayIso(cleanNullableText(body.timezone) || 'America/Sao_Paulo');
       const evUuid = toDeterministicUuid(ev.id || `${evTitle}:${evDate}`, `event:${userId}`);
       if (deletedSet.has(String(ev.id || '').trim().toLowerCase()) || deletedSet.has(evUuid.toLowerCase())) {
         continue;
@@ -851,7 +850,7 @@ export async function POST(request) {
     for (const n of notes) {
       const content = n?.content || n?.description || n?.texto || n?.title || '';
       if (!content) continue;
-      const noteDate = parsePgDate(n.date || n.data) || new Date().toISOString().slice(0, 10);
+      const noteDate = parsePgDate(n.date || n.data) || getLocalTodayIso(cleanNullableText(body.timezone) || 'America/Sao_Paulo');
       const noteUuid = toDeterministicUuid(n.id || `note:${noteDate}:${content.slice(0, 20)}`, `note:${userId}`);
       if (deletedSet.has(String(n.id || '').trim().toLowerCase()) || deletedSet.has(noteUuid.toLowerCase())) {
         continue;
@@ -1029,7 +1028,8 @@ export async function POST(request) {
         const resolvedMedUuid =
           medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : rawMedId);
         const doseDate =
-          parsePgDate(reqItem.dose_date || reqItem.data || reqItem.date) || new Date().toISOString().slice(0, 10);
+          parsePgDate(reqItem.dose_date || reqItem.data || reqItem.date) ||
+          getLocalTodayIso(cleanNullableText(body.timezone) || 'America/Sao_Paulo');
         const rawHora = String(reqItem.hora || reqItem.horario || '08:00').trim();
         const hora = rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora;
         const reqStatus = normalizeDoseStatus(reqItem.requested_status || reqItem.target_status || 'confirmed');

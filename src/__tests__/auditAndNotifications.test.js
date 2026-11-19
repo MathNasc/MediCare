@@ -5,11 +5,38 @@ import {
   notifyCaregiversOfDoseRequest,
   checkOverdueDosesForCaregivers,
 } from '@/lib/caregiverNotifications';
+import {
+  getBrazilDateIso,
+  getBrazilTimeHm,
+  getBrazilMinutesOfDay,
+  parseBrazilDateTime,
+  addDaysBrazilDateIso,
+  formatBrazilTime,
+} from '@/lib/brazilTime';
 
 jest.mock('web-push', () => ({
   setVapidDetails: jest.fn(),
   sendNotification: jest.fn().mockResolvedValue({}),
 }));
+
+describe('brazilTime (America/Sao_Paulo)', () => {
+  test('keeps Brasilia calendar date and time when UTC has already crossed midnight (e.g. 21:25 BRT = 00:25 UTC next day)', () => {
+    const utcAfterMidnight = new Date('2026-11-19T00:25:00.000Z');
+    expect(getBrazilDateIso(utcAfterMidnight)).toBe('2026-11-18');
+    expect(getBrazilTimeHm(utcAfterMidnight)).toBe('21:25');
+    expect(getBrazilMinutesOfDay(utcAfterMidnight)).toBe(21 * 60 + 25);
+    expect(formatBrazilTime(utcAfterMidnight)).toBe('21:25');
+  });
+
+  test('parseBrazilDateTime anchors HH:MM strictly to UTC-03:00', () => {
+    const parsed = parseBrazilDateTime('2026-11-18', '21:25');
+    expect(parsed.toISOString()).toBe('2026-11-19T00:25:00.000Z');
+  });
+
+  test('addDaysBrazilDateIso computes end date reliably without UTC drift', () => {
+    expect(addDaysBrazilDateIso(6, '2026-11-18')).toBe('2026-11-24');
+  });
+});
 
 describe('auditFormatter', () => {
   test('translates known audit actions into friendly Portuguese labels with context', () => {

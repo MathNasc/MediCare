@@ -7,6 +7,13 @@ import {
   extractAuthenticatedUser,
   verifyActiveSessionInDb,
 } from '@/lib/oracleAuth';
+import {
+  getBrazilDateIso,
+  getBrazilMonthPrefix,
+  addDaysBrazilDateIso,
+  getBrazilTimeHm,
+  parseBrazilDateTime,
+} from '@/lib/brazilTime';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -177,14 +184,14 @@ function buildWhereClause(searchParams, values, extraClauses = []) {
 
 function computeDoseTimingAndRetroactivity({ doseDate, scheduledHora, actualAdminTime, isUpdatingExisting, explicitRetroactive }) {
   const now = new Date();
-  const todayIso = now.toISOString().slice(0, 10);
+  const todayIso = getBrazilDateIso(now);
   const cleanDate = String(doseDate || todayIso).slice(0, 10);
   const cleanScheduled = String(scheduledHora || '08:00').trim().slice(0, 5);
   const cleanActual = actualAdminTime ? String(actualAdminTime).trim().slice(0, 5) : null;
 
-  const scheduledDateObj = new Date(`${cleanDate}T${cleanScheduled}:00`);
+  const scheduledDateObj = parseBrazilDateTime(cleanDate, cleanScheduled);
   const actualDateObj = cleanActual
-    ? new Date(`${cleanDate}T${cleanActual}:00`)
+    ? parseBrazilDateTime(cleanDate, cleanActual)
     : now;
 
   let delayMinutes = 0;
@@ -209,7 +216,7 @@ function computeDoseTimingAndRetroactivity({ doseDate, scheduledHora, actualAdmi
   return {
     cleanDate,
     cleanScheduled,
-    cleanActual: cleanActual || now.toTimeString().slice(0, 5),
+    cleanActual: cleanActual || getBrazilTimeHm(now),
     actualTimestampIso: !isNaN(actualDateObj.getTime()) ? actualDateObj.toISOString() : now.toISOString(),
     recordedAtIso: now.toISOString(),
     delayMinutes,
@@ -244,7 +251,7 @@ async function handleRpcCall(client, fnName, args, userId) {
       if (!allowed) {
         return { status: 403, body: { success: false, error: 'Acesso negado a este paciente.' } };
       }
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = getBrazilDateIso();
       const res = await client.query(
         `UPDATE medicamentos
          SET status = 'concluido', finished_at = NOW(), ativo = FALSE
@@ -265,7 +272,7 @@ async function handleRpcCall(client, fnName, args, userId) {
       const patientId = args.p_patient_id || userId;
       const medId = args.p_med_id;
       const hora = String(args.p_hora || '').trim();
-      const doseDate = String(args.p_dose_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      const doseDate = String(args.p_dose_date || getBrazilDateIso()).slice(0, 10);
       const requestedStatus = String(args.p_new_status || 'confirmed').toLowerCase().trim();
       const reason = args.p_reason ? String(args.p_reason).trim() : null;
       const actor = userId;
@@ -456,9 +463,19 @@ async function handleRpcCall(client, fnName, args, userId) {
                  confirmed_by_role = $5,
                  corrected_at = NOW(),
                  correction_reason = $6,
-                 motivo = COALESCE($6, motivo)
+                 motivo = COALESCE($6, motivo),
+                 administered_at = COALESCE($8::timestamptz, administered_at)
              WHERE id = $7`,
-            [finalStatus, delayToStore, actor, actorName, actorRole, reason, primaryRow.id]
+            [
+              finalStatus,
+              delayToStore,
+              actor,
+              actorName,
+              actorRole,
+              reason,
+              primaryRow.id,
+              finalStatus === 'missed' ? null : timing.actualTimestampIso,
+            ]
           );
 
           await client
@@ -495,9 +512,9 @@ async function handleRpcCall(client, fnName, args, userId) {
           `INSERT INTO historico_doses (
              id, med_id, user_id, hora, dose_date, status, atraso_minutos,
              performed_by, confirmed_by_name, confirmed_by_role,
-             is_retroactive, corrected_at, created_at, correction_reason, motivo
+             is_retroactive, corrected_at, created_at, correction_reason, motivo, administered_at
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), $13, $13)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), $13, $13, $14::timestamptz)`,
           [
             newId,
             medId,
@@ -512,6 +529,7 @@ async function handleRpcCall(client, fnName, args, userId) {
             timing.isRetroactive,
             timing.isRetroactive ? new Date().toISOString() : null,
             reason,
+            finalStatus === 'missed' ? null : timing.actualTimestampIso,
           ]
         );
 
@@ -846,9 +864,7 @@ async function handleRpcCall(client, fnName, args, userId) {
       const horarios = Array.isArray(m.horarios) ? m.horarios : ['08:00'];
       const dosesPerDay = Math.max(1, horarios.length);
       const daysRemaining = Math.floor(Number(m.quantidade || 0) / dosesPerDay);
-      const depDate = new Date();
-      depDate.setDate(depDate.getDate() + daysRemaining);
-      const depIso = depDate.toISOString().slice(0, 10);
+      const depIso = addDaysBrazilDateIso(daysRemaining);
 
       const mvsRes = await client.query(
         `SELECT created_at, COALESCE(quantity_changed, quantity_delta, quantity_after - quantity_before) AS delta
@@ -858,11 +874,11 @@ async function handleRpcCall(client, fnName, args, userId) {
         [String(medId)]
       );
       const lastPurchase = mvsRes.rows[0]?.created_at
-        ? new Date(mvsRes.rows[0].created_at).toISOString().slice(0, 10)
+        ? getBrazilDateIso(mvsRes.rows[0].created_at)
         : null;
-      const monthPrefix = new Date().toISOString().slice(0, 7);
+      const monthPrefix = getBrazilMonthPrefix();
       const monthQty = mvsRes.rows
-        .filter((r) => String(r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at).startsWith(monthPrefix))
+        .filter((r) => getBrazilDateIso(r.created_at).startsWith(monthPrefix))
         .reduce((acc, r) => acc + Number(r.delta || 0), 0);
 
       return {
@@ -906,9 +922,7 @@ async function handleRpcCall(client, fnName, args, userId) {
         const horarios = Array.isArray(m.horarios) ? m.horarios : ['08:00'];
         const dosesPerDay = Math.max(1, horarios.length);
         const daysRemaining = Math.floor(Number(m.quantidade || 0) / dosesPerDay);
-        const depDate = new Date();
-        depDate.setDate(depDate.getDate() + daysRemaining);
-        const depIso = depDate.toISOString().slice(0, 10);
+        const depIso = addDaysBrazilDateIso(daysRemaining);
         return {
           med_id: m.id,
           nome: m.nome,
@@ -1298,8 +1312,7 @@ async function handleRpcCall(client, fnName, args, userId) {
         return { status: 403, body: { error: 'Acesso negado para repetir tratamento deste paciente.' } };
       }
       const days = Number(m.treatment_days) || 7;
-      const start = new Date(`${newStartDate}T00:00:00`);
-      const end = new Date(start.getTime() + Math.max(0, days - 1) * 86400000).toISOString().slice(0, 10);
+      const end = addDaysBrazilDateIso(Math.max(0, days - 1), newStartDate);
       const newId = crypto.randomUUID();
 
       await client.query(
@@ -1340,7 +1353,7 @@ async function handleRpcCall(client, fnName, args, userId) {
         `SELECT id, treatment_type, status, ativo FROM medicamentos WHERE user_id::text = $1::text`,
         [String(targetUser)]
       );
-      const monthPrefix = new Date().toISOString().slice(0, 7);
+      const monthPrefix = getBrazilMonthPrefix();
       const histRes = await client.query(
         `SELECT med_id, created_at FROM historico_doses WHERE user_id::text = $1::text`,
         [String(targetUser)]
@@ -1349,7 +1362,7 @@ async function handleRpcCall(client, fnName, args, userId) {
       const sosCount = histRes.rows.filter(
         (h) =>
           sosIds.has(String(h.med_id)) &&
-          String(h.created_at instanceof Date ? h.created_at.toISOString() : h.created_at).startsWith(monthPrefix)
+          getBrazilDateIso(h.created_at).startsWith(monthPrefix)
       ).length;
 
       return {
@@ -1621,8 +1634,8 @@ async function handleRestRequest(req, { params }) {
 
         if (table === 'historico_doses' && !record.dose_date) {
           record.dose_date = record.created_at
-            ? String(record.created_at).slice(0, 10)
-            : new Date().toISOString().slice(0, 10);
+            ? getBrazilDateIso(record.created_at)
+            : getBrazilDateIso();
         }
 
         const cols = Object.keys(record)
