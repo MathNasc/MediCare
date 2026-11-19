@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import medicareLogo from '../../../public/icon-192.png';
-import { registerServiceWorker, PWAInstallButton, OfflineIndicator } from '@/lib/usePWA';
+import { registerServiceWorker, PWAInstallButton, OfflineIndicator, usePWAInstall } from '@/lib/usePWA';
 import {
   Home,
   Users,
@@ -39,6 +39,14 @@ import {
   Smartphone,
   Copy,
   Bell,
+  ChevronLeft,
+  FileText,
+  Pencil,
+  Info,
+  Download,
+  Globe,
+  ShieldCheck,
+  HeartHandshake,
 } from 'lucide-react';
 import { formatAuditLogEntry } from '@/lib/auditFormatter';
 import { subscribeToPush } from '@/lib/webPush';
@@ -49,6 +57,15 @@ import {
   formatBrazilDateTime,
   formatBrazilTime,
 } from '@/lib/brazilTime';
+import {
+  MONTHS_PT,
+  WEEKDAYS_SHORT_PT,
+  formatDateBr,
+  formatFullDateBr,
+  getDayDetails,
+  buildCalendarMonthData,
+  isStockEventRecord,
+} from '@/lib/caregiverCalendar';
 
 function readCookieValue(name) {
   if (typeof document === 'undefined') return '';
@@ -148,6 +165,8 @@ export default function CuidadorWebPage() {
   const [medications, setMedications] = useState([]);
   const [doseHistory, setDoseHistory] = useState([]);
   const [appointments, setAppointments] = useState([]);
+  const [calendarNotes, setCalendarNotes] = useState([]);
+  const [stockMovements, setStockMovements] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState([]);
 
@@ -158,6 +177,7 @@ export default function CuidadorWebPage() {
   const [medToDelete, setMedToDelete] = useState(null);
   const [showDoseModal, setShowDoseModal] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
+  const [showNoteModal, setShowNoteModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
   const [showMobileMenuSheet, setShowMobileMenuSheet] = useState(false);
   const [showPatientPickerSheet, setShowPatientPickerSheet] = useState(false);
@@ -171,6 +191,18 @@ export default function CuidadorWebPage() {
   const [pushConfigured, setPushConfigured] = useState(false);
   const [pushPermission, setPushPermission] = useState('default');
   const [pushLoading, setPushLoading] = useState(false);
+  const [systemVersions, setSystemVersions] = useState(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [showAndroidPwaGuide, setShowAndroidPwaGuide] = useState(false);
+  const pwaInstall = usePWAInstall();
+
+  // Calendar states (Horário de Brasília)
+  const [calYear, setCalYear] = useState(() => Number(getBrazilDateIso().slice(0, 4)) || 2026);
+  const [calMonthIndex, setCalMonthIndex] = useState(() => (Number(getBrazilDateIso().slice(5, 7)) || 1) - 1);
+  const [selectedCalDate, setSelectedCalDate] = useState(() => getBrazilDateIso());
+  const [showCalSearch, setShowCalSearch] = useState(false);
+  const [calSearchQuery, setCalSearchQuery] = useState('');
+  const [noteForm, setNoteForm] = useState({ id: null, date: '', content: '', mood: '' });
 
   // Form states (sem valores clínicos pré-definidos)
   const [inviteTokenInput, setInviteTokenInput] = useState('');
@@ -220,6 +252,7 @@ export default function CuidadorWebPage() {
     Boolean(medToDelete) ||
     showDoseModal ||
     showAppointmentModal ||
+    showNoteModal ||
     showStockModal ||
     showMobileMenuSheet ||
     showPatientPickerSheet ||
@@ -250,6 +283,7 @@ export default function CuidadorWebPage() {
     setMedToDelete(null);
     setShowDoseModal(false);
     setShowAppointmentModal(false);
+    setShowNoteModal(false);
     setShowStockModal(false);
     setShowMobileMenuSheet(false);
     setShowPatientPickerSheet(false);
@@ -486,6 +520,8 @@ export default function CuidadorWebPage() {
     setMedications([]);
     setDoseHistory([]);
     setAppointments([]);
+    setCalendarNotes([]);
+    setStockMovements([]);
     setAuditLogs([]);
     setApprovalRequests([]);
     setNotificationsList([]);
@@ -925,11 +961,29 @@ export default function CuidadorWebPage() {
     }
   };
 
+  const loadSystemVersions = useCallback(async () => {
+    setVersionsLoading(true);
+    try {
+      const res = await fetch('/api/system/versions', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.ok) {
+          setSystemVersions(data);
+        }
+      }
+    } catch {
+      // ignora erro transitório ao consultar versões
+    } finally {
+      setVersionsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPushPermission(Notification.permission);
     }
-  }, [isAuthenticated]);
+    loadSystemVersions();
+  }, [isAuthenticated, loadSystemVersions]);
 
   // Carrega dados do cuidador e pacientes autorizados (somente vínculos ativos!)
   const loadData = useCallback(async () => {
@@ -976,15 +1030,17 @@ export default function CuidadorWebPage() {
       }
 
       if (validTargetId) {
-        const [medsRes, histRes, eventsRes, logsRes, approvalsRes] = await Promise.all([
+        const [medsRes, histRes, eventsRes, logsRes, approvalsRes, notesRes, stockRes] = await Promise.all([
           apiFetch(`/api/rest/v1/medicamentos?user_id=eq.${validTargetId}&ativo=eq.true&order=created_at.asc`),
-          apiFetch(`/api/rest/v1/historico_doses?user_id=eq.${validTargetId}&order=created_at.desc&limit=100`),
+          apiFetch(`/api/rest/v1/historico_doses?user_id=eq.${validTargetId}&order=created_at.desc&limit=350`),
           apiFetch(`/api/rest/v1/health_events?user_id=eq.${validTargetId}&order=date.asc`),
           apiFetch('/api/rest/v1/rpc/list_audit_logs', {
             method: 'POST',
             body: JSON.stringify({ p_patient_id: validTargetId, p_limit: 30 }),
           }),
           apiFetch(`/api/rest/v1/approval_requests?patient_id=eq.${validTargetId}&status=eq.pending&order=created_at.desc`),
+          apiFetch(`/api/rest/v1/calendar_notes?user_id=eq.${validTargetId}&order=date.desc&limit=200`),
+          apiFetch(`/api/rest/v1/stock_movements?user_id=eq.${validTargetId}&order=created_at.desc&limit=200`),
         ]);
 
         const meds = medsRes.ok ? await medsRes.json().catch(() => []) : [];
@@ -992,18 +1048,24 @@ export default function CuidadorWebPage() {
         const events = eventsRes.ok ? await eventsRes.json().catch(() => []) : [];
         const logs = logsRes.ok ? await logsRes.json().catch(() => []) : [];
         const approvals = approvalsRes.ok ? await approvalsRes.json().catch(() => []) : [];
+        const cNotes = notesRes.ok ? await notesRes.json().catch(() => []) : [];
+        const sMoves = stockRes.ok ? await stockRes.json().catch(() => []) : [];
 
         setMedications(Array.isArray(meds) ? meds : []);
         setDoseHistory(Array.isArray(hist) ? hist : []);
         setAppointments(Array.isArray(events) ? events : []);
         setAuditLogs(Array.isArray(logs) ? logs : []);
         setApprovalRequests(Array.isArray(approvals) ? approvals : []);
+        setCalendarNotes(Array.isArray(cNotes) ? cNotes : []);
+        setStockMovements(Array.isArray(sMoves) ? sMoves : []);
       } else {
         setMedications([]);
         setDoseHistory([]);
         setAppointments([]);
         setAuditLogs([]);
         setApprovalRequests([]);
+        setCalendarNotes([]);
+        setStockMovements([]);
       }
     } catch (err) {
       console.warn('Erro ao carregar dados:', err);
@@ -1323,14 +1385,14 @@ export default function CuidadorWebPage() {
 
     setActionLoading(true);
     try {
-      const todayIso = getBrazilDateIso();
+      const targetDoseDate = selectedDoseTarget?.dose_date || getBrazilDateIso();
       const res = await apiFetch('/api/rest/v1/rpc/confirm_dose_retroactive', {
         method: 'POST',
         body: JSON.stringify({
           p_patient_id: selectedPatientId,
           p_med_id: selectedDoseTarget.med_id,
           p_hora: selectedDoseTarget.hora,
-          p_dose_date: todayIso,
+          p_dose_date: targetDoseDate,
           p_administered_time: status === 'confirmed' ? doseAdministeredTime : null,
           p_new_status: status,
           p_reason:
@@ -1415,6 +1477,14 @@ export default function CuidadorWebPage() {
         throw new Error(errData.error || 'Erro ao salvar compromisso');
       }
       showToast('Compromisso agendado com sucesso!');
+      if (newAppointmentForm.date) {
+        const parts = newAppointmentForm.date.split('-').map(Number);
+        if (parts.length === 3 && parts[0] && parts[1]) {
+          setCalYear(parts[0]);
+          setCalMonthIndex(parts[1] - 1);
+          setSelectedCalDate(newAppointmentForm.date);
+        }
+      }
       setShowAppointmentModal(false);
       setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
       loadData();
@@ -1423,6 +1493,130 @@ export default function CuidadorWebPage() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleDeleteAppointment = async (aptId) => {
+    if (!aptId) return;
+    setActionLoading(true);
+    try {
+      const res = await apiFetch(`/api/rest/v1/health_events?id=eq.${aptId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        throw new Error('Não foi possível excluir este compromisso.');
+      }
+      showToast('Compromisso removido da agenda.');
+      loadData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSaveCalendarNote = async (e) => {
+    e.preventDefault();
+    if (!selectedPatientId) return;
+    const cleanDate = String(noteForm.date || selectedCalDate || getBrazilDateIso()).slice(0, 10);
+    const cleanContent = noteForm.content.trim();
+    if (!cleanContent) {
+      showToast('Escreva o conteúdo da anotação antes de salvar.', 'error');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const isEdit = Boolean(noteForm.id);
+      const url = isEdit
+        ? `/api/rest/v1/calendar_notes?id=eq.${noteForm.id}`
+        : '/api/rest/v1/calendar_notes';
+      const res = await apiFetch(url, {
+        method: isEdit ? 'PATCH' : 'POST',
+        body: JSON.stringify(
+          isEdit
+            ? {
+                date: cleanDate,
+                content: cleanContent,
+                mood: noteForm.mood.trim() || null,
+              }
+            : {
+                user_id: selectedPatientId,
+                date: cleanDate,
+                content: cleanContent,
+                mood: noteForm.mood.trim() || null,
+              }
+        ),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Erro ao salvar anotação');
+      }
+      showToast(isEdit ? 'Anotação atualizada!' : 'Anotação salva no calendário!');
+      setShowNoteModal(false);
+      setNoteForm({ id: null, date: cleanDate, content: '', mood: '' });
+      setSelectedCalDate(cleanDate);
+      const parts = cleanDate.split('-').map(Number);
+      if (parts.length === 3 && parts[0] && parts[1]) {
+        setCalYear(parts[0]);
+        setCalMonthIndex(parts[1] - 1);
+      }
+      loadData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteCalendarNote = async (noteId) => {
+    if (!noteId) return;
+    setActionLoading(true);
+    try {
+      const res = await apiFetch(`/api/rest/v1/calendar_notes?id=eq.${noteId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        throw new Error('Não foi possível remover a anotação.');
+      }
+      showToast('Anotação removida.');
+      loadData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSelectCalDate = (dateIso) => {
+    if (!dateIso) return;
+    setSelectedCalDate(dateIso);
+    const parts = dateIso.split('-').map(Number);
+    if (parts.length === 3 && parts[0] && parts[1]) {
+      setCalYear(parts[0]);
+      setCalMonthIndex(parts[1] - 1);
+    }
+  };
+
+  const handlePrevCalMonth = () => {
+    if (calMonthIndex === 0) {
+      setCalMonthIndex(11);
+      setCalYear((y) => y - 1);
+    } else {
+      setCalMonthIndex((m) => m - 1);
+    }
+  };
+
+  const handleNextCalMonth = () => {
+    if (calMonthIndex === 11) {
+      setCalMonthIndex(0);
+      setCalYear((y) => y + 1);
+    } else {
+      setCalMonthIndex((m) => m + 1);
+    }
+  };
+
+  const handleJumpTodayCal = () => {
+    const tIso = getBrazilDateIso();
+    handleSelectCalDate(tIso);
   };
 
   // Registrar Reposição de Estoque
@@ -1567,6 +1761,30 @@ export default function CuidadorWebPage() {
   const adherenceRate =
     totalDosesToday > 0 ? Math.round((confirmedDosesToday / totalDosesToday) * 100) : 100;
 
+  const calendarMonthData = buildCalendarMonthData({
+    year: calYear,
+    monthIndex: calMonthIndex,
+    todayIso,
+    currentMinutesOfDay,
+    medications,
+    doseHistory,
+    appointments,
+    calendarNotes,
+    stockMovements,
+  });
+
+  const activeSelectedCalDate = selectedCalDate || todayIso;
+  const selectedDayDetails = getDayDetails({
+    dateIso: activeSelectedCalDate,
+    todayIso,
+    currentMinutesOfDay,
+    medications,
+    doseHistory,
+    appointments,
+    calendarNotes,
+    stockMovements,
+  });
+
   const selectedPatient =
     patients.find((p) => p.patient_id === selectedPatientId) || patients[0] || null;
 
@@ -1574,9 +1792,10 @@ export default function CuidadorWebPage() {
     { id: 'dashboard', label: 'Central de Doses', mobileLabel: 'Doses', icon: Home },
     { id: 'patients', label: 'Pacientes', mobileLabel: 'Pacientes', icon: Users },
     { id: 'meds', label: 'Medicamentos & Estoque', mobileLabel: 'Remédios', icon: Pill },
-    { id: 'agenda', label: 'Agenda', mobileLabel: 'Agenda', icon: Calendar },
+    { id: 'agenda', label: 'Calendário & Agenda', mobileLabel: 'Agenda', icon: Calendar },
     { id: 'reports', label: 'Indicadores', mobileLabel: 'Indicadores', icon: BarChart3 },
     { id: 'audit', label: 'Auditoria', mobileLabel: 'Auditoria', icon: History },
+    { id: 'about', label: 'Sobre & Apps', mobileLabel: 'Sobre', icon: Info },
   ];
 
   const mobileNavItems = [
@@ -1594,10 +1813,12 @@ export default function CuidadorWebPage() {
       : currentTab === 'meds'
       ? 'Medicamentos & Estoque'
       : currentTab === 'agenda'
-      ? 'Agenda Médica'
+      ? 'Calendário & Agenda'
       : currentTab === 'reports'
       ? 'Indicadores de Adesão'
-      : 'Trilha de Auditoria';
+      : currentTab === 'audit'
+      ? 'Trilha de Auditoria'
+      : 'Sobre o MediCare';
 
   // ─────────────────────────────────────────────────────────────
   // TELA DE LOGIN / CADASTRO DO CUIDADOR
@@ -2200,10 +2421,10 @@ export default function CuidadorWebPage() {
           </div>
         </header>
 
-        {/* Sub-navegação mobile entre Indicadores e Auditoria */}
-        {(currentTab === 'reports' || currentTab === 'audit') && (
+        {/* Sub-navegação mobile entre Indicadores, Auditoria e Sobre */}
+        {(currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about') && (
           <div className="md:hidden px-4 pt-3">
-            <div className="grid grid-cols-2 gap-1 p-1 bg-[#131d31] border border-slate-800 rounded-xl">
+            <div className="grid grid-cols-3 gap-1 p-1 bg-[#131d31] border border-slate-800 rounded-xl">
               <button
                 type="button"
                 onClick={() => navigateToTab('reports')}
@@ -2226,6 +2447,17 @@ export default function CuidadorWebPage() {
               >
                 Auditoria
               </button>
+              <button
+                type="button"
+                onClick={() => navigateToTab('about')}
+                className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                  currentTab === 'about'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Sobre
+              </button>
             </div>
           </div>
         )}
@@ -2233,7 +2465,7 @@ export default function CuidadorWebPage() {
         {/* Tab Body */}
         <main className="flex-1 px-4 py-5 sm:p-6 lg:p-8 max-w-6xl w-full mx-auto pb-24 md:pb-10">
           {/* Estado vazio quando não há paciente com vínculo ativo */}
-          {patients.length === 0 && currentTab !== 'patients' && (
+          {patients.length === 0 && currentTab !== 'patients' && currentTab !== 'about' && (
             <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-10 text-center space-y-5 mb-6 max-w-xl mx-auto">
               <div className="w-12 h-12 rounded-2xl bg-blue-600/15 border border-blue-500/30 text-blue-400 flex items-center justify-center mx-auto">
                 <Users size={22} className="w-5 h-5" />
@@ -2825,89 +3057,680 @@ export default function CuidadorWebPage() {
             </div>
           )}
 
-          {/* TAB 4: AGENDA */}
-          {currentTab === 'agenda' && selectedPatient && (
-            <div className="space-y-5 sm:space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Agenda Médica</h1>
-                  <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                    Consultas e exames de {selectedPatient.nome}.
-                  </p>
-                </div>
+          {/* TAB 4: CALENDÁRIO & AGENDA (ESPELHADO NO CALENDÁRIO DO PACIENTE) */}
+          {currentTab === 'agenda' && selectedPatient && (() => {
+            const { cells, monthSummary, upcomingEvents } = calendarMonthData;
+            const currentMonthPrefix = todayIso.slice(0, 7);
+            const viewedMonthPrefix = `${calYear}-${String(calMonthIndex + 1).padStart(2, '0')}`;
+            const isViewingCurrentMonth = currentMonthPrefix === viewedMonthPrefix;
+            const calQueryTrim = calSearchQuery.trim().toLowerCase();
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
-                    setShowAppointmentModal(true);
-                  }}
-                  className="w-full sm:w-auto min-h-[44px] flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
-                >
-                  <Plus size={15} className="w-4 h-4" />
-                  <span>Novo Compromisso</span>
-                </button>
-              </div>
+            const searchResults = [];
+            if (showCalSearch && calQueryTrim.length >= 2) {
+              calendarNotes.forEach((n) => {
+                if (
+                  String(n.content || '').toLowerCase().includes(calQueryTrim) ||
+                  String(n.mood || '').toLowerCase().includes(calQueryTrim)
+                ) {
+                  searchResults.push({
+                    key: `note-${n.id}`,
+                    kind: 'Nota',
+                    title: n.content,
+                    sub: `${formatDateBr(n.date)}${n.mood ? ` · ${n.mood}` : ''}`,
+                    date: String(n.date || '').slice(0, 10),
+                  });
+                }
+              });
+              appointments.forEach((ev) => {
+                if (isStockEventRecord(ev)) return;
+                if (
+                  String(ev.title || '').toLowerCase().includes(calQueryTrim) ||
+                  String(ev.doctor || '').toLowerCase().includes(calQueryTrim) ||
+                  String(ev.location || '').toLowerCase().includes(calQueryTrim)
+                ) {
+                  searchResults.push({
+                    key: `ev-${ev.id}`,
+                    kind: 'Evento',
+                    title: ev.title,
+                    sub: `${formatDateBr(ev.date)}${ev.time ? ` às ${ev.time}` : ''}${ev.doctor ? ` · ${ev.doctor}` : ''}`,
+                    date: String(ev.date || '').slice(0, 10),
+                  });
+                }
+              });
+              stockMovements.forEach((sm) => {
+                const label = sm.med_name || 'Medicamento';
+                if (
+                  label.toLowerCase().includes(calQueryTrim) ||
+                  String(sm.notes || '').toLowerCase().includes(calQueryTrim)
+                ) {
+                  const smDate = sm.created_at ? getBrazilDateIso(sm.created_at) : todayIso;
+                  const delta = Number(sm.quantity_delta ?? sm.quantity_changed ?? 0);
+                  searchResults.push({
+                    key: `sm-${sm.id}`,
+                    kind: 'Estoque',
+                    title: `${label} (${delta >= 0 ? `+${delta}` : delta} un)`,
+                    sub: `${formatDateBr(smDate)}${sm.notes ? ` · ${sm.notes}` : ''}`,
+                    date: smDate,
+                  });
+                }
+              });
+              medications.forEach((m) => {
+                if (String(m.nome || '').toLowerCase().includes(calQueryTrim)) {
+                  searchResults.push({
+                    key: `med-${m.id}`,
+                    kind: 'Remédio',
+                    title: `${m.nome} ${m.dosagem || ''}`.trim(),
+                    sub: Array.isArray(m.horarios) && m.horarios.length > 0 ? `Horários: ${m.horarios.join(', ')}` : 'Uso SOS',
+                    date: todayIso,
+                  });
+                }
+              });
+              searchResults.sort((a, b) => b.date.localeCompare(a.date));
+            }
 
-              {appointments.length === 0 ? (
-                <div className="text-center py-10 px-4 bg-[#131d31] rounded-2xl border border-slate-800/90 space-y-3">
-                  <p className="text-slate-400 text-sm">
-                    Nenhum compromisso clínico agendado para {selectedPatient.nome}.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
-                      setShowAppointmentModal(true);
-                    }}
-                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors"
-                  >
-                    <Calendar size={15} className="w-4 h-4" />
-                    <span>Agendar Consulta ou Exame</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {appointments.map((apt) => (
-                    <div
-                      key={apt.id}
-                      className="bg-[#131d31] p-5 rounded-2xl border border-slate-800/90 flex items-start gap-3.5"
+            return (
+              <div className="space-y-5 sm:space-y-6">
+                {/* Cabeçalho + Busca + Ações Rápidas */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3.5">
+                  <div>
+                    <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                      Calendário &amp; Agenda
+                    </h1>
+                    <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                      Histórico de doses, consultas, anotações e estoque de {selectedPatient.nome}.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCalSearch((prev) => {
+                          if (prev) setCalSearchQuery('');
+                          return !prev;
+                        });
+                      }}
+                      aria-label="Buscar no calendário"
+                      title="Buscar notas, eventos ou medicamentos"
+                      className={`min-w-[42px] min-h-[42px] px-3 rounded-xl border flex items-center justify-center transition-colors ${
+                        showCalSearch
+                          ? 'bg-blue-600 border-blue-500 text-white'
+                          : 'bg-[#131d31] border-slate-700 text-slate-300 hover:text-white'
+                      }`}
                     >
-                      <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
-                        <Calendar size={18} className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0 space-y-1.5">
-                        <div className="flex flex-wrap items-center gap-x-2">
-                          <h3 className="font-bold text-white text-sm">{apt.title}</h3>
-                          <span className="text-xs text-indigo-300 font-semibold capitalize">
-                            · {apt.type}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 tabular-nums">
-                          <span className="flex items-center gap-1">
-                            <Clock size={13} className="w-3.5 h-3.5 text-slate-500" />
-                            {apt.date} {apt.time ? `às ${apt.time}` : ''}
-                          </span>
-                          {apt.doctor && (
-                            <span className="flex items-center gap-1">
-                              <User size={13} className="w-3.5 h-3.5 text-slate-500" />
-                              {apt.doctor}
-                            </span>
-                          )}
-                          {apt.location && (
-                            <span className="flex items-center gap-1">
-                              <MapPin size={13} className="w-3.5 h-3.5 text-slate-500" />
-                              {apt.location}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                      <Search size={16} className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNoteForm({ id: null, date: activeSelectedCalDate, content: '', mood: '' });
+                        setShowNoteModal(true);
+                      }}
+                      className="min-h-[42px] flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#131d31] hover:bg-slate-800 border border-slate-700 text-blue-300 font-semibold text-xs transition-colors whitespace-nowrap"
+                    >
+                      <FileText size={14} className="w-3.5 h-3.5" />
+                      <span>Nova Anotação</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewAppointmentForm({ ...EMPTY_APPOINTMENT_FORM, date: activeSelectedCalDate });
+                        setShowAppointmentModal(true);
+                      }}
+                      className="min-h-[42px] flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
+                    >
+                      <Plus size={15} className="w-4 h-4" />
+                      <span>Novo Evento</span>
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {/* Barra de Busca Opcional */}
+                {showCalSearch && (
+                  <div className="bg-[#131d31] rounded-2xl border border-slate-800 p-4 space-y-3">
+                    <div className="relative">
+                      <Search size={15} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={calSearchQuery}
+                        onChange={(e) => setCalSearchQuery(e.target.value)}
+                        placeholder="Buscar anotações, consultas, reposições ou medicamentos..."
+                        className="w-full bg-[#0b1120] border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 min-h-[42px] text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    {calQueryTrim.length >= 2 && (
+                      <div className="divide-y divide-slate-800/80 max-h-56 overflow-y-auto">
+                        {searchResults.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-2 text-center">
+                            Nenhum resultado para &ldquo;{calSearchQuery}&rdquo;.
+                          </p>
+                        ) : (
+                          searchResults.map((item) => (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onClick={() => handleSelectCalDate(item.date)}
+                              className="w-full text-left py-2.5 px-2 hover:bg-slate-800/50 rounded-lg flex items-center justify-between gap-3 transition-colors"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-blue-300 uppercase">
+                                    {item.kind}
+                                  </span>
+                                  <span className="text-xs font-semibold text-white truncate">{item.title}</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 truncate mt-0.5">{item.sub}</p>
+                              </div>
+                              <ChevronRight size={14} className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Grade Principal: Mini-Calendário Mensal (esq) + Painel do Dia Selecionado (dir) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                  {/* Card do Calendário Mensal */}
+                  <div className="lg:col-span-7 bg-[#131d31] rounded-2xl border border-slate-800/90 p-4 sm:p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={handlePrevCalMonth}
+                        aria-label="Mês anterior"
+                        className="w-9 h-9 rounded-xl bg-[#0b1120] border border-slate-800 hover:border-slate-700 text-slate-200 flex items-center justify-center transition-colors"
+                      >
+                        <ChevronLeft size={18} className="w-4 h-4" />
+                      </button>
+
+                      <div className="text-center flex items-center gap-2.5">
+                        <div>
+                          <div className="text-base sm:text-lg font-bold text-white leading-tight">
+                            {MONTHS_PT[calMonthIndex]}
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-medium tabular-nums">{calYear}</div>
+                        </div>
+                        {!isViewingCurrentMonth && (
+                          <button
+                            type="button"
+                            onClick={handleJumpTodayCal}
+                            className="px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-semibold hover:bg-blue-500/25 transition-colors"
+                          >
+                            Hoje
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleNextCalMonth}
+                        aria-label="Próximo mês"
+                        className="w-9 h-9 rounded-xl bg-[#0b1120] border border-slate-800 hover:border-slate-700 text-slate-200 flex items-center justify-center transition-colors"
+                      >
+                        <ChevronRight size={18} className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Cabeçalho dias da semana */}
+                    <div className="grid grid-cols-7 gap-1.5 text-center">
+                      {WEEKDAYS_SHORT_PT.map((wd) => (
+                        <div key={wd} className="text-[11px] font-bold text-slate-400 uppercase tracking-wider py-1">
+                          {wd}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Células do Mês */}
+                    <div className="grid grid-cols-7 gap-1.5">
+                      {cells.map((cell) => {
+                        if (cell.empty) {
+                          return <div key={cell.key} className="h-12 sm:h-13" />;
+                        }
+                        const isSelected = cell.dateIso === activeSelectedCalDate;
+                        const statusBg =
+                          cell.isToday && isSelected
+                            ? 'bg-blue-600 text-white border-blue-400'
+                            : cell.isToday
+                            ? 'bg-blue-600/25 text-white border-blue-500/60'
+                            : cell.dayDoseStat === 'all_taken'
+                            ? 'bg-emerald-500/15 text-slate-100 border-emerald-500/30'
+                            : cell.dayDoseStat === 'partial'
+                            ? 'bg-amber-500/15 text-slate-100 border-amber-500/30'
+                            : cell.dayDoseStat === 'missed'
+                            ? 'bg-rose-500/15 text-slate-100 border-rose-500/30'
+                            : 'bg-[#0b1120]/70 text-slate-200 border-slate-800/80';
+
+                        return (
+                          <button
+                            key={cell.key}
+                            type="button"
+                            onClick={() => handleSelectCalDate(cell.dateIso)}
+                            className={`h-12 sm:h-13 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all relative ${statusBg} ${
+                              isSelected
+                                ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-[#131d31]'
+                                : 'hover:border-slate-600'
+                            } ${cell.isFuture && !isSelected ? 'opacity-65' : ''}`}
+                          >
+                            <span
+                              className={`text-xs sm:text-sm tabular-nums leading-none ${
+                                cell.isToday || isSelected ? 'font-extrabold' : 'font-semibold'
+                              }`}
+                            >
+                              {cell.dayNum}
+                            </span>
+                            <div className="flex items-center justify-center gap-0.5 min-h-[6px]">
+                              {cell.dayDoseStat && (
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    cell.dayDoseStat === 'all_taken'
+                                      ? 'bg-emerald-400'
+                                      : cell.dayDoseStat === 'partial'
+                                      ? 'bg-amber-400'
+                                      : 'bg-rose-400'
+                                  }`}
+                                />
+                              )}
+                              {cell.hasSos && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />}
+                              {cell.hasNote && <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />}
+                              {cell.hasEvent && <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />}
+                              {cell.hasStock && <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Legenda (igual ao Calendário do Paciente) */}
+                    <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" /> Tomado
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-400" /> Parcial
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-rose-400" /> Perdido
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-orange-400" /> SOS
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-400" /> Nota
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-purple-400" /> Evento
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-teal-400" /> Estoque
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Painel de Detalhes do Dia Selecionado */}
+                  <div className="lg:col-span-5 bg-[#131d31] rounded-2xl border border-slate-800/90 p-4 sm:p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
+                      <div className="min-w-0">
+                        <h2 className="text-sm sm:text-base font-bold text-white truncate">
+                          {formatFullDateBr(activeSelectedCalDate)}
+                        </h2>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Detalhes e registros deste dia
+                        </p>
+                      </div>
+                      {activeSelectedCalDate === todayIso && (
+                        <span className="px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold shrink-0">
+                          Hoje
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 1. Doses do Dia */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Medicações ({selectedDayDetails.doses.length})
+                        </span>
+                      </div>
+
+                      {selectedDayDetails.doses.length === 0 ? (
+                        <p className="text-xs text-slate-500 bg-[#0b1120]/60 rounded-xl px-3 py-2.5 border border-slate-800/60">
+                          Nenhuma dose programada para esta data.
+                        </p>
+                      ) : (
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                          {selectedDayDetails.doses.map((dose) => {
+                            const statusChip =
+                              dose.status === 'confirmed'
+                                ? { label: 'Tomada', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' }
+                                : dose.status === 'missed'
+                                ? { label: 'Não confirmada', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30' }
+                                : { label: 'Prevista', cls: 'bg-slate-800 text-slate-300 border-slate-700' };
+                            return (
+                              <div
+                                key={dose.id}
+                                className="p-2.5 rounded-xl bg-[#0b1120] border border-slate-800 flex items-center justify-between gap-2.5"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-xs text-blue-300 tabular-nums">
+                                      {dose.hora}
+                                    </span>
+                                    <span className="text-xs font-semibold text-white truncate">
+                                      {dose.med_name}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${statusChip.cls}`}>
+                                      {statusChip.label}
+                                    </span>
+                                    {dose.dosagem && (
+                                      <span className="text-[11px] text-slate-400">{dose.dosagem}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                {activeSelectedCalDate <= todayIso && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedDoseTarget(dose);
+                                      setDoseAdministeredTime(dose.hora);
+                                      setDoseActionReason('');
+                                      setConfirmDoseSave(false);
+                                      setShowDoseModal(true);
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-[11px] font-semibold transition-colors shrink-0"
+                                  >
+                                    {dose.status === 'pending' ? 'Registrar' : 'Retificar'}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {selectedDayDetails.sosDoses.length > 0 && (
+                        <div className="space-y-1.5 pt-1">
+                          {selectedDayDetails.sosDoses.map((s) => (
+                            <div
+                              key={s.id}
+                              className="p-2.5 rounded-xl bg-orange-950/20 border border-orange-500/30 text-xs flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <span className="font-bold text-orange-300">Uso SOS: {s.med_name}</span>
+                                <p className="text-[11px] text-slate-300 truncate">{s.reason}</p>
+                              </div>
+                              <span className="font-mono text-[11px] text-orange-200 shrink-0">{s.hora}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 2. Compromissos / Eventos do Dia */}
+                    <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Consultas e Eventos ({selectedDayDetails.events.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewAppointmentForm({ ...EMPTY_APPOINTMENT_FORM, date: activeSelectedCalDate });
+                            setShowAppointmentModal(true);
+                          }}
+                          className="text-[11px] font-semibold text-purple-300 hover:text-purple-200"
+                        >
+                          + Agendar neste dia
+                        </button>
+                      </div>
+
+                      {selectedDayDetails.events.length === 0 ? (
+                        <p className="text-xs text-slate-500">Sem consultas ou exames nesta data.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {selectedDayDetails.events.map((ev) => (
+                            <div
+                              key={ev.id}
+                              className="p-3 rounded-xl bg-purple-950/20 border border-purple-500/30 flex items-start justify-between gap-2.5"
+                            >
+                              <div className="min-w-0 space-y-0.5 text-xs">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="font-bold text-white">{ev.title}</span>
+                                  <span className="text-[10px] text-purple-300 uppercase font-semibold">
+                                    · {ev.type || 'consulta'}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-300 flex flex-wrap items-center gap-x-2">
+                                  {ev.time && <span>{ev.time}</span>}
+                                  {ev.doctor && <span>· {ev.doctor}</span>}
+                                  {ev.location && <span>· {ev.location}</span>}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={actionLoading}
+                                onClick={() => handleDeleteAppointment(ev.id)}
+                                aria-label="Remover compromisso"
+                                className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/15 transition-colors shrink-0"
+                              >
+                                <Trash2 size={14} className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. Anotações do Dia */}
+                    <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Anotações ({selectedDayDetails.notes.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNoteForm({ id: null, date: activeSelectedCalDate, content: '', mood: '' });
+                            setShowNoteModal(true);
+                          }}
+                          className="text-[11px] font-semibold text-blue-300 hover:text-blue-200"
+                        >
+                          + Adicionar nota
+                        </button>
+                      </div>
+
+                      {selectedDayDetails.notes.length === 0 ? (
+                        <p className="text-xs text-slate-500">Sem anotações registradas para esta data.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {selectedDayDetails.notes.map((n) => (
+                            <div
+                              key={n.id}
+                              className="p-3 rounded-xl bg-blue-950/20 border border-blue-500/30 flex items-start justify-between gap-2.5"
+                            >
+                              <div className="min-w-0 space-y-1 text-xs">
+                                {n.mood && (
+                                  <span className="inline-block px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 text-[10px] font-bold">
+                                    {n.mood}
+                                  </span>
+                                )}
+                                <p className="text-slate-200 leading-relaxed whitespace-pre-wrap break-words">
+                                  {n.content}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNoteForm({
+                                      id: n.id,
+                                      date: String(n.date || activeSelectedCalDate).slice(0, 10),
+                                      content: n.content || '',
+                                      mood: n.mood || '',
+                                    });
+                                    setShowNoteModal(true);
+                                  }}
+                                  aria-label="Editar anotação"
+                                  className="p-1.5 rounded-lg text-slate-300 hover:bg-slate-800 transition-colors"
+                                >
+                                  <Pencil size={13} className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={actionLoading}
+                                  onClick={() => handleDeleteCalendarNote(n.id)}
+                                  aria-label="Remover anotação"
+                                  className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/15 transition-colors"
+                                >
+                                  <Trash2 size={13} className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 4. Movimentações de Estoque no Dia */}
+                    {selectedDayDetails.stockMoves.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Estoque no Dia ({selectedDayDetails.stockMoves.length})
+                        </span>
+                        <div className="space-y-1.5">
+                          {selectedDayDetails.stockMoves.map((sm) => {
+                            const delta = Number(sm.quantity_delta ?? sm.quantity_changed ?? 0);
+                            return (
+                              <div
+                                key={sm.id}
+                                className="p-2.5 rounded-xl bg-teal-950/20 border border-teal-500/30 text-xs flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <span className="font-semibold text-teal-200 truncate block">
+                                    {sm.med_name || 'Medicamento'} ({delta >= 0 ? `+${delta}` : delta} un)
+                                  </span>
+                                  {sm.notes && (
+                                    <span className="text-[11px] text-slate-400 truncate block">{sm.notes}</span>
+                                  )}
+                                </div>
+                                <Package size={14} className="w-3.5 h-3.5 text-teal-300 shrink-0" />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Próximos Compromissos + Resumo Mensal de 8 Cards (igual ao Paciente) */}
+                {upcomingEvents.length > 0 && (
+                  <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-4 sm:p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <Calendar size={16} className="w-4 h-4 text-purple-400" />
+                        <span>Próximos Compromissos</span>
+                      </h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {upcomingEvents.map((apt) => (
+                        <button
+                          key={apt.id}
+                          type="button"
+                          onClick={() => handleSelectCalDate(String(apt.date || '').slice(0, 10))}
+                          className="text-left p-3.5 rounded-xl bg-[#0b1120] border border-slate-800 hover:border-purple-500/40 flex items-center justify-between gap-3 transition-colors"
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-bold text-white text-xs sm:text-sm truncate">{apt.title}</span>
+                              <span className="text-[11px] text-purple-300 font-semibold capitalize">
+                                · {apt.type}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2 tabular-nums">
+                              <span>
+                                {formatDateBr(apt.date)}
+                                {apt.time ? ` às ${apt.time}` : ''}
+                              </span>
+                              {apt.doctor && <span>· {apt.doctor}</span>}
+                              {apt.location && <span>· {apt.location}</span>}
+                            </div>
+                          </div>
+                          <ChevronRight size={15} className="w-4 h-4 text-purple-300 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-4 sm:p-5 space-y-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <BarChart3 size={16} className="w-4 h-4 text-blue-400" />
+                      <span>
+                        Resumo — {MONTHS_PT[calMonthIndex]} {calYear}
+                      </span>
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-emerald-400 tabular-nums">
+                        {monthSummary.adherencePct !== null ? `${monthSummary.adherencePct}%` : '—'}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Adesão</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-blue-400 tabular-nums">
+                        {monthSummary.takenCount}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Tomadas</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-amber-400 tabular-nums">
+                        {monthSummary.lateCount}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Atrasos</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-rose-400 tabular-nums">
+                        {monthSummary.missedCount}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Perdidas</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-sky-400 tabular-nums">
+                        {monthSummary.notesCount}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Anotações</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-purple-400 tabular-nums">
+                        {monthSummary.eventsCount}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Consultas</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-orange-400 tabular-nums">
+                        {monthSummary.sosCount}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Uso SOS</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800/80 text-center">
+                      <div className="text-lg font-extrabold text-teal-400 tabular-nums">
+                        {monthSummary.restockCount}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Reposições</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* TAB 5: INDICADORES */}
           {currentTab === 'reports' && selectedPatient && (
@@ -3027,6 +3850,311 @@ export default function CuidadorWebPage() {
               )}
             </div>
           )}
+
+          {/* TAB 7: SOBRE, VERSÕES E DOWNLOADS ANDROID */}
+          {currentTab === 'about' && (() => {
+            const webInfo = systemVersions?.web || {
+              name: 'MediCare Cuidador Web',
+              version: '2.0.0',
+              swVersion: 'medicare-cuidador-v5',
+              timezone: 'America/Sao_Paulo',
+            };
+            const patientApp = systemVersions?.patientAndroid || {
+              name: 'MediCare Paciente',
+              package: 'br.com.medicare.paciente',
+              versionName: '2.8.8',
+              versionCode: 288,
+              apkAvailable: true,
+              apkSizeBytes: 0,
+              updatedAt: null,
+              downloadUrl: '/api/apk',
+            };
+            const caregiverApp = systemVersions?.caregiverAndroid || {
+              name: 'MediCare Cuidador',
+              package: 'br.com.medicare.cuidador',
+              versionName: '2.0.0',
+              versionCode: 200,
+              apkAvailable: false,
+              apkSizeBytes: 0,
+              updatedAt: null,
+              downloadUrl: '/api/apk/cuidador',
+            };
+            const formatApkSize = (bytes) => {
+              const num = Number(bytes || 0);
+              if (num <= 0) return 'Disponível para download';
+              if (num >= 1024 * 1024) {
+                return `${(num / (1024 * 1024)).toFixed(2).replace('.', ',')} MB`;
+              }
+              return `${Math.round(num / 1024)} KB`;
+            };
+
+            return (
+              <div className="space-y-6">
+                {/* Cabeçalho */}
+                <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <Image
+                      src={medicareLogo}
+                      alt="MediCare"
+                      width={52}
+                      height={52}
+                      referrerPolicy="no-referrer"
+                      className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl shadow-lg shadow-blue-950/50 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                        Sobre o MediCare
+                      </h1>
+                      <p className="text-xs sm:text-sm text-slate-400 mt-0.5 leading-relaxed">
+                        Consulte as versões da plataforma Web, dos aplicativos Android e faça o download direto dos instaladores.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadSystemVersions}
+                    disabled={versionsLoading}
+                    className="w-full sm:w-auto min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
+                  >
+                    <RefreshCw size={14} className={`w-3.5 h-3.5 ${versionsLoading ? 'animate-spin text-blue-400' : ''}`} />
+                    <span>{versionsLoading ? 'Verificando...' : 'Atualizar versões'}</span>
+                  </button>
+                </div>
+
+                {/* Resumo de Versões: Web vs App Android */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">Versão da Web</span>
+                      <div className="w-8 h-8 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center">
+                        <Globe size={16} className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-extrabold text-white tabular-nums">v{webInfo.version}</div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Portal & Painel Cuidador ({webInfo.swVersion})
+                      </p>
+                    </div>
+                    <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                      <span>Fuso: Brasília (UTC-03:00)</span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-semibold">
+                        {pwaInstall.isInstalled ? 'Modo App (PWA)' : 'Navegador Web'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">App Paciente (Android)</span>
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
+                        <HeartHandshake size={16} className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-extrabold text-white tabular-nums">
+                        v{patientApp.versionName || '2.8.8'}
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 tabular-nums">
+                        Build {patientApp.versionCode || '—'} · {patientApp.package}
+                      </p>
+                    </div>
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                      <span>{formatApkSize(patientApp.apkSizeBytes)}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md border font-semibold ${
+                          patientApp.apkAvailable
+                            ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {patientApp.apkAvailable ? 'APK disponível' : 'Indisponível'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">App Cuidador (Android)</span>
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center">
+                        <ShieldCheck size={16} className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-extrabold text-white tabular-nums">
+                        v{caregiverApp.versionName || webInfo.version}
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 tabular-nums">
+                        Build {caregiverApp.versionCode || '—'} · {caregiverApp.package}
+                      </p>
+                    </div>
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                      <span>
+                        {caregiverApp.apkAvailable ? formatApkSize(caregiverApp.apkSizeBytes) : 'APK + PWA Android'}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md border font-semibold ${
+                          caregiverApp.apkAvailable
+                            ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+                            : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                        }`}
+                      >
+                        {caregiverApp.apkAvailable ? 'APK disponível' : 'Via PWA / Servidor'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Downloads para Android */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  {/* Download MediCare Paciente Android */}
+                  <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 flex flex-col justify-between gap-5">
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-11 h-11 rounded-xl bg-emerald-600/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                            <Smartphone size={20} className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h2 className="text-base sm:text-lg font-bold text-white">
+                              MediCare Paciente para Android
+                            </h2>
+                            <p className="text-xs text-emerald-400 font-semibold tabular-nums">
+                              Versão {patientApp.versionName} (Build {patientApp.versionCode})
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                        Aplicativo nativo completo para o celular do paciente: alarmes exatos em tela cheia, registro rápido de doses, lembretes de consultas, estoque e vínculo por código com cuidadores.
+                      </p>
+
+                      {patientApp.updatedAt && (
+                        <p className="text-[11px] text-slate-400 tabular-nums">
+                          Atualizado em: {formatBrazilDateTime(patientApp.updatedAt)} · {formatApkSize(patientApp.apkSizeBytes)}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {patientApp.apkAvailable ? (
+                        <a
+                          href="/api/apk"
+                          download="MediCare-Paciente.apk"
+                          className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-sm font-bold shadow-lg shadow-emerald-600/20 transition-colors"
+                        >
+                          <Download size={18} className="w-4 h-4 shrink-0" />
+                          <span>Baixar MediCare Paciente (.APK)</span>
+                        </a>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+                          O arquivo MediCare-Paciente.apk ainda não foi compilado neste servidor.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Download MediCare Cuidador Android */}
+                  <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 flex flex-col justify-between gap-5">
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-11 h-11 rounded-xl bg-blue-600/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+                            <Smartphone size={20} className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h2 className="text-base sm:text-lg font-bold text-white">
+                              MediCare Cuidador para Android
+                            </h2>
+                            <p className="text-xs text-blue-400 font-semibold tabular-nums">
+                              Versão {caregiverApp.versionName || webInfo.version} (Build {caregiverApp.versionCode || 200})
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                        Acesso dedicado no celular do cuidador para acompanhar doses em tempo real, confirmar administrações, receber alertas de atraso e gerenciar pacientes vinculados.
+                      </p>
+
+                      {caregiverApp.updatedAt && (
+                        <p className="text-[11px] text-slate-400 tabular-nums">
+                          Atualizado em: {formatBrazilDateTime(caregiverApp.updatedAt)} · {formatApkSize(caregiverApp.apkSizeBytes)}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {caregiverApp.apkAvailable ? (
+                        <a
+                          href="/api/apk/cuidador"
+                          download="MediCare-Cuidador.apk"
+                          className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold shadow-lg shadow-blue-600/20 transition-colors"
+                        >
+                          <Download size={18} className="w-4 h-4 shrink-0" />
+                          <span>Baixar MediCare Cuidador (.APK)</span>
+                        </a>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-[#0b1120] border border-slate-800 text-xs text-slate-300 leading-relaxed">
+                          O instalador <strong className="text-white">MediCare-Cuidador.apk</strong> será disponibilizado aqui após rodar o build do APK no servidor. Enquanto isso, instale instantaneamente como aplicativo via navegador abaixo:
+                        </div>
+                      )}
+
+                      {pwaInstall.isInstalled ? (
+                        <div className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+                          <CheckCircle2 size={15} className="w-4 h-4 shrink-0" />
+                          <span>App Web (PWA) já instalado neste aparelho</span>
+                        </div>
+                      ) : pwaInstall.isInstallable ? (
+                        <button
+                          type="button"
+                          onClick={() => pwaInstall.install()}
+                          className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 text-xs font-semibold transition-colors"
+                        >
+                          <Download size={15} className="w-4 h-4 text-blue-400 shrink-0" />
+                          <span>Instalar App Rápido no Android (PWA)</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setShowAndroidPwaGuide((prev) => !prev)}
+                          className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                        >
+                          <Info size={15} className="w-4 h-4 text-blue-400 shrink-0" />
+                          <span>{showAndroidPwaGuide ? 'Ocultar guia PWA' : 'Como instalar direto pelo Chrome / Safari'}</span>
+                        </button>
+                      )}
+
+                      {showAndroidPwaGuide && !pwaInstall.isInstalled && !pwaInstall.isInstallable && (
+                        <div className="p-3.5 rounded-xl bg-[#0b1120] border border-slate-800 text-xs text-slate-300 space-y-1.5 leading-relaxed">
+                          <p className="font-bold text-white">Instalação rápida sem APK (PWA):</p>
+                          {pwaInstall.isIOS ? (
+                            <p>No Safari do iPhone/iPad, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</p>
+                          ) : (
+                            <p>No Google Chrome ou Edge do Android, toque no menu <strong>⋮</strong> (canto superior direito) e selecione <strong>Instalar aplicativo</strong> ou <strong>Adicionar à tela inicial</strong>.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Instruções de instalação de APK no Android */}
+                <div className="bg-[#131d31]/80 rounded-2xl border border-slate-800/80 p-4 sm:p-5 flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                    <Info size={16} className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1 text-xs text-slate-300 leading-relaxed">
+                    <p className="font-bold text-white">Dica ao instalar o arquivo .APK no Android</p>
+                    <p>
+                      Ao abrir o arquivo baixado (<strong>MediCare-Paciente.apk</strong> ou <strong>MediCare-Cuidador.apk</strong>), caso o Android exiba um aviso de segurança, toque em <strong>Configurações</strong> e ative <strong>Permitir desta fonte</strong> para concluir a instalação.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </main>
       </div>
 
@@ -3133,6 +4261,18 @@ export default function CuidadorWebPage() {
                 <span className="flex items-center gap-3">
                   <History size={18} className="w-4 h-4 text-indigo-400" />
                   Trilha de Auditoria
+                </span>
+                <ChevronRight size={16} className="w-4 h-4 text-slate-500" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigateToTab('about')}
+                className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
+              >
+                <span className="flex items-center gap-3">
+                  <Info size={18} className="w-4 h-4 text-emerald-400" />
+                  Sobre, Versões & Apps Android
                 </span>
                 <ChevronRight size={16} className="w-4 h-4 text-slate-500" />
               </button>
@@ -3607,7 +4747,9 @@ export default function CuidadorWebPage() {
             <h3 className="text-base font-bold text-white mb-1">Registro Clínico de Administração</h3>
             <p className="text-xs text-slate-400 mb-4 leading-relaxed">
               <strong>{selectedDoseTarget.med_name}</strong> ({selectedDoseTarget.dosagem}) previsto para{' '}
-              <strong>{selectedDoseTarget.hora}</strong> · Paciente: <strong>{selectedPatient?.nome}</strong>.
+              <strong>{selectedDoseTarget.hora}</strong>
+              {selectedDoseTarget.dose_date ? ` (${formatDateBr(selectedDoseTarget.dose_date)})` : ''} · Paciente:{' '}
+              <strong>{selectedPatient?.nome}</strong>.
             </p>
 
             <div className="space-y-3 mb-4">
@@ -3759,6 +4901,84 @@ export default function CuidadorWebPage() {
                   className="min-h-[42px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
                 >
                   {actionLoading ? 'Agendando...' : 'Agendar Evento'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────── */}
+      {/* MODAL: NOVA ANOTAÇÃO NO CALENDÁRIO                         */}
+      {/* ─────────────────────────────────────────────────────────── */}
+      {showNoteModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setShowNoteModal(false)}
+        >
+          <div
+            className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto mb-4 sm:hidden" />
+            <h3 className="text-base font-bold text-white mb-3">
+              {noteForm.id ? 'Editar Anotação do Calendário' : 'Nova Anotação no Calendário'}
+            </h3>
+            <form onSubmit={handleSaveCalendarNote} className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">Data *</label>
+                <input
+                  type="date"
+                  required
+                  value={noteForm.date}
+                  onChange={(e) => setNoteForm({ ...noteForm, date: e.target.value })}
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2 min-h-[44px] text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">Etiqueta / Tipo (opcional)</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {['Rotina', 'Sintoma', 'Pressão/Glicemia', 'Efeito colateral', 'Observação'].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setNoteForm({ ...noteForm, mood: noteForm.mood === tag ? '' : tag })}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
+                        noteForm.mood === tag
+                          ? 'bg-blue-600 border-blue-500 text-white'
+                          : 'bg-[#0b1120] border-slate-700 text-slate-300 hover:border-slate-600'
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">Anotação Clínica *</label>
+                <textarea
+                  rows={4}
+                  required
+                  value={noteForm.content}
+                  onChange={(e) => setNoteForm({ ...noteForm, content: e.target.value })}
+                  placeholder="Ex: Paciente relatou tontura leve pela manhã; pressão 120x80 mmHg..."
+                  className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNoteModal(false)}
+                  className="min-h-[42px] px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="min-h-[42px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+                >
+                  {actionLoading ? 'Salvando...' : 'Salvar Anotação'}
                 </button>
               </div>
             </form>
@@ -4137,12 +5357,12 @@ export default function CuidadorWebPage() {
             type="button"
             onClick={() => setShowMobileMenuSheet(true)}
             className={`relative flex flex-col items-center justify-center gap-1 min-h-[52px] px-1 rounded-xl transition-colors focus:outline-none ${
-              currentTab === 'reports' || currentTab === 'audit' || showMobileMenuSheet
+              currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about' || showMobileMenuSheet
                 ? 'text-blue-400 font-semibold'
                 : 'text-slate-400 hover:text-slate-200 font-medium'
             }`}
           >
-            {(currentTab === 'reports' || currentTab === 'audit') && (
+            {(currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about') && (
               <span className="absolute top-1 w-5 h-0.5 rounded-full bg-blue-400" aria-hidden="true" />
             )}
             <LayoutGrid size={20} className="w-5 h-5 shrink-0" />
