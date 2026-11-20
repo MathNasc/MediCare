@@ -1,5 +1,10 @@
 import crypto from 'crypto';
-import { getPgPool, ensureOraclePostgresSchema } from './oraclePostgres';
+import {
+  getPgPool,
+  ensureOraclePostgresSchema,
+  ensureCleanPgClient,
+  safeReleasePgClient,
+} from './oraclePostgres';
 
 const JWT_SECRET =
   process.env.JWT_SECRET ||
@@ -330,22 +335,29 @@ export async function withAuthenticatedPg(req, handler) {
   }
 
   const client = await pool.connect();
+  let txOpen = false;
   try {
+    await ensureCleanPgClient(client);
     await ensureOraclePostgresSchema(client);
     const active = await verifyActiveSessionInDb(client, userClaims);
     if (!active) {
       return { unauthorized: true, error: 'Sessão expirada ou revogada.' };
     }
     await client.query('BEGIN');
+    txOpen = true;
     await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [userClaims.sub]);
     const result = await handler(client, userClaims);
     await client.query('COMMIT');
+    txOpen = false;
     return { ok: true, data: result, user: userClaims };
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (txOpen) {
+      await client.query('ROLLBACK').catch(() => {});
+      txOpen = false;
+    }
     throw err;
   } finally {
-    client.release();
+    await safeReleasePgClient(client, { rollbackFirst: txOpen });
   }
 }
 

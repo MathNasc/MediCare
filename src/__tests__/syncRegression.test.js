@@ -35,9 +35,11 @@ function createPgTxSimulator({
   failOnPatterns = [],
   existingCaregiverPair = false,
   pushSubscriptionRows = [{ id: 'sub-1', user_id: CAREGIVER_ID, endpoint: 'https://push.example/1', p256dh: 'p256', auth: 'auth' }],
+  initialInTx = false,
+  initialAborted = false,
 } = {}) {
-  let inTx = false;
-  let aborted = false;
+  let inTx = Boolean(initialInTx);
+  let aborted = Boolean(initialAborted);
   const savepointStack = [];
   const callLog = [];
 
@@ -106,6 +108,10 @@ function createPgTxSimulator({
           if (pattern.code) err.code = pattern.code;
           throw err;
         }
+      }
+
+      if (upper.includes('TXID_CURRENT_IF_ASSIGNED')) {
+        return { rowCount: 1, rows: [{ txid: inTx ? 1 : null }] };
       }
 
       if (sql.includes('SELECT id FROM profiles WHERE id = $1')) {
@@ -199,8 +205,8 @@ describe('Regressão de Sincronização (POST /api/v1/sync e Notificações)', (
 
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.VAPID_PUBLIC_KEY = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8';
-    process.env.VAPID_PRIVATE_KEY = 'UUxI4O8-FbRouAevSmBQ6o18hgE4nSG3qwvJTfKc-ls';
+    process.env.VAPID_PUBLIC_KEY = 'test-vapid-public-key-fixture';
+    process.env.VAPID_PRIVATE_KEY = 'test-vapid-private-key-fixture';
   });
 
   afterEach(() => {
@@ -715,5 +721,35 @@ describe('Regressão de Sincronização (POST /api/v1/sync e Notificações)', (
     expect(approvalInserts[1].params[2]).toBeNull();
     expect(callLog.some((c) => c.sql.toUpperCase() === 'COMMIT')).toBe(true);
     warnSpy.mockRestore();
+  });
+
+  it('recupera automaticamente conexão do pool que chegou em transação abortada (25P02) antes do POST /api/v1/sync', async () => {
+    const { client, callLog } = createPgTxSimulator({
+      initialInTx: true,
+      initialAborted: true,
+    });
+    connectPgOrFallback.mockResolvedValue({ client, fallbackResponse: null });
+
+    const res = await syncPost(
+      buildPostRequest({
+        user: { id: PATIENT_ID, nome: 'Marcela', role: 'paciente' },
+        timezone: 'America/Sao_Paulo',
+        meds: [],
+        history: [],
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+
+    const rollbackIdx = callLog.findIndex((c) => c.sql.toUpperCase() === 'ROLLBACK');
+    const beginIdx = callLog.findIndex((c) => c.sql.toUpperCase() === 'BEGIN');
+    const commitIdx = callLog.findIndex((c) => c.sql.toUpperCase() === 'COMMIT');
+
+    expect(rollbackIdx).toBeGreaterThan(-1);
+    expect(beginIdx).toBeGreaterThan(rollbackIdx);
+    expect(commitIdx).toBeGreaterThan(beginIdx);
+    expect(client.release).toHaveBeenCalledTimes(1);
   });
 });

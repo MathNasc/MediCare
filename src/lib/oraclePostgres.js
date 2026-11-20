@@ -294,6 +294,61 @@ export function getPgPool() {
   return poolInstance;
 }
 
+/**
+ * Garante que uma conexão obtida do pg.Pool não esteja presa em uma transação
+ * aberta ou abortada (SQLSTATE 25P02) deixada por alguma requisição anterior.
+ */
+export async function ensureCleanPgClient(client) {
+  if (!client || typeof client.query !== 'function') return client;
+  try {
+    const res = await client.query('SELECT txid_current_if_assigned() AS txid');
+    if (res?.rows?.[0]?.txid != null) {
+      await client.query('ROLLBACK');
+    }
+  } catch {
+    await client.query('ROLLBACK').catch(() => {});
+  }
+  return client;
+}
+
+/**
+ * Libera o client para o pool garantindo que não fique em estado transacional sujo.
+ * Se o ROLLBACK falhar, passa o erro para client.release(err) destruir o socket quebrado.
+ */
+export async function safeReleasePgClient(client, { rollbackFirst = false } = {}) {
+  if (!client) return;
+  let releaseErr = null;
+  if (typeof client.query === 'function') {
+    if (rollbackFirst) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (err) {
+        releaseErr = err || new Error('Rollback failed before release');
+      }
+    } else {
+      try {
+        const res = await client.query('SELECT txid_current_if_assigned() AS txid');
+        if (res?.rows?.[0]?.txid != null) {
+          await client.query('ROLLBACK');
+        }
+      } catch {
+        try {
+          await client.query('ROLLBACK');
+        } catch (err) {
+          releaseErr = err || new Error('Transaction state cleanup failed before release');
+        }
+      }
+    }
+  }
+  if (typeof client.release === 'function') {
+    if (releaseErr) {
+      client.release(releaseErr);
+    } else {
+      client.release();
+    }
+  }
+}
+
 export function resetSchemaVerificationCache() {
   schemaVerified = false;
 }

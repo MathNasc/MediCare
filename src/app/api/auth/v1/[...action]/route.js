@@ -529,6 +529,20 @@ export async function POST(req, { params }) {
   }
 }
 
+async function runAuthSavepointQuery(client, label, sql, params = [], fallbackValue = { rows: [], rowCount: 0 }) {
+  const sp = `sp_auth_${String(label || 'opt').replace(/[^a-zA-Z0-9_]/g, '_')}`;
+  await client.query(`SAVEPOINT ${sp}`);
+  try {
+    const res = await client.query(sql, params);
+    await client.query(`RELEASE SAVEPOINT ${sp}`);
+    return res;
+  } catch {
+    await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
+    await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    return fallbackValue;
+  }
+}
+
 async function executeDeleteUserRecords(client, targetId, targetEmail) {
   const cleanEmail = (targetEmail || '').trim().toLowerCase();
   const idStr = targetId ? String(targetId).trim() : null;
@@ -538,16 +552,24 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
 
   if (idStr) {
     foundUserIds.add(idStr);
-    const uById = await client
-      .query('SELECT id, email FROM app_users WHERE id::text = $1', [idStr])
-      .catch(() => ({ rows: [] }));
+    const uById = await runAuthSavepointQuery(
+      client,
+      'del_lookup_uid',
+      'SELECT id, email FROM app_users WHERE id::text = $1',
+      [idStr],
+      { rows: [] }
+    );
     uById.rows.forEach((r) => {
       if (r.id) foundUserIds.add(String(r.id));
       if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
     });
-    const pById = await client
-      .query('SELECT id, email FROM profiles WHERE id::text = $1', [idStr])
-      .catch(() => ({ rows: [] }));
+    const pById = await runAuthSavepointQuery(
+      client,
+      'del_lookup_pid',
+      'SELECT id, email FROM profiles WHERE id::text = $1',
+      [idStr],
+      { rows: [] }
+    );
     pById.rows.forEach((r) => {
       if (r.id) foundUserIds.add(String(r.id));
       if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
@@ -556,16 +578,24 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
 
   if (cleanEmail) {
     foundEmails.add(cleanEmail);
-    const uByEmail = await client
-      .query('SELECT id, email FROM app_users WHERE lower(email) = $1', [cleanEmail])
-      .catch(() => ({ rows: [] }));
+    const uByEmail = await runAuthSavepointQuery(
+      client,
+      'del_lookup_uemail',
+      'SELECT id, email FROM app_users WHERE lower(email) = $1',
+      [cleanEmail],
+      { rows: [] }
+    );
     uByEmail.rows.forEach((r) => {
       if (r.id) foundUserIds.add(String(r.id));
       if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
     });
-    const pByEmail = await client
-      .query('SELECT id, email FROM profiles WHERE lower(email) = $1', [cleanEmail])
-      .catch(() => ({ rows: [] }));
+    const pByEmail = await runAuthSavepointQuery(
+      client,
+      'del_lookup_pemail',
+      'SELECT id, email FROM profiles WHERE lower(email) = $1',
+      [cleanEmail],
+      { rows: [] }
+    );
     pByEmail.rows.forEach((r) => {
       if (r.id) foundUserIds.add(String(r.id));
       if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
@@ -580,81 +610,81 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
   }
 
   // 1. Desvincular chaves estrangeiras de agente / autor
-  await client
-    .query(
-      `UPDATE historico_doses SET performed_by = NULL
-       WHERE performed_by::text = ANY($1::text[])
-          OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
-      [userIdsArray, emailsArray]
-    )
-    .catch(() => {});
+  await runAuthSavepointQuery(
+    client,
+    'unlink_hist',
+    `UPDATE historico_doses SET performed_by = NULL
+     WHERE performed_by::text = ANY($1::text[])
+        OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+    [userIdsArray, emailsArray]
+  );
 
-  await client
-    .query(
-      `UPDATE caregiver_audit_log SET actor_id = NULL
-       WHERE actor_id::text = ANY($1::text[])
-          OR actor_id IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
-      [userIdsArray, emailsArray]
-    )
-    .catch(() => {});
+  await runAuthSavepointQuery(
+    client,
+    'unlink_cg_audit',
+    `UPDATE caregiver_audit_log SET actor_id = NULL
+     WHERE actor_id::text = ANY($1::text[])
+        OR actor_id IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+    [userIdsArray, emailsArray]
+  );
 
-  await client
-    .query(
-      `UPDATE audit_logs SET performed_by = NULL
-       WHERE performed_by::text = ANY($1::text[])
-          OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
-      [userIdsArray, emailsArray]
-    )
-    .catch(() => {});
+  await runAuthSavepointQuery(
+    client,
+    'unlink_audit',
+    `UPDATE audit_logs SET performed_by = NULL
+     WHERE performed_by::text = ANY($1::text[])
+        OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+    [userIdsArray, emailsArray]
+  );
 
   // 2. Apagar logs e notas de cuidadores associados
-  await client
-    .query(
-      `DELETE FROM caregiver_audit_log
-       WHERE relationship_id IN (
-         SELECT id FROM caregiver_relationships
-         WHERE patient_id::text = ANY($1::text[])
-            OR caregiver_id::text = ANY($1::text[])
-            OR lower(invite_email) = ANY($2::text[])
-       )`,
-      [userIdsArray, emailsArray]
-    )
-    .catch(() => {});
-
-  await client
-    .query(
-      `DELETE FROM caregiver_notes
+  await runAuthSavepointQuery(
+    client,
+    'del_cg_audit',
+    `DELETE FROM caregiver_audit_log
+     WHERE relationship_id IN (
+       SELECT id FROM caregiver_relationships
        WHERE patient_id::text = ANY($1::text[])
           OR caregiver_id::text = ANY($1::text[])
-          OR relationship_id IN (
-            SELECT id FROM caregiver_relationships
-            WHERE patient_id::text = ANY($1::text[])
-               OR caregiver_id::text = ANY($1::text[])
-               OR lower(invite_email) = ANY($2::text[])
-          )`,
-      [userIdsArray, emailsArray]
-    )
-    .catch(() => {});
+          OR lower(invite_email) = ANY($2::text[])
+     )`,
+    [userIdsArray, emailsArray]
+  );
+
+  await runAuthSavepointQuery(
+    client,
+    'del_cg_notes',
+    `DELETE FROM caregiver_notes
+     WHERE patient_id::text = ANY($1::text[])
+        OR caregiver_id::text = ANY($1::text[])
+        OR relationship_id IN (
+          SELECT id FROM caregiver_relationships
+          WHERE patient_id::text = ANY($1::text[])
+             OR caregiver_id::text = ANY($1::text[])
+             OR lower(invite_email) = ANY($2::text[])
+        )`,
+    [userIdsArray, emailsArray]
+  );
 
   // 3. Apagar relacionamentos de cuidadores
-  await client
-    .query(
-      `DELETE FROM caregiver_relationships
-       WHERE patient_id::text = ANY($1::text[])
-          OR caregiver_id::text = ANY($1::text[])
-          OR lower(invite_email) = ANY($2::text[])`,
-      [userIdsArray, emailsArray]
-    )
-    .catch(() => {});
+  await runAuthSavepointQuery(
+    client,
+    'del_cg_rel',
+    `DELETE FROM caregiver_relationships
+     WHERE patient_id::text = ANY($1::text[])
+        OR caregiver_id::text = ANY($1::text[])
+        OR lower(invite_email) = ANY($2::text[])`,
+    [userIdsArray, emailsArray]
+  );
 
-  await client
-    .query(
-      `DELETE FROM cuidadores
-       WHERE paciente_id::text = ANY($1::text[])
-          OR cuidador_id::text = ANY($1::text[])`,
-      [userIdsArray]
-    )
-    .catch(() => {});
+  await runAuthSavepointQuery(
+    client,
+    'del_cuidadores',
+    `DELETE FROM cuidadores
+     WHERE paciente_id::text = ANY($1::text[])
+        OR cuidador_id::text = ANY($1::text[])`,
+    [userIdsArray]
+  );
 
   // 4. Apagar registros das tabelas dependentes
   const tables = [
@@ -681,25 +711,25 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
 
   for (const table of tables) {
     const col = table === 'audit_logs' ? 'patient_id' : 'user_id';
-    await client
-      .query(
-        `DELETE FROM ${table}
-         WHERE ${col}::text = ANY($1::text[])
-            OR ${col} IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
-        [userIdsArray, emailsArray]
-      )
-      .catch(() => {});
+    await runAuthSavepointQuery(
+      client,
+      `del_${table}`,
+      `DELETE FROM ${table}
+       WHERE ${col}::text = ANY($1::text[])
+          OR ${col} IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
+      [userIdsArray, emailsArray]
+    );
   }
 
   // 5. Apagar do perfil e usuários
-  await client
-    .query(
-      `DELETE FROM profiles
-       WHERE id::text = ANY($1::text[])
-          OR lower(email) = ANY($2::text[])`,
-      [userIdsArray, emailsArray]
-    )
-    .catch(() => {});
+  await runAuthSavepointQuery(
+    client,
+    'del_profiles',
+    `DELETE FROM profiles
+     WHERE id::text = ANY($1::text[])
+        OR lower(email) = ANY($2::text[])`,
+    [userIdsArray, emailsArray]
+  );
 
   await client.query(
     `DELETE FROM app_users

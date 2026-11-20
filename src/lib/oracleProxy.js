@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { getPgPool, isPgConnectionNetworkError } from './oraclePostgres';
+import { ensureCleanPgClient, getPgPool, isPgConnectionNetworkError } from './oraclePostgres';
 import {
   ACCESS_COOKIE_NAME,
   CSRF_COOKIE_NAME,
@@ -57,6 +57,7 @@ export async function connectPgOrFallback(req, targetPath) {
 
   try {
     const client = await pool.connect();
+    await ensureCleanPgClient(client);
     pgUnreachableUntil = 0;
     return { client, fallbackResponse: null };
   } catch (err) {

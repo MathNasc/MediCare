@@ -69,6 +69,23 @@ function sanitizeIdentifier(ident) {
   return clean;
 }
 
+async function runRestSavepointQuery(client, label, sql, params = [], fallbackValue = { rows: [], rowCount: 0 }) {
+  const sp = `sp_rest_${String(label || 'opt').replace(/[^a-zA-Z0-9_]/g, '_')}`;
+  await client.query(`SAVEPOINT ${sp}`);
+  try {
+    const res = await client.query(sql, params);
+    await client.query(`RELEASE SAVEPOINT ${sp}`);
+    return res;
+  } catch (err) {
+    await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
+    await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    if (err?.message) {
+      console.warn(`[rest] optional tx query ${sp} skipped:`, err.message);
+    }
+    return fallbackValue;
+  }
+}
+
 const PAIRING_CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 function generatePairingCode() {
@@ -363,18 +380,18 @@ async function handleRpcCall(client, fnName, args, userId) {
             [String(patientId), String(medId), hora, doseDate]
           );
 
-          await client
-            .query(
-              `UPDATE approval_requests
-               SET status = 'approved', updated_at = NOW()
-               WHERE patient_id::text = $1::text
-                 AND med_id::text = $2::text
-                 AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
-                 AND dose_date = $4
-                 AND status = 'pending'`,
-              [String(patientId), String(medId), hora, doseDate]
-            )
-            .catch(() => {});
+          await runRestSavepointQuery(
+            client,
+            'approve_req_pending',
+            `UPDATE approval_requests
+             SET status = 'approved', updated_at = NOW()
+             WHERE patient_id::text = $1::text
+               AND med_id::text = $2::text
+               AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+               AND dose_date = $4
+               AND status = 'pending'`,
+            [String(patientId), String(medId), hora, doseDate]
+          );
 
           await client.query('COMMIT');
           return { status: 200, body: { success: true, action: 'deleted' } };
@@ -478,18 +495,18 @@ async function handleRpcCall(client, fnName, args, userId) {
             ]
           );
 
-          await client
-            .query(
-              `UPDATE approval_requests
-               SET status = 'approved', updated_at = NOW()
-               WHERE patient_id::text = $1::text
-                 AND med_id::text = $2::text
-                 AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
-                 AND dose_date = $4
-                 AND status = 'pending'`,
-              [String(patientId), String(medId), hora, doseDate]
-            )
-            .catch(() => {});
+          await runRestSavepointQuery(
+            client,
+            'approve_req_update',
+            `UPDATE approval_requests
+             SET status = 'approved', updated_at = NOW()
+             WHERE patient_id::text = $1::text
+               AND med_id::text = $2::text
+               AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+               AND dose_date = $4
+               AND status = 'pending'`,
+            [String(patientId), String(medId), hora, doseDate]
+          );
 
           await client.query('COMMIT');
           return {
@@ -569,18 +586,18 @@ async function handleRpcCall(client, fnName, args, userId) {
           ]
         );
 
-        await client
-          .query(
-            `UPDATE approval_requests
-             SET status = 'approved', updated_at = NOW()
-             WHERE patient_id::text = $1::text
-               AND med_id::text = $2::text
-               AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
-               AND dose_date = $4
-               AND status = 'pending'`,
-            [String(patientId), String(medId), hora, doseDate]
-          )
-          .catch(() => {});
+        await runRestSavepointQuery(
+          client,
+          'approve_req_insert',
+          `UPDATE approval_requests
+           SET status = 'approved', updated_at = NOW()
+           WHERE patient_id::text = $1::text
+             AND med_id::text = $2::text
+             AND LEFT(COALESCE(hora, ''), 5) = LEFT($3, 5)
+             AND dose_date = $4
+             AND status = 'pending'`,
+          [String(patientId), String(medId), hora, doseDate]
+        );
 
         await client.query('COMMIT');
         return {
@@ -640,11 +657,12 @@ async function handleRpcCall(client, fnName, args, userId) {
               [String(reqRow.patient_id), String(reqRow.med_id), String(reqRow.hora), String(reqRow.dose_date)]
             );
             if (delRes.rowCount > 0) {
-              await client
-                .query(`UPDATE medicamentos SET quantidade = quantidade + 1, updated_at = NOW() WHERE id::text = $1::text`, [
-                  String(reqRow.med_id),
-                ])
-                .catch(() => {});
+              await runRestSavepointQuery(
+                client,
+                'undo_stock_restore',
+                `UPDATE medicamentos SET quantidade = quantidade + 1, updated_at = NOW() WHERE id::text = $1::text`,
+                [String(reqRow.med_id)]
+              );
             }
           } else {
             const newDoseId = crypto.randomUUID();
@@ -670,43 +688,47 @@ async function handleRpcCall(client, fnName, args, userId) {
                 reqRow.reason || 'Validado pelo cuidador',
               ]
             );
-            await client
-              .query(
-                `UPDATE medicamentos SET quantidade = quantidade - 1, updated_at = NOW() WHERE id::text = $1::text`,
-                [String(reqRow.med_id)]
-              )
-              .catch(() => {});
+            await runRestSavepointQuery(
+              client,
+              'confirm_stock_decrement',
+              `UPDATE medicamentos SET quantidade = quantidade - 1, updated_at = NOW() WHERE id::text = $1::text`,
+              [String(reqRow.med_id)]
+            );
           }
         }
-        const actorRes = await client
-          .query(`SELECT nome FROM profiles WHERE id::text = $1::text LIMIT 1`, [String(actor)])
-          .catch(() => ({ rows: [] }));
+        const actorRes = await runRestSavepointQuery(
+          client,
+          'resolve_actor_name',
+          `SELECT nome FROM profiles WHERE id::text = $1::text LIMIT 1`,
+          [String(actor)],
+          { rows: [] }
+        );
         const approverName = actorRes.rows[0]?.nome || 'Cuidador';
-        await client
-          .query(
-            `INSERT INTO audit_logs (id, patient_id, performed_by, action, old_value, new_value, reason)
-             VALUES ($1, $2, $3, $4, NULL, $5::jsonb, $6)`,
-            [
-              crypto.randomUUID(),
-              reqRow.patient_id,
-              actor,
-              finalStatus === 'approved' ? 'dose_approval_approved' : 'dose_approval_rejected',
-              JSON.stringify({
-                med_id: reqRow.med_id,
-                med_nome: reqRow.med_nome || 'Medicamento',
-                scheduled_time: reqRow.hora,
-                scheduled_date: reqRow.dose_date,
-                actor_name: approverName,
-                actor_role: 'cuidador',
-                origin: 'caregiver_web',
-              }),
-              reqRow.reason ||
-                (finalStatus === 'approved'
-                  ? 'Solicitação aprovada pelo cuidador'
-                  : 'Solicitação recusada pelo cuidador'),
-            ]
-          )
-          .catch(() => {});
+        await runRestSavepointQuery(
+          client,
+          'resolve_audit_log',
+          `INSERT INTO audit_logs (id, patient_id, performed_by, action, old_value, new_value, reason)
+           VALUES ($1, $2, $3, $4, NULL, $5::jsonb, $6)`,
+          [
+            crypto.randomUUID(),
+            reqRow.patient_id,
+            actor,
+            finalStatus === 'approved' ? 'dose_approval_approved' : 'dose_approval_rejected',
+            JSON.stringify({
+              med_id: reqRow.med_id,
+              med_nome: reqRow.med_nome || 'Medicamento',
+              scheduled_time: reqRow.hora,
+              scheduled_date: reqRow.dose_date,
+              actor_name: approverName,
+              actor_role: 'cuidador',
+              origin: 'caregiver_web',
+            }),
+            reqRow.reason ||
+              (finalStatus === 'approved'
+                ? 'Solicitação aprovada pelo cuidador'
+                : 'Solicitação recusada pelo cuidador'),
+          ]
+        );
 
         await client.query('COMMIT');
         return { status: 200, body: { success: true, id: reqRow.id, status: finalStatus } };
@@ -764,8 +786,9 @@ async function handleRpcCall(client, fnName, args, userId) {
         ]);
 
         const movId = crypto.randomUUID();
-        await client
-          .query(
+        await client.query('SAVEPOINT sp_rest_stock_mv');
+        try {
+          await client.query(
             `INSERT INTO stock_movements (
                id, medication_id, user_id, med_name, movement_type,
                quantity_before, quantity_changed, quantity_delta, quantity_after,
@@ -787,30 +810,33 @@ async function handleRpcCall(client, fnName, args, userId) {
               args.p_expiration_date || null,
               args.p_notes ?? null,
             ]
-          )
-          .catch(async () => {
-            await client.query(
-              `INSERT INTO stock_movements (
-                 id, medication_id, user_id, movement_type,
-                 quantity_before, quantity_after, quantity_changed,
-                 purchase_price, purchase_location, batch, expiration_date, notes
-               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-              [
-                movId,
-                med.id,
-                med.user_id,
-                movementType,
-                qtyBefore,
-                qtyAfter,
-                qtyChanged,
-                args.p_purchase_price ?? null,
-                args.p_purchase_location ?? null,
-                args.p_batch ?? null,
-                args.p_expiration_date || null,
-                args.p_notes ?? null,
-              ]
-            );
-          });
+          );
+          await client.query('RELEASE SAVEPOINT sp_rest_stock_mv');
+        } catch {
+          await client.query('ROLLBACK TO SAVEPOINT sp_rest_stock_mv');
+          await client.query('RELEASE SAVEPOINT sp_rest_stock_mv').catch(() => {});
+          await client.query(
+            `INSERT INTO stock_movements (
+               id, medication_id, user_id, movement_type,
+               quantity_before, quantity_after, quantity_changed,
+               purchase_price, purchase_location, batch, expiration_date, notes
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [
+              movId,
+              med.id,
+              med.user_id,
+              movementType,
+              qtyBefore,
+              qtyAfter,
+              qtyChanged,
+              args.p_purchase_price ?? null,
+              args.p_purchase_location ?? null,
+              args.p_batch ?? null,
+              args.p_expiration_date || null,
+              args.p_notes ?? null,
+            ]
+          );
+        }
 
         await client.query('COMMIT');
         return { status: 200, body: { success: true, movement_id: movId } };
@@ -1025,23 +1051,23 @@ async function handleRpcCall(client, fnName, args, userId) {
           [userId, effectivePerm, effectiveLabel, rel.id]
         );
 
-        await client
-          .query(
-            `INSERT INTO cuidadores (paciente_id, cuidador_id, nivel_acesso, status)
-             VALUES ($1, $2, $3, 'ativo')
-             ON CONFLICT (paciente_id, cuidador_id) DO UPDATE
-               SET status = 'ativo', nivel_acesso = EXCLUDED.nivel_acesso`,
-            [rel.patient_id, userId, effectivePerm === 'admin' ? 'total' : 'leitura']
-          )
-          .catch(() => {});
+        await runRestSavepointQuery(
+          client,
+          'accept_legacy_cuidadores',
+          `INSERT INTO cuidadores (paciente_id, cuidador_id, nivel_acesso, status)
+           VALUES ($1, $2, $3, 'ativo')
+           ON CONFLICT (paciente_id, cuidador_id) DO UPDATE
+             SET status = 'ativo', nivel_acesso = EXCLUDED.nivel_acesso`,
+          [rel.patient_id, userId, effectivePerm === 'admin' ? 'total' : 'leitura']
+        );
 
-        await client
-          .query(
-            `INSERT INTO caregiver_audit_log (relationship_id, actor_id, action, details)
-             VALUES ($1, $2, 'invite_accepted', $3::jsonb)`,
-            [rel.id, userId, JSON.stringify({ patient_id: rel.patient_id, token: rel.invite_token })]
-          )
-          .catch(() => {});
+        await runRestSavepointQuery(
+          client,
+          'accept_cg_audit',
+          `INSERT INTO caregiver_audit_log (relationship_id, actor_id, action, details)
+           VALUES ($1, $2, 'invite_accepted', $3::jsonb)`,
+          [rel.id, userId, JSON.stringify({ patient_id: rel.patient_id, token: rel.invite_token })]
+        );
 
         await client.query('COMMIT');
       } catch (txErr) {
@@ -1791,6 +1817,7 @@ async function handleRestRequest(req, { params }) {
       { status: 500, headers: corsHeaders }
     );
   } finally {
+    await client.query('ROLLBACK').catch(() => {});
     client.release();
   }
 }

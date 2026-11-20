@@ -158,7 +158,7 @@ export async function notifyCaregiversOfDoseRequest(
     const cgNotifId = toDeterministicUuid(`notif:cg:${cgRow.caregiver_id}:${reqUuid}`, `notif:${cgRow.caregiver_id}`);
 
     if (useSavepoint) {
-      await client.query('SAVEPOINT sp_cg_req_notif').catch(() => {});
+      await client.query('SAVEPOINT sp_cg_req_notif');
     }
     try {
       if (isNewOrReopened) {
@@ -181,11 +181,11 @@ export async function notifyCaregiversOfDoseRequest(
         );
       }
       if (useSavepoint) {
-        await client.query('RELEASE SAVEPOINT sp_cg_req_notif').catch(() => {});
+        await client.query('RELEASE SAVEPOINT sp_cg_req_notif');
       }
     } catch {
       if (useSavepoint) {
-        await client.query('ROLLBACK TO SAVEPOINT sp_cg_req_notif').catch(() => {});
+        await client.query('ROLLBACK TO SAVEPOINT sp_cg_req_notif');
         await client.query('RELEASE SAVEPOINT sp_cg_req_notif').catch(() => {});
       }
     }
@@ -246,7 +246,7 @@ export async function notifyCaregiversOfSosUsage(
   for (const cgId of cleanCgIds) {
     const notifId = toDeterministicUuid(`sos:${cgId}:${doseId}`, `notif:${cgId}`);
     if (useSavepoint) {
-      await client.query('SAVEPOINT sp_cg_sos_notif').catch(() => {});
+      await client.query('SAVEPOINT sp_cg_sos_notif');
     }
     let insRes = { rowCount: 0 };
     try {
@@ -258,11 +258,11 @@ export async function notifyCaregiversOfSosUsage(
         [notifId, cgId, title, body]
       );
       if (useSavepoint) {
-        await client.query('RELEASE SAVEPOINT sp_cg_sos_notif').catch(() => {});
+        await client.query('RELEASE SAVEPOINT sp_cg_sos_notif');
       }
     } catch {
       if (useSavepoint) {
-        await client.query('ROLLBACK TO SAVEPOINT sp_cg_sos_notif').catch(() => {});
+        await client.query('ROLLBACK TO SAVEPOINT sp_cg_sos_notif');
         await client.query('RELEASE SAVEPOINT sp_cg_sos_notif').catch(() => {});
       }
     }

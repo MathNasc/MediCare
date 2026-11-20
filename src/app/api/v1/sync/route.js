@@ -33,20 +33,41 @@ function toDeterministicUuid(rawId, prefix = 'medicare') {
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
+async function ensureCleanSyncClient(client) {
+  if (!client || typeof client.query !== 'function') return;
+  try {
+    const res = await client.query('SELECT txid_current_if_assigned() AS txid');
+    if (res?.rows?.[0]?.txid != null) {
+      await client.query('ROLLBACK');
+    }
+  } catch {
+    await client.query('ROLLBACK').catch(() => {});
+  }
+}
+
 async function runOptionalTxFn(client, label, fn, fallbackValue = null) {
   const sp = `sp_${String(label || 'opt').replace(/[^a-zA-Z0-9_]/g, '_')}`;
   try {
     await client.query(`SAVEPOINT ${sp}`);
-  } catch {
+  } catch (spErr) {
+    if (spErr?.code === '25P02') {
+      throw spErr;
+    }
+    console.warn(`[sync] SAVEPOINT ${sp} failed:`, spErr?.message || spErr);
     return fallbackValue;
   }
   try {
     const res = await fn();
-    await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    await client.query(`RELEASE SAVEPOINT ${sp}`);
     return res;
   } catch (err) {
-    await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
-    await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    try {
+      await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
+      await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    } catch (rbErr) {
+      console.error(`[sync] ROLLBACK TO SAVEPOINT ${sp} failed:`, rbErr?.message || rbErr);
+      throw rbErr;
+    }
     if (err?.message) {
       console.warn(`[sync] optional tx step ${sp} skipped:`, {
         code: err?.code || null,
@@ -298,6 +319,7 @@ export async function GET(request) {
   }
 
   try {
+    await ensureCleanSyncClient(client);
     await ensureOraclePostgresSchema(client);
 
     const allProfilesRes = await client.query(
@@ -543,21 +565,33 @@ export async function POST(request) {
     ? body.approval_requests
     : [];
 
+  let txStep = 'ensure_clean_client';
+  let txOpen = false;
+  let rollbackFailed = false;
+
   try {
+    await ensureCleanSyncClient(client);
+    txStep = 'ensure_schema';
     await ensureOraclePostgresSchema(client);
+    txStep = 'resolve_user';
     const userId = await resolveTargetUserId(client, requestedUserId, user);
+    txStep = 'fetch_care_settings';
     const careSettings = await fetchPatientCareSettings(client, userId);
 
     // Detecta o tipo da coluna horarios em medicamentos (text[] no schema standalone vs jsonb)
+    txStep = 'inspect_horarios_col';
     const horariosColRes = await client.query(
       `SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'medicamentos' AND column_name = 'horarios' LIMIT 1`
     );
     const isHorariosArray = horariosColRes.rows[0]?.data_type === 'ARRAY';
 
+    txStep = 'begin';
     await client.query('BEGIN');
+    txOpen = true;
     const deferredPushes = [];
 
     // 1. Atualiza ou insere o perfil do paciente preservando campos existentes caso não venham preenchidos
+    txStep = 'upsert_profile';
     const rawIncomingRole = String(user.role || user.user_role || '')
       .trim()
       .toLowerCase();
@@ -628,6 +662,7 @@ export async function POST(request) {
       }
     }
 
+    txStep = 'delete_stale_records';
     if (deletedMedIdsToMatch.size > 0 && (!isDependentPatientSync || careSettings.allow_patient_med_edit)) {
       const delMedArr = Array.from(deletedMedIdsToMatch);
       await runOptionalTxQuery(
@@ -667,6 +702,7 @@ export async function POST(request) {
     for (const m of meds) {
       const rawMedId = m.id || `med-${m.nome || Date.now()}`;
       const medUuid = toDeterministicUuid(rawMedId, `med:${userId}`);
+      txStep = `upsert_med:${m?.nome || medUuid}`;
       if (
         deletedSet.has(String(rawMedId).trim().toLowerCase()) ||
         deletedSet.has(medUuid.toLowerCase()) ||
@@ -766,6 +802,7 @@ export async function POST(request) {
       }
     }
 
+    txStep = 'sync_auth_meds';
     if (syncAuthoritativeMeds && (!isDependentPatientSync || careSettings.allow_patient_med_edit)) {
       const activeMedUuids = Array.from(medIdMap.values()).map((id) => String(id).toLowerCase());
       if (activeMedUuids.length > 0) {
@@ -796,6 +833,7 @@ export async function POST(request) {
       }
     }
 
+    txStep = 'fetch_active_caregivers';
     const activeCgLinksRes = await runOptionalTxQuery(
       client,
       'active_cg_links',
@@ -809,6 +847,7 @@ export async function POST(request) {
       .map(String);
     const resolvedPatientName = user.nome || user.full_name || 'Paciente';
 
+    txStep = 'upsert_history';
     for (const h of history) {
       if (!h || typeof h !== 'object') continue;
       await runOptionalTxFn(client, 'dose_item', async () => {
@@ -963,6 +1002,7 @@ export async function POST(request) {
       });
     }
 
+    txStep = 'cleanup_stock_events';
     await runOptionalTxQuery(
       client,
       'cleanup_stock_events',
@@ -970,6 +1010,7 @@ export async function POST(request) {
       [userId]
     );
 
+    txStep = 'upsert_events';
     for (const ev of events) {
       if (!ev || typeof ev !== 'object') continue;
       const evType = normalizeEventType(ev.type || ev.tipo);
@@ -1008,6 +1049,7 @@ export async function POST(request) {
       );
     }
 
+    txStep = 'upsert_notes';
     for (const n of notes) {
       const content = n?.content || n?.description || n?.texto || n?.title || '';
       if (!content) continue;
@@ -1036,6 +1078,7 @@ export async function POST(request) {
       );
     }
 
+    txStep = 'upsert_allergies';
     for (const a of allergies) {
       if (!a || typeof a !== 'object') continue;
       const algName = a.name || a.nome || a.substancia || '';
@@ -1052,6 +1095,7 @@ export async function POST(request) {
       );
     }
 
+    txStep = 'upsert_conditions';
     for (const c of conditions) {
       if (!c || typeof c !== 'object') continue;
       const condName = c.name || c.nome || '';
@@ -1074,6 +1118,7 @@ export async function POST(request) {
       );
     }
 
+    txStep = 'upsert_contacts';
     for (const ct of contacts) {
       if (!ct || typeof ct !== 'object') continue;
       const ctName = ct.name || ct.nome || '';
@@ -1091,6 +1136,7 @@ export async function POST(request) {
       );
     }
 
+    txStep = 'upsert_professionals';
     for (const pr of professionals) {
       if (!pr || typeof pr !== 'object') continue;
       const prName = pr.name || pr.nome || '';
@@ -1117,6 +1163,7 @@ export async function POST(request) {
       );
     }
 
+    txStep = 'upsert_stock_movements';
     for (const sm of stockMovements) {
       if (!sm || typeof sm !== 'object') continue;
       await runOptionalTxFn(client, 'upsert_stock_movement', async () => {
@@ -1187,6 +1234,7 @@ export async function POST(request) {
     }
 
     // Processa solicitações de validação de dose (confirmação ou desfazimento) enviadas pelo paciente ao cuidador
+    txStep = 'upsert_approval_requests';
     let approvalRequestsSaved = 0;
     if (pendingDoseRequests.length > 0) {
       const cgLinksRes = await runOptionalTxQuery(
@@ -1414,6 +1462,7 @@ export async function POST(request) {
     }
 
     // Processa revogações explícitas de convites/cuidadores enviadas pelo app
+    txStep = 'revoke_caregivers';
     for (const rawDelId of deletedRecordIds) {
       const delUuid = toDeterministicUuid(rawDelId, `cg:${userId}`);
       deletedSet.add(delUuid.toLowerCase());
@@ -1440,6 +1489,7 @@ export async function POST(request) {
     }
 
     // Sincroniza convites e vínculos de cuidadores gerados pelo paciente
+    txStep = 'upsert_caregivers';
     for (const cg of caregiverRelationships) {
       if (!cg || typeof cg !== 'object') continue;
       const rawCgId = String(cg.id || cg.codigo_convite || cg.invite_code || cg.invite_token || '').trim();
@@ -1528,7 +1578,9 @@ export async function POST(request) {
       });
     }
 
+    txStep = 'commit';
     await client.query('COMMIT');
+    txOpen = false;
 
     if (deferredPushes.length > 0) {
       await Promise.race([
@@ -1564,6 +1616,7 @@ export async function POST(request) {
     );
   } catch (err) {
     console.error('[sync] POST fatal error:', {
+      step: txStep,
       userId: requestedUserId || null,
       code: err?.code || null,
       message: err?.message || String(err),
@@ -1571,13 +1624,30 @@ export async function POST(request) {
       table: err?.table || null,
       constraint: err?.constraint || null,
     });
-    await client.query('ROLLBACK').catch(() => {});
+    if (txOpen) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        rollbackFailed = true;
+      }
+      txOpen = false;
+    } else {
+      await client.query('ROLLBACK').catch(() => {});
+    }
     return NextResponse.json(
-      { ok: false, error: err.message || 'Falha ao sincronizar com o PostgreSQL Oracle' },
+      {
+        ok: false,
+        error: err.message || 'Falha ao sincronizar com o PostgreSQL Oracle',
+        step: txStep,
+      },
       { status: 500, headers: corsHeaders }
     );
   } finally {
-    client.release();
+    if (rollbackFailed || txOpen) {
+      client.release(true);
+    } else {
+      client.release();
+    }
   }
 }
 
@@ -1590,7 +1660,9 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
     );
   }
 
+  let rollbackFailed = false;
   try {
+    await ensureCleanSyncClient(client);
     await client.query('BEGIN');
     const cleanEmail = (targetEmail || '').trim().toLowerCase();
     const idStr = targetUserId ? String(targetUserId).trim() : null;
@@ -1600,12 +1672,24 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
 
     if (idStr) {
       foundUserIds.add(idStr);
-      const uById = await client.query('SELECT id, email FROM app_users WHERE id::text = $1', [idStr]).catch(() => ({ rows: [] }));
+      const uById = await runOptionalTxQuery(
+        client,
+        'del_acc_uid',
+        'SELECT id, email FROM app_users WHERE id::text = $1',
+        [idStr],
+        { rows: [] }
+      );
       uById.rows.forEach(r => {
         if (r.id) foundUserIds.add(String(r.id));
         if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
       });
-      const pById = await client.query('SELECT id, email FROM profiles WHERE id::text = $1', [idStr]).catch(() => ({ rows: [] }));
+      const pById = await runOptionalTxQuery(
+        client,
+        'del_acc_pid',
+        'SELECT id, email FROM profiles WHERE id::text = $1',
+        [idStr],
+        { rows: [] }
+      );
       pById.rows.forEach(r => {
         if (r.id) foundUserIds.add(String(r.id));
         if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
@@ -1614,12 +1698,24 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
 
     if (cleanEmail) {
       foundEmails.add(cleanEmail);
-      const uByEmail = await client.query('SELECT id, email FROM app_users WHERE lower(email) = $1', [cleanEmail]).catch(() => ({ rows: [] }));
+      const uByEmail = await runOptionalTxQuery(
+        client,
+        'del_acc_uemail',
+        'SELECT id, email FROM app_users WHERE lower(email) = $1',
+        [cleanEmail],
+        { rows: [] }
+      );
       uByEmail.rows.forEach(r => {
         if (r.id) foundUserIds.add(String(r.id));
         if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
       });
-      const pByEmail = await client.query('SELECT id, email FROM profiles WHERE lower(email) = $1', [cleanEmail]).catch(() => ({ rows: [] }));
+      const pByEmail = await runOptionalTxQuery(
+        client,
+        'del_acc_pemail',
+        'SELECT id, email FROM profiles WHERE lower(email) = $1',
+        [cleanEmail],
+        { rows: [] }
+      );
       pByEmail.rows.forEach(r => {
         if (r.id) foundUserIds.add(String(r.id));
         if (r.email) foundEmails.add(String(r.email).trim().toLowerCase());
@@ -1631,29 +1727,37 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
 
     if (userIdsArray.length > 0 || emailsArray.length > 0) {
       // 1. Desvincular chaves estrangeiras de agente / autor
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_unlink_hist',
         `UPDATE historico_doses SET performed_by = NULL
          WHERE performed_by::text = ANY($1::text[])
             OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
         [userIdsArray, emailsArray]
-      ).catch(() => {});
+      );
 
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_unlink_cg_audit',
         `UPDATE caregiver_audit_log SET actor_id = NULL
          WHERE actor_id::text = ANY($1::text[])
             OR actor_id IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
         [userIdsArray, emailsArray]
-      ).catch(() => {});
+      );
 
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_unlink_audit',
         `UPDATE audit_logs SET performed_by = NULL
          WHERE performed_by::text = ANY($1::text[])
             OR performed_by IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
         [userIdsArray, emailsArray]
-      ).catch(() => {});
+      );
 
       // 2. Apagar logs e notas de cuidadores associados
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_cg_audit',
         `DELETE FROM caregiver_audit_log
          WHERE relationship_id IN (
            SELECT id FROM caregiver_relationships
@@ -1662,9 +1766,11 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
               OR lower(invite_email) = ANY($2::text[])
          )`,
         [userIdsArray, emailsArray]
-      ).catch(() => {});
+      );
 
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_cg_notes',
         `DELETE FROM caregiver_notes
          WHERE patient_id::text = ANY($1::text[])
             OR caregiver_id::text = ANY($1::text[])
@@ -1675,23 +1781,27 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
                  OR lower(invite_email) = ANY($2::text[])
             )`,
         [userIdsArray, emailsArray]
-      ).catch(() => {});
+      );
 
       // 3. Apagar relacionamentos de cuidadores
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_cg_rel',
         `DELETE FROM caregiver_relationships
          WHERE patient_id::text = ANY($1::text[])
             OR caregiver_id::text = ANY($1::text[])
             OR lower(invite_email) = ANY($2::text[])`,
         [userIdsArray, emailsArray]
-      ).catch(() => {});
+      );
 
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_cuidadores',
         `DELETE FROM cuidadores
          WHERE paciente_id::text = ANY($1::text[])
             OR cuidador_id::text = ANY($1::text[])`,
         [userIdsArray]
-      ).catch(() => {});
+      );
 
       // 4. Apagar registros das tabelas dependentes
       const tables = [
@@ -1718,21 +1828,25 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
 
       for (const table of tables) {
         const col = table === 'audit_logs' ? 'patient_id' : 'user_id';
-        await client.query(
+        await runOptionalTxQuery(
+          client,
+          `del_acc_${table}`,
           `DELETE FROM ${table}
            WHERE ${col}::text = ANY($1::text[])
               OR ${col} IN (SELECT id FROM app_users WHERE lower(email) = ANY($2::text[]))`,
           [userIdsArray, emailsArray]
-        ).catch(() => {});
+        );
       }
 
       // 5. Apagar do perfil e usuários
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'del_acc_profiles',
         `DELETE FROM profiles
          WHERE id::text = ANY($1::text[])
             OR lower(email) = ANY($2::text[])`,
         [userIdsArray, emailsArray]
-      ).catch(() => {});
+      );
 
       await client.query(
         `DELETE FROM app_users
@@ -1748,13 +1862,21 @@ async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
       { status: 200, headers: corsHeaders }
     );
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      rollbackFailed = true;
+    }
     return NextResponse.json(
       { ok: false, error: err.message || 'Erro ao excluir dados no PostgreSQL Oracle' },
       { status: 500, headers: corsHeaders }
     );
   } finally {
-    client.release();
+    if (rollbackFailed) {
+      client.release(true);
+    } else {
+      client.release();
+    }
   }
 }
 
