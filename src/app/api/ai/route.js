@@ -16,12 +16,46 @@ const corsHeaders = {
 };
 
 const DEFAULT_OPENROUTER_MODEL = 'openai/gpt-4o-mini';
+const BUILTIN_OPENROUTER_FALLBACK_MODELS = [
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemma-3-27b-it:free',
+  'mistralai/mistral-small-3.1-24b-instruct:free',
+  'openrouter/free',
+];
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders });
 }
 
-async function callOpenRouter({ messages, model, apiKey }) {
+function extractOpenRouterContent(choice) {
+  const content = choice?.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part === 'string' ? part : part?.text || ''))
+      .join('\n')
+      .trim();
+  }
+  return '';
+}
+
+function buildCandidateOpenRouterModels(primaryModel) {
+  const envFallbacks = String(process.env.OPENROUTER_FALLBACK_MODEL || '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+
+  const candidates = [primaryModel, ...envFallbacks, ...BUILTIN_OPENROUTER_FALLBACK_MODELS];
+  const unique = [];
+  for (const model of candidates) {
+    if (model && !unique.includes(model)) {
+      unique.push(model);
+    }
+  }
+  return unique;
+}
+
+async function callOpenRouter({ messages, model, apiKey, timeoutMs = 22000 }) {
   const siteUrl =
     process.env.OPENROUTER_SITE_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -38,10 +72,10 @@ async function callOpenRouter({ messages, model, apiKey }) {
     body: JSON.stringify({
       model: model || DEFAULT_OPENROUTER_MODEL,
       messages,
-      temperature: 0.25,
-      max_tokens: 750,
+      temperature: 0.3,
+      max_tokens: 1800,
     }),
-    signal: AbortSignal.timeout(22000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   const data = await res.json().catch(() => ({}));
@@ -52,14 +86,40 @@ async function callOpenRouter({ messages, model, apiKey }) {
     throw err;
   }
 
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => (typeof part === 'string' ? part : part?.text || ''))
-      .join('\n');
+  const choice = data?.choices?.[0];
+  const text = extractOpenRouterContent(choice);
+  if (!text) {
+    console.warn('[AI] OpenRouter retornou conteúdo vazio:', {
+      requestedModel: model || DEFAULT_OPENROUTER_MODEL,
+      resolvedModel: data?.model || null,
+      finishReason: choice?.finish_reason || null,
+      hasReasoning: Boolean(choice?.message?.reasoning),
+    });
   }
-  return '';
+  return {
+    text,
+    resolvedModel: data?.model || model || DEFAULT_OPENROUTER_MODEL,
+  };
+}
+
+async function callGemini({ messages, cleanedText, apiKey }) {
+  const ai = new GoogleGenAI({ apiKey });
+  const userTurn = messages[messages.length - 1]?.content || cleanedText;
+  const historyPrompt = messages
+    .slice(1, -1)
+    .map((m) => `${m.role === 'user' ? 'Paciente' : 'Assistente'}: ${m.content}`)
+    .join('\n');
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: historyPrompt ? `${historyPrompt}\nPaciente: ${userTurn}` : userTurn,
+    config: {
+      systemInstruction: HARDENED_SYSTEM_PROMPT,
+      temperature: 0.3,
+      maxOutputTokens: 1800,
+    },
+  });
+  return String(response?.text || '').trim();
 }
 
 export async function POST(req) {
@@ -122,39 +182,58 @@ export async function POST(req) {
       return forwardToOracleBackend(req, '/api/ai');
     }
 
-    let rawAiText = '';
-    let usedProvider = 'openrouter';
-
-    if (openRouterKey) {
-      rawAiText = await callOpenRouter({
-        messages,
-        model: openRouterModel,
-        apiKey: openRouterKey,
-      });
-    } else if (geminiKey) {
-      usedProvider = 'gemini_fallback';
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
-      const userTurn = messages[messages.length - 1]?.content || inputCheck.cleanedText;
-      const historyPrompt = messages
-        .slice(1, -1)
-        .map((m) => `${m.role === 'user' ? 'Paciente' : 'Assistente'}: ${m.content}`)
-        .join('\n');
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: historyPrompt ? `${historyPrompt}\nPaciente: ${userTurn}` : userTurn,
-        config: {
-          systemInstruction: HARDENED_SYSTEM_PROMPT,
-          temperature: 0.25,
-          maxOutputTokens: 750,
-        },
-      });
-      rawAiText = response?.text || '';
-    } else {
+    if (!openRouterKey && !geminiKey) {
       return NextResponse.json(
         { error: 'OPENROUTER_API_KEY não configurada no servidor.' },
         { status: 503, headers: corsHeaders }
       );
+    }
+
+    let rawAiText = '';
+    let usedProvider = 'openrouter';
+    let usedModel = openRouterModel;
+    let lastOpenRouterError = null;
+
+    if (openRouterKey) {
+      const candidateModels = buildCandidateOpenRouterModels(openRouterModel).slice(0, 4);
+      for (let i = 0; i < candidateModels.length; i += 1) {
+        const candidateModel = candidateModels[i];
+        try {
+          const result = await callOpenRouter({
+            messages,
+            model: candidateModel,
+            apiKey: openRouterKey,
+            timeoutMs: i === 0 ? 22000 : 15000,
+          });
+          if (result.text) {
+            rawAiText = result.text;
+            usedModel = result.resolvedModel || candidateModel;
+            lastOpenRouterError = null;
+            break;
+          }
+        } catch (err) {
+          lastOpenRouterError = err;
+          const errStatus = Number(err?.status || 0);
+          // Erro de chave inválida não resolve tentando outro modelo do mesmo provedor
+          if (errStatus === 401 || errStatus === 403) {
+            break;
+          }
+        }
+      }
+    }
+
+    if (!rawAiText && geminiKey) {
+      usedProvider = 'gemini_fallback';
+      usedModel = 'gemini-2.5-flash';
+      rawAiText = await callGemini({
+        messages,
+        cleanedText: inputCheck.cleanedText,
+        apiKey: geminiKey,
+      });
+    }
+
+    if (!rawAiText && lastOpenRouterError) {
+      throw lastOpenRouterError;
     }
 
     // 2. Validação pós-resposta contra vazamento de código ou instruções do sistema
@@ -166,7 +245,7 @@ export async function POST(req) {
       {
         text: sanitized.text,
         provider: usedProvider,
-        model: usedProvider === 'openrouter' ? openRouterModel : 'gemini-2.5-flash',
+        model: usedModel,
         guardrailBlocked: !sanitized.safe,
       },
       { status: 200, headers: corsHeaders }
