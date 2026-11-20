@@ -15,7 +15,7 @@ out/
 *.pem
 *.key
 backups/
-public/assets/aistudio/Paste_*
+public/assets/aistudio/
 secrets/
 
 # OS

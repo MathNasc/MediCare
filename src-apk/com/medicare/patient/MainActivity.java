@@ -3629,7 +3629,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public final void run() {
-                String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+                String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
                 JSONObject successObj = null;
                 String lastErrorMsg = "";
                 boolean gotHttpError = false;
@@ -12312,7 +12312,7 @@ public class MainActivity extends Activity {
                     payload.put("patientName", MainActivity.this.profile.optString("nome", "Paciente"));
 
                     byte[] payloadBytes = payload.toString().getBytes(StandardCharsets.UTF_8);
-                    String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+                    String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
 
                     for (String base : baseCandidates) {
                         if (base == null || base.trim().isEmpty()) continue;
@@ -12394,7 +12394,7 @@ public class MainActivity extends Activity {
             if (this.prefs == null) return false;
             String refreshToken = this.prefs.getString("auth_refresh_token", "").trim();
             if (refreshToken.isEmpty()) return false;
-            String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+            String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
             for (String base : baseCandidates) {
                 if (base == null || base.trim().isEmpty()) continue;
                 HttpURLConnection conn = null;
@@ -12463,7 +12463,7 @@ public class MainActivity extends Activity {
                 return result;
             }
 
-            String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+            String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
             boolean retriedAfterRefresh = false;
 
             String lastNetError = "";
@@ -17207,7 +17207,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+                String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
                 for (String base : baseCandidates) {
                     if (base == null || base.trim().isEmpty()) continue;
                     HttpURLConnection conn = null;
@@ -17811,7 +17811,7 @@ public class MainActivity extends Activity {
             if (!this.isLoggedIn) return false;
             final String patId = resolveCurrentAccountUserId();
             final String myEmail = this.profile.optString("email", "").trim().toLowerCase(Locale.ROOT);
-            String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+            String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
             JSONObject resp = null;
             for (String base : baseCandidates) {
                 if (base == null || base.trim().isEmpty()) continue;
@@ -18195,7 +18195,7 @@ public class MainActivity extends Activity {
                 int responseCode = -1;
                 JSONObject jSONObject2 = new JSONObject();
                 String lastAttemptError = "";
-                String[] postCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+                String[] postCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
                 for (String base : postCandidates) {
                     if (base == null || base.trim().isEmpty()) continue;
                     HttpURLConnection httpURLConnection = null;

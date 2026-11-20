@@ -468,4 +468,193 @@ describe('Regressão de Sincronização (POST /api/v1/sync e Notificações)', (
     expect(notifInserts.some((q) => q.sql.includes("'estoque'"))).toBe(true);
     expect(notifInserts.some((q) => q.sql.includes("'alerta'"))).toBe(false);
   });
+
+  it('isola erros em datas/timestamps inválidos, item legado de histórico, health_events e stock_movements sem perder doses válidas ou aprovações', async () => {
+    const { client, callLog } = createPgTxSimulator({
+      failOnPatterns: [
+        {
+          match: (sql, params) =>
+            sql.includes('INSERT INTO historico_doses') &&
+            String(params?.[8] || '').includes('ITEM_QUEBRADO'),
+          message: 'simulated constraint failure on single legacy history item',
+          code: '23514',
+        },
+        {
+          match: (sql) => sql.includes('INSERT INTO health_events'),
+          message: 'simulated health_events constraint failure',
+          code: '22007',
+        },
+        {
+          match: (sql) => sql.includes('INSERT INTO stock_movements'),
+          message: 'simulated stock_movements numeric overflow',
+          code: '22003',
+        },
+      ],
+    });
+    connectPgOrFallback.mockResolvedValue({ client, fallbackResponse: null });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+
+    const payload = {
+      user: {
+        id: PATIENT_ID,
+        nome: 'Marcela',
+        role: 'paciente',
+        dob: '2026-02-30',
+      },
+      timezone: 'America/Sao_Paulo',
+      meds: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          nome: 'Sertralina',
+          dosagem: '150mg',
+          quantidade: 9999999999999,
+          treatment_days: 9999999999999,
+          start_date: '2026-02-30',
+          end_date: '2026-13-40',
+          horarios: ['09:00'],
+          treatment_type: 'continuous',
+        },
+      ],
+      history: [
+        {
+          id: 'dose-broken-legacy',
+          med_id: '11111111-1111-4111-8111-111111111111',
+          hora: '25:99',
+          dose_date: '2026-02-30',
+          status: 'tomado',
+          reason: 'ITEM_QUEBRADO',
+          administered_at: 'not-a-timestamp',
+        },
+        {
+          id: 'dose-sertralina-2355',
+          med_id: '11111111-1111-4111-8111-111111111111',
+          hora: '23:55',
+          dose_date: today,
+          status: 'tomado',
+          atraso_minutos: 5,
+          administered_at: 'data-invalida-locale',
+        },
+        {
+          id: 'sos-clamp-check',
+          med_id: '11111111-1111-4111-8111-111111111111',
+          hora: '10:30',
+          dose_date: today,
+          status: 'tomado',
+          is_sos: true,
+          reason: 'Uso SOS - clamp int4',
+          atraso_minutos: 99999999999,
+          administered_at: 'data-invalida-locale',
+        },
+      ],
+      events: [
+        {
+          id: 'ev-1',
+          title: 'Consulta',
+          date: today,
+          time: '25:99',
+        },
+      ],
+      stock_movements: [
+        {
+          id: 'sm-1',
+          med_id: '11111111-1111-4111-8111-111111111111',
+          quantity_before: 17,
+          quantity_changed: -1,
+          quantity_after: 16,
+          created_at: 'not-valid',
+        },
+      ],
+      pending_dose_requests: [
+        {
+          id: 'req-venvanse-0900',
+          med_id: '33333333-3333-4333-8333-333333333333',
+          med_nome: 'Venvanse',
+          dose_date: today,
+          hora: '09:00',
+          requested_status: 'confirmed',
+          action_type: 'confirm_dose',
+          reason: 'Tomei com atraso',
+        },
+      ],
+    };
+
+    const res = await syncPost(buildPostRequest(payload));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(callLog.some((c) => c.sql.toUpperCase() === 'COMMIT')).toBe(true);
+    expect(callLog.some((c) => c.sql.toUpperCase() === 'ROLLBACK')).toBe(false);
+
+    // O medicamento teve datas inválidas sanitizadas para null e inteiros limitados a int4
+    const medInsert = callLog.find((c) => c.sql.includes('INSERT INTO medicamentos'));
+    expect(medInsert).toBeTruthy();
+    expect(medInsert.params[10]).toBe(2147483647);
+    expect(medInsert.params[16]).toBeNull();
+    expect(medInsert.params[17]).toBeNull();
+    expect(medInsert.params[18]).toBe(2147483647);
+
+    // A dose válida e o uso SOS foram inseridos com administered_at null e atraso_minutos limitado a int4
+    const validScheduledInsert = callLog.find(
+      (c) => c.sql.includes('INSERT INTO historico_doses') && c.params?.[3] === '23:55'
+    );
+    expect(validScheduledInsert).toBeTruthy();
+    expect(validScheduledInsert.params[13]).toBe(5);
+    expect(validScheduledInsert.params[14]).toBeNull();
+
+    const validSosInsert = callLog.find(
+      (c) =>
+        c.sql.includes('INSERT INTO historico_doses') &&
+        String(c.params?.[8] || '').includes('Uso SOS - clamp int4')
+    );
+    expect(validSosInsert).toBeTruthy();
+    expect(validSosInsert.params[13]).toBe(2147483647);
+    expect(validSosInsert.params[14]).toBeNull();
+
+    // A solicitação pendente ao cuidador foi preservada
+    expect(callLog.some((c) => c.sql.includes('INSERT INTO approval_requests'))).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it('registra console.error estruturado quando ocorre erro fatal na transação de sync', async () => {
+    const { client } = createPgTxSimulator({
+      failOnPatterns: [
+        {
+          match: (sql) => sql.includes('INSERT INTO profiles'),
+          message: 'simulated fatal profiles failure',
+          code: '22001',
+        },
+      ],
+    });
+    connectPgOrFallback.mockResolvedValue({ client, fallbackResponse: null });
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await syncPost(
+      buildPostRequest({
+        user: { id: PATIENT_ID, nome: 'Marcela', role: 'paciente' },
+        meds: [],
+        history: [],
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(json.ok).toBe(false);
+    expect(errSpy).toHaveBeenCalledWith(
+      '[sync] POST fatal error:',
+      expect.objectContaining({
+        userId: PATIENT_ID,
+        code: '22001',
+        message: 'simulated fatal profiles failure',
+      })
+    );
+    errSpy.mockRestore();
+  });
 });

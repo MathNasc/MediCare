@@ -48,7 +48,12 @@ async function runOptionalTxFn(client, label, fn, fallbackValue = null) {
     await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
     await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
     if (err?.message) {
-      console.warn(`[sync] optional tx step ${sp} skipped:`, err.message);
+      console.warn(`[sync] optional tx step ${sp} skipped:`, {
+        code: err?.code || null,
+        message: err.message,
+        detail: err?.detail || null,
+        constraint: err?.constraint || null,
+      });
     }
     return fallbackValue;
   }
@@ -62,33 +67,75 @@ function parsePgDate(val) {
   if (!val || typeof val !== 'string') return null;
   const s = val.trim();
   if (!s) return null;
+  let iso = null;
   // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    return s.slice(0, 10);
+    iso = s.slice(0, 10);
+  } else {
+    // DD/MM/YYYY
+    const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (br) {
+      const dd = br[1].padStart(2, '0');
+      const mm = br[2].padStart(2, '0');
+      const yyyy = br[3];
+      iso = `${yyyy}-${mm}-${dd}`;
+    } else if (/^\d{4}$/.test(s)) {
+      // Just year YYYY
+      iso = `${s}-01-01`;
+    }
   }
-  // DD/MM/YYYY
-  const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (br) {
-    const dd = br[1].padStart(2, '0');
-    const mm = br[2].padStart(2, '0');
-    const yyyy = br[3];
-    return `${yyyy}-${mm}-${dd}`;
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (
+    Number.isNaN(dt.getTime()) ||
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== m - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return null;
   }
-  // Just year YYYY
-  if (/^\d{4}$/.test(s)) {
-    return `${s}-01-01`;
-  }
-  return null;
+  return iso;
 }
 
 function parsePgTime(val) {
   if (!val || typeof val !== 'string') return null;
   const s = val.trim();
   const m = s.match(/^(\d{1,2}):(\d{2})/);
-  if (m) {
-    return `${m[1].padStart(2, '0')}:${m[2]}`;
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    return null;
   }
-  return null;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function parsePgTimestamp(val) {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) {
+    return Number.isNaN(val.getTime()) ? null : val.toISOString();
+  }
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) return null;
+    const ms = val > 0 && val < 1e12 ? val * 1000 : val;
+    const dt = new Date(ms);
+    return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
+  }
+  const s = String(val).trim();
+  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined') return null;
+  if (/^\d{10,13}$/.test(s)) {
+    const num = Number(s);
+    const ms = s.length === 10 ? num * 1000 : num;
+    const dt = new Date(ms);
+    return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
+  }
+  const parsed = Date.parse(s);
+  if (Number.isNaN(parsed)) return null;
+  const dt = new Date(parsed);
+  return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
 }
 
 function parsePgNumeric(val) {
@@ -101,6 +148,14 @@ function parsePgNumeric(val) {
   if (!cleaned) return null;
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
+}
+
+function clampPgInt(val, fallback = null) {
+  const num = parsePgNumeric(val);
+  if (num === null) return fallback;
+  const rounded = Math.round(num);
+  if (!Number.isFinite(rounded)) return fallback;
+  return Math.max(-2147483648, Math.min(2147483647, rounded));
 }
 
 function cleanNullableText(val) {
@@ -633,10 +688,7 @@ export async function POST(request) {
       const treatType = normalizeTreatmentType(m.treatment_type || m.treatmentType || m.tipo_uso);
       const medStatus = ['ativo', 'pausado', 'concluido', 'cancelado'].includes(m.status) ? m.status : 'ativo';
       const rawMedQty = m.quantidade ?? m.estoque_atual;
-      const parsedMedQty =
-        rawMedQty !== undefined && rawMedQty !== null && rawMedQty !== '' && Number.isFinite(Number(rawMedQty))
-          ? Math.round(Number(rawMedQty))
-          : 30;
+      const parsedMedQty = clampPgInt(rawMedQty, 30);
 
       const hasImportantFlag =
         m.important_for_emergency !== undefined || m.importantForEmergency !== undefined;
@@ -690,10 +742,7 @@ export async function POST(request) {
         treatType,
         parsePgDate(m.start_date || m.startDate || m.data_inicio),
         parsePgDate(m.end_date || m.endDate || m.data_fim),
-        (() => {
-          const td = parsePgNumeric(m.treatment_days ?? m.treatmentDays ?? m.duracao_dias);
-          return td !== null ? Math.round(td) : null;
-        })(),
+        clampPgInt(m.treatment_days ?? m.treatmentDays ?? m.duracao_dias, null),
         importantForEmergency,
       ];
 
@@ -720,7 +769,9 @@ export async function POST(request) {
     if (syncAuthoritativeMeds && (!isDependentPatientSync || careSettings.allow_patient_med_edit)) {
       const activeMedUuids = Array.from(medIdMap.values()).map((id) => String(id).toLowerCase());
       if (activeMedUuids.length > 0) {
-        await client.query(
+        await runOptionalTxQuery(
+          client,
+          'sync_auth_meds_keep',
           `UPDATE medicamentos
            SET ativo = false, status = 'cancelado', updated_at = NOW()
            WHERE user_id = $1
@@ -731,7 +782,9 @@ export async function POST(request) {
           [userId, activeMedUuids]
         );
       } else {
-        await client.query(
+        await runOptionalTxQuery(
+          client,
+          'sync_auth_meds_clear',
           `UPDATE medicamentos
            SET ativo = false, status = 'cancelado', updated_at = NOW()
            WHERE user_id = $1
@@ -757,153 +810,157 @@ export async function POST(request) {
     const resolvedPatientName = user.nome || user.full_name || 'Paciente';
 
     for (const h of history) {
-      const rawMedId = h.med_id || h.medId || '';
-      const resolvedMedUuid = medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
-      if (!resolvedMedUuid) continue;
+      if (!h || typeof h !== 'object') continue;
+      await runOptionalTxFn(client, 'dose_item', async () => {
+        const rawMedId = h.med_id || h.medId || '';
+        const resolvedMedUuid = medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
+        if (!resolvedMedUuid) return;
 
-      // Verifica se o medicamento existe para não violar FK
-      const medRowRes = await client.query('SELECT id, nome, dosagem, treatment_type FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
-      if (medRowRes.rowCount === 0) continue;
-      const matchedMed = medRowRes.rows[0];
+        // Verifica se o medicamento existe para não violar FK
+        const medRowRes = await client.query('SELECT id, nome, dosagem, treatment_type FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
+        if (medRowRes.rowCount === 0) return;
+        const matchedMed = medRowRes.rows[0];
 
-      const clientTz = cleanNullableText(body.timezone) || 'America/Sao_Paulo';
-      const rawDoseDate =
-        h.date ||
-        h.data ||
-        h.dose_date ||
-        (h.created_at ? String(h.created_at).slice(0, 10) : getLocalTodayIso(clientTz));
-      const doseDate = parsePgDate(rawDoseDate) || getLocalTodayIso(clientTz);
-      const rawHora = String(h.hora || h.horario || '08:00').trim();
-      const hora = parsePgTime(rawHora) || (rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora);
-      const normStatus = normalizeDoseStatus(h.status);
+        const clientTz = cleanNullableText(body.timezone) || 'America/Sao_Paulo';
+        const rawDoseDate =
+          h.date ||
+          h.data ||
+          h.dose_date ||
+          (h.created_at ? String(h.created_at).slice(0, 10) : getLocalTodayIso(clientTz));
+        const doseDate = parsePgDate(rawDoseDate) || getLocalTodayIso(clientTz);
+        const rawHora = String(h.hora || h.horario || '08:00').trim();
+        const parsedHora = parsePgTime(rawHora);
+        const hora = parsedHora || (/^sos$/i.test(rawHora) ? 'SOS' : '08:00');
+        const normStatus = normalizeDoseStatus(h.status);
 
-      const isSosDose =
-        hora.toUpperCase() === 'SOS' ||
-        Boolean(h.is_sos) ||
-        String(h.horario_programado || '').toUpperCase() === 'SOS' ||
-        String(h.id || '').startsWith('sos-') ||
-        String(matchedMed.treatment_type || '').toLowerCase() === 'sos' ||
-        String(h.motivo || h.reason || '').trim().toLowerCase().startsWith('uso sos');
+        const isSosDose =
+          hora.toUpperCase() === 'SOS' ||
+          Boolean(h.is_sos) ||
+          String(h.horario_programado || '').toUpperCase() === 'SOS' ||
+          String(h.id || '').startsWith('sos-') ||
+          String(matchedMed.treatment_type || '').toLowerCase() === 'sos' ||
+          String(h.motivo || h.reason || '').trim().toLowerCase().startsWith('uso sos');
 
-      // Respeita regras configuradas no Painel de Gerenciamento para paciente dependente
-      if (isDependentPatientSync && !isSosDose) {
-        if (normStatus === 'pending') {
-          if (shouldPatientRequireCaregiverApproval({ careSettings, actionType: 'undo' })) {
-            continue;
-          }
-        } else {
-          const { todayIso, currentMinutes } = getLocalDateAndMinutes(clientTz);
-          const delayFromPayload = parsePgNumeric(h.atraso_minutos ?? h.delay_minutes);
-          let isDoseMissed = false;
-          if (doseDate < todayIso) {
-            isDoseMissed = delayFromPayload === null || delayFromPayload > careSettings.missed_dose_minutes;
-          } else if (doseDate === todayIso && hora) {
-            const hmMatch = hora.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
-            if (hmMatch) {
-              const schedMins = Number(hmMatch[1]) * 60 + Number(hmMatch[2]);
-              if (currentMinutes - schedMins > careSettings.missed_dose_minutes) {
-                isDoseMissed = delayFromPayload === null || delayFromPayload > careSettings.missed_dose_minutes;
+        // Respeita regras configuradas no Painel de Gerenciamento para paciente dependente
+        if (isDependentPatientSync && !isSosDose) {
+          if (normStatus === 'pending') {
+            if (shouldPatientRequireCaregiverApproval({ careSettings, actionType: 'undo' })) {
+              return;
+            }
+          } else {
+            const { todayIso, currentMinutes } = getLocalDateAndMinutes(clientTz);
+            const delayFromPayload = parsePgNumeric(h.atraso_minutos ?? h.delay_minutes);
+            let isDoseMissed = false;
+            if (doseDate < todayIso) {
+              isDoseMissed = delayFromPayload === null || delayFromPayload > careSettings.missed_dose_minutes;
+            } else if (doseDate === todayIso && hora) {
+              const hmMatch = hora.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+              if (hmMatch) {
+                const schedMins = Number(hmMatch[1]) * 60 + Number(hmMatch[2]);
+                if (currentMinutes - schedMins > careSettings.missed_dose_minutes) {
+                  isDoseMissed = delayFromPayload === null || delayFromPayload > careSettings.missed_dose_minutes;
+                }
               }
             }
+            if (shouldPatientRequireCaregiverApproval({ careSettings, actionType: 'confirm', isDoseMissed })) {
+              return;
+            }
           }
-          if (shouldPatientRequireCaregiverApproval({ careSettings, actionType: 'confirm', isDoseMissed })) {
-            continue;
+        }
+
+        // Se a dose foi desfeita (status = pending / pendente), remove todos os registros correspondentes do banco
+        if (normStatus === 'pending') {
+          await client.query(
+            `DELETE FROM historico_doses
+             WHERE user_id = $1
+               AND med_id = $2
+               AND LEFT(COALESCE(hora, ''), 5) = $3
+               AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4`,
+            [userId, resolvedMedUuid, hora, doseDate]
+          );
+          if (h.id && isValidUuid(h.id)) {
+            await client.query(`DELETE FROM historico_doses WHERE user_id = $1 AND id = $2`, [userId, h.id.trim()]);
+          }
+          return;
+        }
+
+        const doseUuid = isSosDose
+          ? toDeterministicUuid(h.id || `${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`)
+          : toDeterministicUuid(`${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`);
+
+        if (!isSosDose) {
+          await client.query(
+            `DELETE FROM historico_doses
+             WHERE user_id = $1
+               AND med_id = $2
+               AND LEFT(COALESCE(hora, ''), 5) = $3
+               AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4
+               AND id <> $5`,
+            [userId, resolvedMedUuid, hora, doseDate, doseUuid]
+          );
+        }
+
+        await client.query(
+          `INSERT INTO historico_doses (
+             id, med_id, user_id, hora, dose_date, status, quantidade_usada,
+             is_retroactive, correction_reason, motivo, confirmed_by_name,
+             confirmed_by_role, origin, atraso_minutos, administered_at
+           )
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           ON CONFLICT (id) DO UPDATE SET
+             status = EXCLUDED.status,
+             hora = EXCLUDED.hora,
+             dose_date = EXCLUDED.dose_date,
+             is_retroactive = EXCLUDED.is_retroactive,
+             confirmed_by_role = COALESCE(EXCLUDED.confirmed_by_role, historico_doses.confirmed_by_role),
+             origin = COALESCE(EXCLUDED.origin, historico_doses.origin),
+             atraso_minutos = COALESCE(EXCLUDED.atraso_minutos, historico_doses.atraso_minutos),
+             administered_at = COALESCE(EXCLUDED.administered_at, historico_doses.administered_at),
+             correction_reason = COALESCE(EXCLUDED.correction_reason, historico_doses.correction_reason)`,
+          [
+            doseUuid,
+            resolvedMedUuid,
+            userId,
+            hora,
+            doseDate,
+            normStatus,
+            parsePgNumeric(h.quantidade_usada ?? h.quantidadeUsada ?? 1) || 1,
+            Boolean(h.is_retroactive ?? h.isRetroactive),
+            h.reason || h.correction_reason || h.correctionReason || h.motivo || null,
+            h.motivo || h.reason || null,
+            h.confirmed_by || h.confirmedByName || user.nome || 'Paciente',
+            h.confirmed_by_role || (cleanRole === 'cuidador' ? 'cuidador' : 'paciente'),
+            h.origin || 'android_sync',
+            clampPgInt(h.atraso_minutos ?? h.delay_minutes, 0),
+            parsePgTimestamp(h.administered_at),
+          ]
+        );
+
+        if (isSosDose && careSettings.notify_sos_usage && activeCaregiverIds.length > 0 && normStatus === 'confirmed') {
+          const sosNotifRes = await runOptionalTxFn(
+            client,
+            'sos_notif',
+            () =>
+              notifyCaregiversOfSosUsage(client, {
+                patientId: userId,
+                patientName: resolvedPatientName,
+                caregiverIds: activeCaregiverIds,
+                doseId: doseUuid,
+                medNome: matchedMed.nome || h.med_nome || 'Medicamento SOS',
+                dosagem: matchedMed.dosagem || '',
+                hora,
+                doseDate,
+                reason: h.motivo || h.reason || 'Uso SOS',
+                deferPush: true,
+                useSavepoint: true,
+              }),
+            { pendingPushes: [] }
+          );
+          if (Array.isArray(sosNotifRes?.pendingPushes)) {
+            deferredPushes.push(...sosNotifRes.pendingPushes);
           }
         }
-      }
-
-      // Se a dose foi desfeita (status = pending / pendente), remove todos os registros correspondentes do banco
-      if (normStatus === 'pending') {
-        await client.query(
-          `DELETE FROM historico_doses
-           WHERE user_id = $1
-             AND med_id = $2
-             AND LEFT(COALESCE(hora, ''), 5) = $3
-             AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4`,
-          [userId, resolvedMedUuid, hora, doseDate]
-        );
-        if (h.id && isValidUuid(h.id)) {
-          await client.query(`DELETE FROM historico_doses WHERE user_id = $1 AND id = $2`, [userId, h.id.trim()]);
-        }
-        continue;
-      }
-
-      const doseUuid = isSosDose
-        ? toDeterministicUuid(h.id || `${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`)
-        : toDeterministicUuid(`${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`);
-
-      if (!isSosDose) {
-        await client.query(
-          `DELETE FROM historico_doses
-           WHERE user_id = $1
-             AND med_id = $2
-             AND LEFT(COALESCE(hora, ''), 5) = $3
-             AND COALESCE(dose_date::text, LEFT(created_at::text, 10)) = $4
-             AND id <> $5`,
-          [userId, resolvedMedUuid, hora, doseDate, doseUuid]
-        );
-      }
-
-      await client.query(
-        `INSERT INTO historico_doses (
-           id, med_id, user_id, hora, dose_date, status, quantidade_usada,
-           is_retroactive, correction_reason, motivo, confirmed_by_name,
-           confirmed_by_role, origin, atraso_minutos, administered_at
-         )
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-         ON CONFLICT (id) DO UPDATE SET
-           status = EXCLUDED.status,
-           hora = EXCLUDED.hora,
-           dose_date = EXCLUDED.dose_date,
-           is_retroactive = EXCLUDED.is_retroactive,
-           confirmed_by_role = COALESCE(EXCLUDED.confirmed_by_role, historico_doses.confirmed_by_role),
-           origin = COALESCE(EXCLUDED.origin, historico_doses.origin),
-           atraso_minutos = COALESCE(EXCLUDED.atraso_minutos, historico_doses.atraso_minutos),
-           administered_at = COALESCE(EXCLUDED.administered_at, historico_doses.administered_at),
-           correction_reason = COALESCE(EXCLUDED.correction_reason, historico_doses.correction_reason)`,
-        [
-          doseUuid,
-          resolvedMedUuid,
-          userId,
-          hora,
-          doseDate,
-          normStatus,
-          parsePgNumeric(h.quantidade_usada ?? h.quantidadeUsada ?? 1) || 1,
-          Boolean(h.is_retroactive ?? h.isRetroactive),
-          h.reason || h.correction_reason || h.correctionReason || h.motivo || null,
-          h.motivo || h.reason || null,
-          h.confirmed_by || h.confirmedByName || user.nome || 'Paciente',
-          h.confirmed_by_role || (cleanRole === 'cuidador' ? 'cuidador' : 'paciente'),
-          h.origin || 'android_sync',
-          Math.round(parsePgNumeric(h.atraso_minutos ?? h.delay_minutes) ?? 0),
-          h.administered_at || null,
-        ]
-      );
-
-      if (isSosDose && careSettings.notify_sos_usage && activeCaregiverIds.length > 0 && normStatus === 'confirmed') {
-        const sosNotifRes = await runOptionalTxFn(
-          client,
-          'sos_notif',
-          () =>
-            notifyCaregiversOfSosUsage(client, {
-              patientId: userId,
-              patientName: resolvedPatientName,
-              caregiverIds: activeCaregiverIds,
-              doseId: doseUuid,
-              medNome: matchedMed.nome || h.med_nome || 'Medicamento SOS',
-              dosagem: matchedMed.dosagem || '',
-              hora,
-              doseDate,
-              reason: h.motivo || h.reason || 'Uso SOS',
-              deferPush: true,
-              useSavepoint: true,
-            }),
-          { pendingPushes: [] }
-        );
-        if (Array.isArray(sosNotifRes?.pendingPushes)) {
-          deferredPushes.push(...sosNotifRes.pendingPushes);
-        }
-      }
+      });
     }
 
     await runOptionalTxQuery(
@@ -914,6 +971,7 @@ export async function POST(request) {
     );
 
     for (const ev of events) {
+      if (!ev || typeof ev !== 'object') continue;
       const evType = normalizeEventType(ev.type || ev.tipo);
       const evTitle = String(ev.title || ev.titulo || 'Compromisso').trim();
       if (evType === 'estoque' || /^reposi[cç][aã]o:/i.test(evTitle) || /^ajuste:/i.test(evTitle)) {
@@ -924,7 +982,9 @@ export async function POST(request) {
       if (deletedSet.has(String(ev.id || '').trim().toLowerCase()) || deletedSet.has(evUuid.toLowerCase())) {
         continue;
       }
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'upsert_event',
         `INSERT INTO health_events (id, user_id, type, title, description, date, time, doctor, location)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          ON CONFLICT (id) DO UPDATE SET
@@ -977,11 +1037,14 @@ export async function POST(request) {
     }
 
     for (const a of allergies) {
+      if (!a || typeof a !== 'object') continue;
       const algName = a.name || a.nome || a.substancia || '';
       if (!algName) continue;
       const algUuid = toDeterministicUuid(a.id || algName, `alg:${userId}`);
       if (deletedSet.has(String(a.id || '').trim().toLowerCase()) || deletedSet.has(algUuid.toLowerCase())) continue;
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'upsert_allergy',
         `INSERT INTO allergies (id, user_id, name, reaction, severity)
          VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, reaction = EXCLUDED.reaction, severity = EXCLUDED.severity`,
@@ -990,11 +1053,14 @@ export async function POST(request) {
     }
 
     for (const c of conditions) {
+      if (!c || typeof c !== 'object') continue;
       const condName = c.name || c.nome || '';
       if (!condName) continue;
       const condUuid = toDeterministicUuid(c.id || condName, `cond:${userId}`);
       if (deletedSet.has(String(c.id || '').trim().toLowerCase()) || deletedSet.has(condUuid.toLowerCase())) continue;
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'upsert_condition',
         `INSERT INTO health_conditions (id, user_id, name, notes, diagnosed_at)
          VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, notes = EXCLUDED.notes, diagnosed_at = EXCLUDED.diagnosed_at`,
@@ -1009,26 +1075,32 @@ export async function POST(request) {
     }
 
     for (const ct of contacts) {
+      if (!ct || typeof ct !== 'object') continue;
       const ctName = ct.name || ct.nome || '';
       if (!ctName) continue;
       const ctUuid = toDeterministicUuid(ct.id || `${ctName}:${ct.phone || ct.telefone}`, `ct:${userId}`);
       if (deletedSet.has(String(ct.id || '').trim().toLowerCase()) || deletedSet.has(ctUuid.toLowerCase())) continue;
       const rel = ct.relationship || ct.relation || ct.relacao || 'Familiar';
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'upsert_contact',
         `INSERT INTO emergency_contacts (id, user_id, name, relationship, relation, phone, priority)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, relationship = EXCLUDED.relationship, relation = EXCLUDED.relation, phone = EXCLUDED.phone`,
-        [ctUuid, userId, ctName, rel, rel, ct.phone || ct.telefone || '', Number(ct.priority ?? 1) || 1]
+        [ctUuid, userId, ctName, rel, rel, ct.phone || ct.telefone || '', clampPgInt(ct.priority, 1)]
       );
     }
 
     for (const pr of professionals) {
+      if (!pr || typeof pr !== 'object') continue;
       const prName = pr.name || pr.nome || '';
       if (!prName) continue;
       const prUuid = toDeterministicUuid(pr.id || `${prName}:${pr.crm || ''}`, `pr:${userId}`);
       if (deletedSet.has(String(pr.id || '').trim().toLowerCase()) || deletedSet.has(prUuid.toLowerCase())) continue;
       const clinicVal = pr.clinic || pr.location || pr.clinica || null;
-      await client.query(
+      await runOptionalTxQuery(
+        client,
+        'upsert_professional',
         `INSERT INTO healthcare_professionals (id, user_id, name, specialty, phone, crm, clinic, location)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, specialty = EXCLUDED.specialty, phone = EXCLUDED.phone, crm = EXCLUDED.crm, clinic = EXCLUDED.clinic, location = EXCLUDED.location`,
@@ -1046,69 +1118,72 @@ export async function POST(request) {
     }
 
     for (const sm of stockMovements) {
-      const rawMedId = sm.medication_id || sm.med_id || '';
-      const smMedName = cleanNullableText(sm.med_name || sm.med_nome || sm.nome);
-      let resolvedMedUuid =
-        medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
-      if (!resolvedMedUuid && smMedName) {
-        const matchedMed = meds.find(
-          (m) => String(m.nome || '').trim().toLowerCase() === String(smMedName).trim().toLowerCase()
-        );
-        if (matchedMed) {
-          const mRawId = matchedMed.id || `med-${matchedMed.nome}`;
-          resolvedMedUuid = medIdMap.get(mRawId) || toDeterministicUuid(mRawId, `med:${userId}`);
+      if (!sm || typeof sm !== 'object') continue;
+      await runOptionalTxFn(client, 'upsert_stock_movement', async () => {
+        const rawMedId = sm.medication_id || sm.med_id || '';
+        const smMedName = cleanNullableText(sm.med_name || sm.med_nome || sm.nome);
+        let resolvedMedUuid =
+          medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
+        if (!resolvedMedUuid && smMedName) {
+          const matchedMed = meds.find(
+            (m) => String(m.nome || '').trim().toLowerCase() === String(smMedName).trim().toLowerCase()
+          );
+          if (matchedMed) {
+            const mRawId = matchedMed.id || `med-${matchedMed.nome}`;
+            resolvedMedUuid = medIdMap.get(mRawId) || toDeterministicUuid(mRawId, `med:${userId}`);
+          }
         }
-      }
-      if (!resolvedMedUuid) continue;
-      const medExists = await client.query('SELECT 1 FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
-      if (medExists.rowCount === 0) continue;
+        if (!resolvedMedUuid) return;
+        const medExists = await client.query('SELECT 1 FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
+        if (medExists.rowCount === 0) return;
 
-      const smUuid = toDeterministicUuid(sm.id || `${resolvedMedUuid}:${sm.created_at || sm.data || Date.now()}`, `sm:${userId}`);
-      const qBefore = parsePgNumeric(sm.quantity_before ?? sm.previous_quantity) ?? 0;
-      const qChanged =
-        parsePgNumeric(sm.quantity_changed ?? sm.quantity_delta ?? sm.quantity_change ?? sm.delta ?? sm.qtd) ?? 0;
-      const qAfter = parsePgNumeric(sm.quantity_after ?? sm.new_quantity) ?? (qBefore + qChanged);
-      const rawSmCreatedAt = cleanNullableText(sm.created_at);
-      const validSmCreatedAt =
-        rawSmCreatedAt && !rawSmCreatedAt.endsWith(':00.000Z') && !Number.isNaN(Date.parse(rawSmCreatedAt))
-          ? new Date(rawSmCreatedAt).toISOString()
-          : null;
+        const smUuid = toDeterministicUuid(sm.id || `${resolvedMedUuid}:${sm.created_at || sm.data || Date.now()}`, `sm:${userId}`);
+        const qBefore = parsePgNumeric(sm.quantity_before ?? sm.previous_quantity) ?? 0;
+        const qChanged =
+          parsePgNumeric(sm.quantity_changed ?? sm.quantity_delta ?? sm.quantity_change ?? sm.delta ?? sm.qtd) ?? 0;
+        const qAfter = parsePgNumeric(sm.quantity_after ?? sm.new_quantity) ?? (qBefore + qChanged);
+        const rawSmCreatedAt = cleanNullableText(sm.created_at);
+        const validSmCreatedAt =
+          rawSmCreatedAt && !rawSmCreatedAt.endsWith(':00.000Z')
+            ? parsePgTimestamp(rawSmCreatedAt)
+            : null;
 
-      await client.query(
-        `INSERT INTO stock_movements (
-           id, user_id, medication_id, med_name, movement_type,
-           quantity_before, quantity_changed, quantity_delta, quantity_after,
-           purchase_price, purchase_location, batch, expiration_date, notes, created_at
-         )
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15::timestamptz, NOW()))
-         ON CONFLICT (id) DO UPDATE SET
-           med_name = COALESCE(EXCLUDED.med_name, stock_movements.med_name),
-           movement_type = EXCLUDED.movement_type,
-           quantity_before = EXCLUDED.quantity_before,
-           quantity_changed = EXCLUDED.quantity_changed,
-           quantity_delta = EXCLUDED.quantity_delta,
-           quantity_after = EXCLUDED.quantity_after,
-           purchase_price = COALESCE(EXCLUDED.purchase_price, stock_movements.purchase_price),
-           purchase_location = COALESCE(EXCLUDED.purchase_location, NULLIF(BTRIM(stock_movements.purchase_location), 'null')),
-           notes = COALESCE(EXCLUDED.notes, NULLIF(BTRIM(stock_movements.notes), 'null'))`,
-        [
-          smUuid,
-          userId,
-          resolvedMedUuid,
-          smMedName,
-          normalizeMovementType(sm.movement_type || sm.tipo),
-          qBefore,
-          qChanged,
-          qChanged,
-          qAfter,
-          parsePgNumeric(sm.purchase_price ?? sm.price_paid ?? sm.preco),
-          cleanNullableText(sm.purchase_location ?? sm.pharmacy ?? sm.local),
-          cleanNullableText(sm.batch ?? sm.lote),
-          parsePgDate(sm.expiration_date || sm.validade),
-          cleanNullableText(sm.notes ?? sm.motivo ?? sm.description ?? sm.observacoes),
-          validSmCreatedAt,
-        ]
-      );
+        await client.query(
+          `INSERT INTO stock_movements (
+             id, user_id, medication_id, med_name, movement_type,
+             quantity_before, quantity_changed, quantity_delta, quantity_after,
+             purchase_price, purchase_location, batch, expiration_date, notes, created_at
+           )
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15::timestamptz, NOW()))
+           ON CONFLICT (id) DO UPDATE SET
+             med_name = COALESCE(EXCLUDED.med_name, stock_movements.med_name),
+             movement_type = EXCLUDED.movement_type,
+             quantity_before = EXCLUDED.quantity_before,
+             quantity_changed = EXCLUDED.quantity_changed,
+             quantity_delta = EXCLUDED.quantity_delta,
+             quantity_after = EXCLUDED.quantity_after,
+             purchase_price = COALESCE(EXCLUDED.purchase_price, stock_movements.purchase_price),
+             purchase_location = COALESCE(EXCLUDED.purchase_location, NULLIF(BTRIM(stock_movements.purchase_location), 'null')),
+             notes = COALESCE(EXCLUDED.notes, NULLIF(BTRIM(stock_movements.notes), 'null'))`,
+          [
+            smUuid,
+            userId,
+            resolvedMedUuid,
+            smMedName,
+            normalizeMovementType(sm.movement_type || sm.tipo),
+            qBefore,
+            qChanged,
+            qChanged,
+            qAfter,
+            parsePgNumeric(sm.purchase_price ?? sm.price_paid ?? sm.preco),
+            cleanNullableText(sm.purchase_location ?? sm.pharmacy ?? sm.local),
+            cleanNullableText(sm.batch ?? sm.lote),
+            parsePgDate(sm.expiration_date || sm.validade),
+            cleanNullableText(sm.notes ?? sm.motivo ?? sm.description ?? sm.observacoes),
+            validSmCreatedAt,
+          ]
+        );
+      });
     }
 
     // Processa solicitações de validação de dose (confirmação ou desfazimento) enviadas pelo paciente ao cuidador
@@ -1133,7 +1208,7 @@ export async function POST(request) {
           parsePgDate(reqItem.dose_date || reqItem.data || reqItem.date) ||
           getLocalTodayIso(cleanNullableText(body.timezone) || 'America/Sao_Paulo');
         const rawHora = String(reqItem.hora || reqItem.horario || '08:00').trim();
-        const hora = rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora;
+        const hora = parsePgTime(rawHora) || (/^sos$/i.test(rawHora) ? 'SOS' : '08:00');
         const reqStatus = normalizeDoseStatus(reqItem.requested_status || reqItem.target_status || 'confirmed');
         const actionType =
           reqItem.action_type || (reqStatus === 'pending' ? 'undo_dose' : 'confirm_dose');
@@ -1458,6 +1533,14 @@ export async function POST(request) {
       { status: 200, headers: corsHeaders }
     );
   } catch (err) {
+    console.error('[sync] POST fatal error:', {
+      userId: requestedUserId || null,
+      code: err?.code || null,
+      message: err?.message || String(err),
+      detail: err?.detail || null,
+      table: err?.table || null,
+      constraint: err?.constraint || null,
+    });
     await client.query('ROLLBACK').catch(() => {});
     return NextResponse.json(
       { ok: false, error: err.message || 'Falha ao sincronizar com o PostgreSQL Oracle' },

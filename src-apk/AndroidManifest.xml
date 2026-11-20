@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="br.com.medicare.paciente"
-    android:versionCode="291"
+    android:versionCode="292"
     android:versionName="2.9.1">
 
     <uses-sdk

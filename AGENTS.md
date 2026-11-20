@@ -36,13 +36,18 @@ As seguintes regras são **obrigatórias e permanentes** para todas as alteraç�
   ```
 - Mantenha os arquivos `MediCare-Paciente.apk` e `MediCare-Cuidador.apk` validados e assinados na raiz do repositório.
 
+## 6. Imagens Enviadas no Chat (Não Salvar no Repositório)
+- Nunca mantenha nem versione imagens ou capturas de tela enviadas pelo usuário no chat (normalmente salvas automaticamente em `public/assets/aistudio/`).
+- Sempre que houver arquivos em `public/assets/aistudio/` após análise ou depuração, **delete-os** antes de finalizar a tarefa e mantenha `public/assets/aistudio/` ignorado no `.gitignore`.
+- **Exceção obrigatória:** Nunca remova imagens e ícones essenciais da aplicação (`public/icon-*.png`, `public/apple-touch-icon.png`, `public/favicon*`, recursos em `src-apk/res/` e `src-apk-cuidador/res/`).
+
 ---
 name: cleanup-test-files
 description: "Sempre que terminar testes ou investigações, limpe e delete arquivos temporários que foram gerados."
 ---
 
 # Limpeza de Arquivos Temporários
-Sempre que gerar arquivos temporários para testes (como scripts `test.js`, rotas de API de diagnóstico isoladas, arquivos `output.json`, patches experimentais, etc) e a investigação ou teste for concluída com sucesso, você **DEVE** deletar esses arquivos. Mantenha o repositório limpo, focado apenas no código final do produto.
+Sempre que gerar arquivos temporários para testes (como scripts `test.js`, rotas de API de diagnóstico isoladas, arquivos `output.json`, patches experimentais, etc) ou receber imagens/screenshots temporários em `public/assets/aistudio/`, e a investigação ou teste for concluída com sucesso, você **DEVE** deletar esses arquivos antes de encerrar. Mantenha o repositório limpo, focado apenas no código final do produto e nos recursos essenciais do app.
 
 ---
 name: premortem  
