@@ -4498,11 +4498,13 @@ public class MainActivity extends Activity {
         String s = raw.trim();
         if (s.isEmpty()) return 0L;
         try {
-            String clean = s.replaceAll("\\.[0-9]+", "");
+            String clean = s.replace(" ", "T").replaceAll("\\.[0-9]+", "");
             if (clean.endsWith("Z")) {
                 clean = clean.substring(0, clean.length() - 1);
             } else if (clean.matches(".*[+-]\\d{2}:\\d{2}$")) {
                 clean = clean.substring(0, clean.length() - 6);
+            } else if (clean.matches(".*[+-]\\d{2}$")) {
+                clean = clean.substring(0, clean.length() - 3);
             }
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
             sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
@@ -14743,7 +14745,7 @@ public class MainActivity extends Activity {
                 return pi.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "2.9.2";
+        return "2.9.3";
     }
 
     private int getCurrentAppVersionCode() {
@@ -14756,7 +14758,7 @@ public class MainActivity extends Activity {
                 return pi.versionCode;
             }
         } catch (Exception ignored) {}
-        return 293;
+        return 294;
     }
 
     private void checkForAppUpdate() {
@@ -17499,7 +17501,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean mergeRemoteDoseLogs(JSONArray remoteLogs) {
+    private boolean mergeRemoteDoseLogs(JSONArray remoteLogs, JSONArray remoteApprovals) {
         if (remoteLogs == null) return false;
         try {
             Set<String> deletedIds = getDeletedRecordIds();
@@ -17507,6 +17509,32 @@ public class MainActivity extends Activity {
             Set<String> seenKeys = new HashSet<>();
             Set<String> localUnsyncedSlots = new HashSet<>();
             java.util.Map<String, String> localHoraRealBySlot = new java.util.HashMap<>();
+            java.util.Map<String, Long> approvedUndoSlots = new java.util.HashMap<>();
+
+            if (remoteApprovals != null) {
+                for (int a = 0; a < remoteApprovals.length(); a++) {
+                    JSONObject ra = remoteApprovals.optJSONObject(a);
+                    if (ra == null) continue;
+                    String rSt = optCleanString(ra, "status", "").toLowerCase(Locale.ROOT);
+                    if (!"approved".equals(rSt) && !"aprovado".equals(rSt)) continue;
+                    String rAction = optCleanString(ra, "action_type", "").toLowerCase(Locale.ROOT);
+                    String rTarget = normalizeDoseStatusLocal(optCleanString(ra, "requested_status", ""));
+                    if (!"undo_dose".equals(rAction) && !"pendente".equals(rTarget)) continue;
+                    String aMedId = optCleanString(ra, "med_id", "");
+                    String aDate = optCleanString(ra, "dose_date", optCleanString(ra, "data", ""));
+                    if (aDate.length() >= 10) aDate = aDate.substring(0, 10);
+                    String aHora = optCleanString(ra, "hora", optCleanString(ra, "horario", ""));
+                    if (aHora.length() >= 5 && aHora.charAt(2) == ':') aHora = aHora.substring(0, 5);
+                    if (aMedId.isEmpty() || aDate.isEmpty() || aHora.isEmpty()) continue;
+                    long updatedMs = parseServerIsoToMillis(optCleanString(ra, "updated_at", optCleanString(ra, "created_at", "")));
+                    String k1 = (aMedId + "|" + aDate + "|" + aHora).toLowerCase(Locale.ROOT);
+                    String k2 = (toDeterministicServerUuid(aMedId, "med") + "|" + aDate + "|" + aHora).toLowerCase(Locale.ROOT);
+                    Long prev1 = approvedUndoSlots.get(k1);
+                    if (prev1 == null || updatedMs >= prev1) approvedUndoSlots.put(k1, updatedMs);
+                    Long prev2 = approvedUndoSlots.get(k2);
+                    if (prev2 == null || updatedMs >= prev2) approvedUndoSlots.put(k2, updatedMs);
+                }
+            }
 
             for (int l = 0; l < this.doseLogs.length(); l++) {
                 JSONObject ll = this.doseLogs.optJSONObject(l);
@@ -17524,12 +17552,22 @@ public class MainActivity extends Activity {
                         localHoraRealBySlot.put((detMed + "|" + d + "|" + h).toLowerCase(Locale.ROOT), hr5);
                     }
                 }
-                if (ll.optBoolean("_local_unsynced", false) || this.hasUnsyncedLocalChanges || "pendente".equals(st)) {
-                    if (!mId.isEmpty() && !d.isEmpty() && !h.isEmpty()) {
-                        localUnsyncedSlots.add((mId + "|" + d + "|" + h).toLowerCase(Locale.ROOT));
-                        String detMed = toDeterministicServerUuid(mId, "med");
-                        if (!detMed.isEmpty()) {
-                            localUnsyncedSlots.add((detMed + "|" + d + "|" + h).toLowerCase(Locale.ROOT));
+                boolean llUnsynced = ll.optBoolean("_local_unsynced", false);
+                if (llUnsynced && !mId.isEmpty() && !d.isEmpty() && !h.isEmpty()) {
+                    String k1 = (mId + "|" + d + "|" + h).toLowerCase(Locale.ROOT);
+                    String detMed = toDeterministicServerUuid(mId, "med");
+                    String k2 = detMed.isEmpty() ? "" : (detMed + "|" + d + "|" + h).toLowerCase(Locale.ROOT);
+                    Long approvedUndoMs = approvedUndoSlots.containsKey(k1)
+                            ? approvedUndoSlots.get(k1)
+                            : (!k2.isEmpty() ? approvedUndoSlots.get(k2) : null);
+                    long llUpdatedMs = ll.optLong("updated_at_ms", 0L);
+                    boolean supersededByUndo = !"pendente".equals(st)
+                            && approvedUndoMs != null
+                            && (llUpdatedMs == 0L || llUpdatedMs <= approvedUndoMs + 5000L);
+                    if (!supersededByUndo) {
+                        localUnsyncedSlots.add(k1);
+                        if (!k2.isEmpty()) {
+                            localUnsyncedSlots.add(k2);
                         }
                     }
                 }
@@ -17606,6 +17644,7 @@ public class MainActivity extends Activity {
                 merged.put(rl);
             }
 
+            boolean remoteListTruncated = remoteLogs.length() >= 480;
             for (int l = 0; l < this.doseLogs.length(); l++) {
                 JSONObject ll = this.doseLogs.optJSONObject(l);
                 if (ll == null) continue;
@@ -17625,6 +17664,17 @@ public class MainActivity extends Activity {
                         && !seenKeys.contains(detSlotKey)
                         && !seenKeys.contains("id:" + lId.toLowerCase(Locale.ROOT))
                         && (rawLId.isEmpty() || !seenKeys.contains("id:" + rawLId.toLowerCase(Locale.ROOT)))) {
+                    boolean llUnsynced = ll.optBoolean("_local_unsynced", false);
+                    Long approvedUndoMs = approvedUndoSlots.containsKey(slotKey)
+                            ? approvedUndoSlots.get(slotKey)
+                            : approvedUndoSlots.get(detSlotKey);
+                    long llUpdatedMs = ll.optLong("updated_at_ms", 0L);
+                    if (approvedUndoMs != null && (!llUnsynced || llUpdatedMs == 0L || llUpdatedMs <= approvedUndoMs + 5000L)) {
+                        continue;
+                    }
+                    if (!llUnsynced && !remoteListTruncated) {
+                        continue;
+                    }
                     seenKeys.add(slotKey);
                     seenKeys.add(detSlotKey);
                     if (!lId.isEmpty()) seenKeys.add("id:" + lId.toLowerCase(Locale.ROOT));
@@ -18005,7 +18055,7 @@ public class MainActivity extends Activity {
             }
 
             if (mergeRemoteMeds(mArr)) changed = true;
-            if (mergeRemoteDoseLogs(resp.optJSONArray("history"))) changed = true;
+            if (mergeRemoteDoseLogs(resp.optJSONArray("history"), resp.optJSONArray("approval_requests"))) changed = true;
             if (mergeGenericEntityArray(resp.optJSONArray("events"), "events", "evt", "health_events")) changed = true;
             if (mergeGenericEntityArray(resp.optJSONArray("notes"), "notes", "note", "calendar_notes")) changed = true;
             if (mergeGenericEntityArray(resp.optJSONArray("stock_movements"), "stock_movements", "stk", "stock_movements")) changed = true;
@@ -18113,9 +18163,34 @@ public class MainActivity extends Activity {
 
                 if (matchedResolved != null) {
                     String resolvedSt = optCleanString(matchedResolved, "status", "").toLowerCase(Locale.ROOT);
+                    String medNome = optCleanString(req, "med_nome", optCleanString(matchedResolved, "med_nome", "Medicamento"));
                     if ("rejected".equals(resolvedSt) || "rejeitado".equals(resolvedSt)) {
-                        String medNome = optCleanString(req, "med_nome", optCleanString(matchedResolved, "med_nome", "Medicamento"));
                         this.pendingRejectedFeedback = "⚠️ Solicitação recusada pelo cuidador: " + medNome + " (" + h + ")";
+                    } else if ("approved".equals(resolvedSt) || "aprovado".equals(resolvedSt)) {
+                        String rAction = optCleanString(matchedResolved, "action_type", reqActionType).toLowerCase(Locale.ROOT);
+                        String rTarget = normalizeDoseStatusLocal(optCleanString(matchedResolved, "requested_status", req.optString("requested_status", "")));
+                        if ("undo_dose".equals(rAction) || "pendente".equals(rTarget)) {
+                            long resolvedUpdatedMs = parseServerIsoToMillis(optCleanString(matchedResolved, "updated_at", optCleanString(matchedResolved, "created_at", "")));
+                            JSONArray keptLogs = new JSONArray();
+                            boolean removedAny = false;
+                            for (int l = 0; l < this.doseLogs.length(); l++) {
+                                JSONObject dl = this.doseLogs.optJSONObject(l);
+                                if (dl == null) continue;
+                                if (!mId.isEmpty() && doesDoseLogMatchMed(dl, mId) && d.equals(extractDoseLogDate(dl)) && h.equals(extractDoseLogTime(dl))) {
+                                    long dlUpdatedMs = dl.optLong("updated_at_ms", 0L);
+                                    boolean dlUnsynced = dl.optBoolean("_local_unsynced", false);
+                                    if (!dlUnsynced || dlUpdatedMs == 0L || resolvedUpdatedMs == 0L || dlUpdatedMs <= resolvedUpdatedMs + 5000L) {
+                                        removedAny = true;
+                                        continue;
+                                    }
+                                }
+                                keptLogs.put(dl);
+                            }
+                            if (removedAny) {
+                                this.doseLogs = keptLogs;
+                            }
+                            this.pendingRejectedFeedback = "✓ Desfazimento aprovado pelo cuidador: " + medNome + " (" + h + ")";
+                        }
                     }
                     continue;
                 }

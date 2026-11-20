@@ -37,6 +37,7 @@ function createPgTxSimulator({
   pushSubscriptionRows = [{ id: 'sub-1', user_id: CAREGIVER_ID, endpoint: 'https://push.example/1', p256dh: 'p256', auth: 'auth' }],
   initialInTx = false,
   initialAborted = false,
+  approvedUndoRows = [],
 } = {}) {
   let inTx = Boolean(initialInTx);
   let aborted = Boolean(initialAborted);
@@ -172,6 +173,9 @@ function createPgTxSimulator({
       }
       if (sql.includes('SELECT status, updated_at FROM approval_requests WHERE id = $1')) {
         return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM approval_requests') && sql.includes("status = 'approved'")) {
+        return { rowCount: approvedUndoRows.length, rows: approvedUndoRows };
       }
       if (sql.includes('FROM push_subscriptions')) {
         return { rowCount: pushSubscriptionRows.length, rows: pushSubscriptionRows };
@@ -751,5 +755,62 @@ describe('Regressão de Sincronização (POST /api/v1/sync e Notificações)', (
     expect(beginIdx).toBeGreaterThan(rollbackIdx);
     expect(commitIdx).toBeGreaterThan(beginIdx);
     expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('não ressuscita dose antiga no historico_doses quando já existe solicitação undo_dose aprovada pelo cuidador', async () => {
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const medId = '11111111-1111-4111-8111-111111111111';
+    const undoApprovedAt = new Date(Date.now() - 60_000).toISOString();
+    const staleConfirmedAt = new Date(Date.now() - 3_600_000).toISOString();
+
+    const { client, callLog } = createPgTxSimulator({
+      approvedUndoRows: [
+        {
+          med_id: medId,
+          dose_date: today,
+          hora: '09:00',
+          updated_at: undoApprovedAt,
+        },
+      ],
+    });
+    connectPgOrFallback.mockResolvedValue({ client, fallbackResponse: null });
+
+    const res = await syncPost(
+      buildPostRequest({
+        user: { id: PATIENT_ID, nome: 'Marcela', role: 'paciente' },
+        timezone: 'America/Sao_Paulo',
+        meds: [
+          {
+            id: medId,
+            nome: 'Sertralina',
+            dosagem: '150mg',
+            horarios: ['09:00'],
+            treatment_type: 'continuous',
+          },
+        ],
+        history: [
+          {
+            id: 'dose-sertralina-0900',
+            med_id: medId,
+            hora: '09:00',
+            dose_date: today,
+            status: 'tomado',
+            administered_at: staleConfirmedAt,
+            updated_at_ms: Date.now() - 3_600_000,
+          },
+        ],
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    const histInserts = callLog.filter((c) => c.sql.includes('INSERT INTO historico_doses'));
+    expect(histInserts).toHaveLength(0);
   });
 });

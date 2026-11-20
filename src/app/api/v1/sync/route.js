@@ -850,6 +850,25 @@ export async function POST(request) {
       .map(String);
     const resolvedPatientName = user.nome || user.full_name || 'Paciente';
 
+    const approvedUndosRes = await runOptionalTxQuery(
+      client,
+      'load_approved_undos',
+      `SELECT med_id::text AS med_id, dose_date::text AS dose_date, LEFT(COALESCE(hora, ''), 5) AS hora, updated_at
+       FROM approval_requests
+       WHERE patient_id = $1
+         AND status = 'approved'
+         AND (action_type = 'undo_dose' OR requested_status = 'pending')`,
+      [userId],
+      { rows: [] }
+    );
+    const approvedUndoMap = new Map();
+    for (const u of approvedUndosRes.rows || []) {
+      const k = `${String(u.med_id || '').toLowerCase()}|${String(u.dose_date || '').slice(0, 10)}|${String(u.hora || '').slice(0, 5)}`;
+      const prevMs = approvedUndoMap.get(k) || 0;
+      const uMs = u.updated_at ? new Date(u.updated_at).getTime() : 0;
+      if (uMs >= prevMs) approvedUndoMap.set(k, uMs);
+    }
+
     txStep = 'upsert_history';
     for (const h of history) {
       if (!h || typeof h !== 'object') continue;
@@ -882,6 +901,20 @@ export async function POST(request) {
           String(h.id || '').startsWith('sos-') ||
           String(matchedMed.treatment_type || '').toLowerCase() === 'sos' ||
           String(h.motivo || h.reason || '').trim().toLowerCase().startsWith('uso sos');
+
+        // Se o cuidador já aprovou o desfazimento desta dose posteriormente, não ressuscitar registro antigo do app
+        if (!isSosDose && normStatus !== 'pending') {
+          const undoKey = `${String(resolvedMedUuid || '').toLowerCase()}|${doseDate}|${hora.slice(0, 5)}`;
+          const approvedUndoMs = approvedUndoMap.get(undoKey);
+          if (approvedUndoMs) {
+            const clientDoseMs =
+              Number(h.updated_at_ms) ||
+              (parsePgTimestamp(h.administered_at) ? new Date(parsePgTimestamp(h.administered_at)).getTime() : 0);
+            if (!clientDoseMs || clientDoseMs <= approvedUndoMs + 5000) {
+              return;
+            }
+          }
+        }
 
         // Respeita regras configuradas no Painel de Gerenciamento para paciente dependente
         if (isDependentPatientSync && !isSosDose) {
