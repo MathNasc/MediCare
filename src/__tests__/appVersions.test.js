@@ -27,8 +27,8 @@ describe('appVersions helpers', () => {
     });
 
     expect(patient.package).toBe('br.com.medicare.paciente');
-    expect(patient.versionCode).toBeGreaterThanOrEqual(294);
-    expect(patient.versionName).toBe('2.9.3');
+    expect(patient.versionCode).toBeGreaterThanOrEqual(295);
+    expect(patient.versionName).toBe('2.9.4');
     expect(patient.apkAvailable).toBe(true);
     expect(patient.apkSizeBytes).toBeGreaterThan(0);
     expect(patient.downloadUrl).toBe('/api/apk');

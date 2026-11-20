@@ -158,7 +158,9 @@ export async function POST(req) {
     }
 
     // 2. Validação pós-resposta contra vazamento de código ou instruções do sistema
-    const sanitized = sanitizeAiOutput(rawAiText);
+    const sanitized = sanitizeAiOutput(rawAiText, {
+      preserveMarkdown: Boolean(body?.richMarkdown),
+    });
 
     return NextResponse.json(
       {

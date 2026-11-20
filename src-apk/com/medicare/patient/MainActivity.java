@@ -12151,10 +12151,10 @@ public class MainActivity extends Activity {
                 botBox.addView(botHdr);
 
                 TextView bubble = new TextView(this);
-                bubble.setText(text);
+                bubble.setText(formatAiMarkdownToSpannable(text));
                 bubble.setTextSize(sp(14.0f));
                 bubble.setTextColor(this.cTextMain);
-                bubble.setLineSpacing(dp(3), 1.05f);
+                bubble.setLineSpacing(dp(3), 1.08f);
                 botBox.addView(bubble);
 
                 msgRow.addView(botBox);
@@ -12357,6 +12357,7 @@ public class MainActivity extends Activity {
                     payload.put("history", historyArr);
                     payload.put("context", clinicalCtx);
                     payload.put("patientName", MainActivity.this.profile.optString("nome", "Paciente"));
+                    payload.put("richMarkdown", true);
 
                     byte[] payloadBytes = payload.toString().getBytes(StandardCharsets.UTF_8);
                     String[] baseCandidates = new String[]{FALLBACK_BACKEND_URL, EMBEDDED_BACKEND_URL};
@@ -12431,6 +12432,168 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    private CharSequence formatAiMarkdownToSpannable(String rawText) {
+        if (rawText == null || rawText.isEmpty()) return "";
+        try {
+            String normalized = rawText.replace("\r\n", "\n").replace('\r', '\n');
+            android.text.SpannableStringBuilder ssb = new android.text.SpannableStringBuilder();
+            String[] lines = normalized.split("\n", -1);
+            int emptyStreak = 0;
+
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i];
+                String trimmed = line.trim();
+
+                if (trimmed.isEmpty()) {
+                    emptyStreak++;
+                    if (ssb.length() > 0 && emptyStreak <= 1) {
+                        ssb.append("\n");
+                    }
+                    continue;
+                }
+                emptyStreak = 0;
+
+                if (ssb.length() > 0 && ssb.charAt(ssb.length() - 1) != '\n') {
+                    ssb.append("\n");
+                }
+
+                // Ignora separadores de tabela markdown |---|---| e linhas --- / ***
+                if (trimmed.matches("^\\|?(?:\\s*:?-+:?\\s*\\|)+\\s*$")) {
+                    continue;
+                }
+                if (trimmed.matches("^([-*_])\\1{2,}$")) {
+                    continue;
+                }
+
+                // Cabeçalhos Markdown (#, ##, ###)
+                if (trimmed.matches("^#{1,6}\\s+.*")) {
+                    String heading = trimmed.replaceFirst("^#{1,6}\\s+", "").trim();
+                    int start = ssb.length();
+                    appendFormattedInlineMarkdown(ssb, heading, true);
+                    int end = ssb.length();
+                    if (end > start) {
+                        ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, end, 33);
+                        ssb.setSpan(new android.text.style.RelativeSizeSpan(1.06f), start, end, 33);
+                        ssb.setSpan(new android.text.style.ForegroundColorSpan(this.cPrimary), start, end, 33);
+                    }
+                    continue;
+                }
+
+                // Blocos de citação / lembrete (> ...)
+                if (trimmed.startsWith(">")) {
+                    String quoteBody = trimmed.replaceFirst("^>\\s?", "");
+                    int barStart = ssb.length();
+                    ssb.append("┃ ");
+                    ssb.setSpan(new android.text.style.ForegroundColorSpan(this.cWarning), barStart, ssb.length(), 33);
+                    ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), barStart, ssb.length(), 33);
+                    appendFormattedInlineMarkdown(ssb, quoteBody, false);
+                    continue;
+                }
+
+                // Listas com marcador (- ou *)
+                if (line.matches("^\\s*[-*]\\s+.*")) {
+                    int indentSpaces = 0;
+                    while (indentSpaces < line.length() && line.charAt(indentSpaces) == ' ') {
+                        indentSpaces++;
+                    }
+                    String bulletBody = line.replaceFirst("^\\s*[-*]\\s+", "");
+                    String bulletPrefix = indentSpaces >= 2 ? "   ◦ " : "• ";
+                    int bStart = ssb.length();
+                    ssb.append(bulletPrefix);
+                    ssb.setSpan(new android.text.style.ForegroundColorSpan(this.cPrimary), bStart, ssb.length(), 33);
+                    ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), bStart, ssb.length(), 33);
+                    appendFormattedInlineMarkdown(ssb, bulletBody, false);
+                    continue;
+                }
+
+                // Listas numeradas (1. , 2. ...)
+                if (trimmed.matches("^\\d+\\.\\s+.*")) {
+                    int dotIdx = trimmed.indexOf('.');
+                    String numPart = trimmed.substring(0, dotIdx + 1) + " ";
+                    String restPart = trimmed.substring(dotIdx + 1).trim();
+                    int nStart = ssb.length();
+                    ssb.append(numPart);
+                    ssb.setSpan(new android.text.style.ForegroundColorSpan(this.cPrimary), nStart, ssb.length(), 33);
+                    ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), nStart, ssb.length(), 33);
+                    appendFormattedInlineMarkdown(ssb, restPart, false);
+                    continue;
+                }
+
+                // Linha comum
+                appendFormattedInlineMarkdown(ssb, line.trim(), false);
+            }
+
+            while (ssb.length() > 0 && ssb.charAt(ssb.length() - 1) == '\n') {
+                ssb.delete(ssb.length() - 1, ssb.length());
+            }
+            return ssb;
+        } catch (Exception e) {
+            return rawText;
+        }
+    }
+
+    private void appendFormattedInlineMarkdown(android.text.SpannableStringBuilder ssb, String input, boolean defaultBold) {
+        if (input == null || input.isEmpty()) return;
+        // Limpa links markdown [label](url) -> label
+        String text = input.replaceAll("\\[([^\\]]+)\\]\\(([^)]+)\\)", "$1");
+        int len = text.length();
+        int idx = 0;
+
+        while (idx < len) {
+            // Negrito **texto** ou __texto__
+            if ((idx + 1 < len && text.charAt(idx) == '*' && text.charAt(idx + 1) == '*')
+                    || (idx + 1 < len && text.charAt(idx) == '_' && text.charAt(idx + 1) == '_')) {
+                String delim = text.substring(idx, idx + 2);
+                int closeIdx = text.indexOf(delim, idx + 2);
+                if (closeIdx > idx + 2) {
+                    String inner = text.substring(idx + 2, closeIdx);
+                    int start = ssb.length();
+                    ssb.append(inner);
+                    if (!defaultBold) {
+                        ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, ssb.length(), 33);
+                    }
+                    idx = closeIdx + 2;
+                    continue;
+                }
+                // Marcador solto sem fechamento: ignora em vez de imprimir **
+                idx += 2;
+                continue;
+            }
+
+            // Código inline `texto`
+            if (text.charAt(idx) == '`') {
+                int closeIdx = text.indexOf('`', idx + 1);
+                if (closeIdx > idx + 1) {
+                    String inner = text.substring(idx + 1, closeIdx);
+                    int start = ssb.length();
+                    ssb.append(inner);
+                    ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, ssb.length(), 33);
+                    ssb.setSpan(new android.text.style.ForegroundColorSpan(this.cPrimary), start, ssb.length(), 33);
+                    idx = closeIdx + 1;
+                    continue;
+                }
+                idx += 1;
+                continue;
+            }
+
+            // Itálico *texto*
+            if (text.charAt(idx) == '*' && idx + 1 < len && text.charAt(idx + 1) != ' ' && text.charAt(idx + 1) != '*') {
+                int closeIdx = text.indexOf('*', idx + 1);
+                if (closeIdx > idx + 1 && text.charAt(closeIdx - 1) != ' ') {
+                    String inner = text.substring(idx + 1, closeIdx);
+                    int start = ssb.length();
+                    ssb.append(inner);
+                    ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.ITALIC), start, ssb.length(), 33);
+                    idx = closeIdx + 1;
+                    continue;
+                }
+            }
+
+            ssb.append(text.charAt(idx));
+            idx++;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -14745,7 +14908,7 @@ public class MainActivity extends Activity {
                 return pi.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "2.9.3";
+        return "2.9.4";
     }
 
     private int getCurrentAppVersionCode() {
@@ -14758,7 +14921,7 @@ public class MainActivity extends Activity {
                 return pi.versionCode;
             }
         } catch (Exception ignored) {}
-        return 294;
+        return 295;
     }
 
     private void checkForAppUpdate() {

@@ -266,7 +266,11 @@ REGRAS ABSOLUTAS E INVIOLÁVEIS DE ESCOPO E SEGURANÇA:
    - Baseie-se fielmente nos dados clínicos fornecidos quando o paciente perguntar sobre os próprios remédios/horários/estoque, sem inventar medicamentos ou doses que não constam na lista.
    - Nunca prescreva medicamentos novos, nem altere doses por conta própria.
    - Sempre reforce de maneira breve e natural que suas orientações são informativas e não substituem avaliação médica ou farmacêutica.
-   - Se houver menção a sintomas graves de emergência (dor forte no peito, falta de ar intensa, desmaio, confusão mental súbita, reação alérgica grave/edema), oriente procurar atendimento médico imediato ou acionar o SAMU (192).`;
+   - Se houver menção a sintomas graves de emergência (dor forte no peito, falta de ar intensa, desmaio, confusão mental súbita, reação alérgica grave/edema), oriente procurar atendimento médico imediato ou acionar o SAMU (192).
+7. FORMATAÇÃO LIMPA PARA LEITURA NO CELULAR:
+   - Escreva em parágrafos curtos, claros e organizados, com listas simples usando "•" ou numeração ("1.", "2.").
+   - NÃO use blocos de citação com ">", NÃO use cabeçalhos com "#" / "##" / "###", NÃO use tabelas com "|" e NÃO use crases.
+   - Use negrito (**texto**) com muita moderação apenas para destacar o nome de um medicamento, horário ou alerta essencial.`;
 
 export function buildHardenedOpenRouterMessages({ userMessage, history = [], patientContext = {} }) {
   const safeCtx = sanitizePatientContext(patientContext);
@@ -296,7 +300,24 @@ const OUTPUT_CODE_OR_LEAK_PATTERNS = [
   /(DADOS\s+CLÍNICOS\s+DO\s+PACIENTE|REGRAS\s+ABSOLUTAS\s+E\s+INVIOLÁVEIS|OPENROUTER_API_KEY|GEMINI_API_KEY|HARDENED_SYSTEM_PROMPT)/i,
 ];
 
-export function sanitizeAiOutput(rawOutput) {
+export function stripMarkdownForPlainText(rawText) {
+  return String(rawText || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+    .replace(/^\s*#{1,6}\s+/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/^\s*([-*_])\1{2,}\s*$/gm, '')
+    .replace(/^(\s*)[-*]\s+/gm, '$1• ')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/(^|[^\w*])\*([^*\n]+)\*(?=[^\w*]|$)/g, '$1$2')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\*\*+/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function sanitizeAiOutput(rawOutput, { preserveMarkdown = false } = {}) {
   const text = stripInvisibleAndControl(rawOutput).trim();
   if (!text) {
     return {
@@ -314,8 +335,12 @@ export function sanitizeAiOutput(rawOutput) {
     }
   }
 
+  const formatted = preserveMarkdown
+    ? text.replace(/\r\n/g, '\n').replace(/^\s*\|?(?:\s*:?-+:?\s*\|)+\s*$/gm, '').trim()
+    : stripMarkdownForPlainText(text);
+
   return {
     safe: true,
-    text: text.slice(0, 4000),
+    text: formatted.slice(0, 4000),
   };
 }

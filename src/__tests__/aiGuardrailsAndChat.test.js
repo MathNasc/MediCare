@@ -148,6 +148,19 @@ describe('AI Guardrails (Anti-Prompt-Injection, Zero Código, Exclusivo Saúde)'
     );
     expect(safeAnswer.safe).toBe(true);
     expect(safeAnswer.text).toContain('Losartana');
+
+    const rawMd = '### 📅 Horários\n- **Sertralina 150mg** — 09:00\n> **Lembrete:** Evite atrasar.';
+    const plainRes = sanitizeAiOutput(rawMd);
+    expect(plainRes.safe).toBe(true);
+    expect(plainRes.text).not.toContain('**');
+    expect(plainRes.text).not.toContain('###');
+    expect(plainRes.text).not.toContain('>');
+    expect(plainRes.text).toContain('• Sertralina 150mg — 09:00');
+    expect(plainRes.text).toContain('Lembrete: Evite atrasar.');
+
+    const richRes = sanitizeAiOutput(rawMd, { preserveMarkdown: true });
+    expect(richRes.safe).toBe(true);
+    expect(richRes.text).toContain('**Sertralina 150mg**');
   });
 });
 
