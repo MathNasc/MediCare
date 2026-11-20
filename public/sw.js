@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'medicare-cuidador-v7';
+const CACHE_VERSION = 'medicare-cuidador-v8';
 const SHELL_ASSETS = [
   '/manifest.json?v=6',
   '/icon-192.png?v=6',

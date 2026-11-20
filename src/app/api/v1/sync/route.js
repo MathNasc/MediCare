@@ -1187,6 +1187,7 @@ export async function POST(request) {
     }
 
     // Processa solicitações de validação de dose (confirmação ou desfazimento) enviadas pelo paciente ao cuidador
+    let approvalRequestsSaved = 0;
     if (pendingDoseRequests.length > 0) {
       const cgLinksRes = await runOptionalTxQuery(
         client,
@@ -1259,10 +1260,7 @@ export async function POST(request) {
           status: 'pending',
         };
 
-        await runOptionalTxQuery(
-          client,
-          'upsert_approval_req',
-          `INSERT INTO approval_requests (
+        const approvalSql = `INSERT INTO approval_requests (
              id, patient_id, caregiver_id, med_id, med_nome, dose_date, hora,
              action_type, requested_status, reason, status, metadata, updated_at
            )
@@ -1275,7 +1273,12 @@ export async function POST(request) {
              reason = EXCLUDED.reason,
              status = 'pending',
              metadata = EXCLUDED.metadata,
-             updated_at = NOW()`,
+             updated_at = NOW()`;
+
+        let approvalRes = await runOptionalTxQuery(
+          client,
+          'upsert_approval_req',
+          approvalSql,
           [
             reqUuid,
             userId,
@@ -1288,8 +1291,33 @@ export async function POST(request) {
             reqStatus,
             reason,
             JSON.stringify(metaObj),
-          ]
+          ],
+          null
         );
+        if (!approvalRes && primaryCaregiverId) {
+          approvalRes = await runOptionalTxQuery(
+            client,
+            'upsert_approval_req_nocg',
+            approvalSql,
+            [
+              reqUuid,
+              userId,
+              null,
+              String(resolvedMedUuid || ''),
+              medNome,
+              doseDate,
+              hora,
+              actionType,
+              reqStatus,
+              reason,
+              JSON.stringify(metaObj),
+            ],
+            null
+          );
+        }
+        if (approvalRes) {
+          approvalRequestsSaved += 1;
+        }
 
         const isUndo = actionType === 'undo_dose' || reqStatus === 'pending';
         const notifTitle = isUndo
@@ -1528,6 +1556,8 @@ export async function POST(request) {
           professionals: professionals.length,
           caregivers: caregiverRelationships.length,
           stock_movements: stockMovements.length,
+          pending_dose_requests: pendingDoseRequests.length,
+          approval_requests_saved: approvalRequestsSaved,
         },
       },
       { status: 200, headers: corsHeaders }

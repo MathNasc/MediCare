@@ -309,11 +309,13 @@ describe('Regressão de Sincronização (POST /api/v1/sync e Notificações)', (
     expect(histInserts[0].params[5]).toBe('missed');
     expect(histInserts[1].params[5]).toBe('confirmed');
 
-    // Verifica gravação da solicitação de aprovação
+    // Verifica gravação da solicitação de aprovação e contadores retornados
     const approvalInserts = callLog.filter((c) => c.sql.includes('INSERT INTO approval_requests'));
     expect(approvalInserts).toHaveLength(1);
     expect(approvalInserts[0].params[4]).toBe('Venvanse');
     expect(approvalInserts[0].params[9]).toBe('Tomei com atraso');
+    expect(json.counts?.pending_dose_requests).toBe(1);
+    expect(json.counts?.approval_requests_saved).toBe(1);
 
     // Verifica COMMIT e push apenas pós-COMMIT
     expect(callLog.some((c) => c.sql.toUpperCase() === 'COMMIT')).toBe(true);
@@ -656,5 +658,62 @@ describe('Regressão de Sincronização (POST /api/v1/sync e Notificações)', (
       })
     );
     errSpy.mockRestore();
+  });
+
+  it('salva solicitação de aprovação com caregiver_id=null quando o primeiro INSERT falha por FK', async () => {
+    const { client, callLog } = createPgTxSimulator({
+      failOnPatterns: [
+        {
+          match: (sql, params) =>
+            sql.includes('INSERT INTO approval_requests') && params?.[2] === CAREGIVER_ID,
+          message: 'insert or update on table "approval_requests" violates foreign key constraint "approval_requests_caregiver_id_fkey"',
+          code: '23503',
+        },
+      ],
+    });
+    connectPgOrFallback.mockResolvedValue({ client, fallbackResponse: null });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+
+    const res = await syncPost(
+      buildPostRequest({
+        user: { id: PATIENT_ID, nome: 'Marcela', role: 'paciente' },
+        timezone: 'America/Sao_Paulo',
+        meds: [],
+        history: [],
+        pending_dose_requests: [
+          {
+            id: 'req-fk-fallback-1',
+            med_id: '33333333-3333-4333-8333-333333333333',
+            med_nome: 'Venvanse',
+            dose_date: today,
+            hora: '09:00',
+            requested_status: 'confirmed',
+            action_type: 'confirm_dose',
+            reason: 'Tomei no horário correto',
+            created_at_ms: Date.now(),
+          },
+        ],
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.counts?.pending_dose_requests).toBe(1);
+    expect(json.counts?.approval_requests_saved).toBe(1);
+
+    const approvalInserts = callLog.filter((c) => c.sql.includes('INSERT INTO approval_requests'));
+    expect(approvalInserts).toHaveLength(2);
+    expect(approvalInserts[0].params[2]).toBe(CAREGIVER_ID);
+    expect(approvalInserts[1].params[2]).toBeNull();
+    expect(callLog.some((c) => c.sql.toUpperCase() === 'COMMIT')).toBe(true);
+    warnSpy.mockRestore();
   });
 });
