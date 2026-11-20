@@ -84,6 +84,26 @@ const ACTION_MAP = {
     category: 'Vínculo',
     tone: 'rose',
   },
+  care_settings_updated: {
+    label: 'Regras de gerenciamento atualizadas',
+    category: 'Gerenciamento',
+    tone: 'indigo',
+  },
+  care_settings_global_updated: {
+    label: 'Regras globais da clínica aplicadas',
+    category: 'Gerenciamento Global',
+    tone: 'indigo',
+  },
+  care_settings_group_updated: {
+    label: 'Regras do grupo atualizadas',
+    category: 'Gerenciamento por Grupo',
+    tone: 'blue',
+  },
+  care_settings_bulk_applied: {
+    label: 'Modo de gerenciamento atualizado em lote',
+    category: 'Gerenciamento',
+    tone: 'indigo',
+  },
 };
 
 function parseJsonSafe(val) {

@@ -1,7 +1,9 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { Shield, ArrowRight, Download, CheckCircle, Calendar, HeartHandshake } from 'lucide-react';
+import { Shield, Download, CheckCircle, Calendar, HeartHandshake } from 'lucide-react';
 import CuidadorAutoRedirect from './CuidadorAutoRedirect';
+import CuidadorPortalActions from './CuidadorPortalActions';
+import { getAllSystemVersions } from '@/lib/appVersions';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +22,8 @@ export default async function HomePage({ searchParams }) {
       redirect('/cuidador');
     }
   }
+
+  const versions = getAllSystemVersions();
 
   return (
     <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col justify-between py-10 px-4 sm:px-6 lg:px-8 antialiased">
@@ -58,19 +62,14 @@ export default async function HomePage({ searchParams }) {
 
               <p className="text-sm text-slate-300 leading-relaxed">
                 Organize o cuidado, acompanhe seus pacientes e consulte administrações,
-                compromissos e histórico em um só lugar.
+                compromissos e histórico pelo navegador ou pela versão mobile.
               </p>
             </div>
 
-            <div className="pt-6 mt-2">
-              <a
-                href="/cuidador"
-                className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-sm py-3 px-5 rounded-xl transition-colors shadow-lg shadow-blue-600/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
-              >
-                <span>Acessar MediCare Cuidador</span>
-                <ArrowRight size={16} className="w-4 h-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
-              </a>
-            </div>
+            <CuidadorPortalActions
+              apkAvailable={versions.caregiverAndroid.apkAvailable}
+              versionName={versions.caregiverAndroid.versionName}
+            />
           </div>
 
           {/* Cartão 2: MediCare Paciente (Destaque Verde) */}
@@ -93,10 +92,14 @@ export default async function HomePage({ searchParams }) {
             <div className="pt-6 mt-2">
               <a
                 href="/api/apk"
-                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold text-sm py-3 px-5 rounded-xl transition-colors shadow-lg shadow-emerald-600/20 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
+                download="MediCare-Paciente.apk"
+                className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold text-sm py-3 px-5 rounded-xl transition-colors shadow-lg shadow-emerald-600/20 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-[#131d31]"
               >
-                <span>Baixar aplicativo Android</span>
                 <Download size={16} className="w-4 h-4 shrink-0" />
+                <span>Baixar aplicativo Android</span>
+                <span className="text-[11px] font-medium text-emerald-100/90 tabular-nums">
+                  (v{versions.patientAndroid.versionName})
+                </span>
               </a>
             </div>
           </div>

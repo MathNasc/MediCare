@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
-import { forwardToOracleBackend } from '@/lib/oracleProxy';
+import { ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
+import { connectPgOrFallback } from '@/lib/oracleProxy';
 import { extractAuthenticatedUser, verifyActiveSessionInDb } from '@/lib/oracleAuth';
 import { checkOverdueDosesForCaregivers, getVapidPublicKey } from '@/lib/caregiverNotifications';
 import { ensureOverdueCaregiverScheduler } from '@/lib/reminderWorker';
@@ -16,19 +16,20 @@ export async function OPTIONS() {
 }
 
 export async function GET(req) {
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(req, '/api/v1/caregiver/notifications');
+  const { client, fallbackResponse } = await connectPgOrFallback(req, '/api/v1/caregiver/notifications');
+  if (fallbackResponse) return fallbackResponse;
+  if (!client) {
+    return NextResponse.json({ error: 'PostgreSQL Oracle indisponível.' }, { status: 503, headers: corsHeaders });
   }
 
   const claims = extractAuthenticatedUser(req, { enforceCsrf: false });
   if (!claims?.sub) {
+    client.release();
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: corsHeaders });
   }
 
   ensureOverdueCaregiverScheduler();
 
-  const client = await pool.connect();
   try {
     await ensureOraclePostgresSchema(client);
     const active = await verifyActiveSessionInDb(client, claims);
@@ -71,16 +72,19 @@ export async function GET(req) {
 }
 
 export async function PATCH(req) {
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(req, '/api/v1/caregiver/notifications');
+  const { client, fallbackResponse } = await connectPgOrFallback(req, '/api/v1/caregiver/notifications');
+  if (fallbackResponse) return fallbackResponse;
+  if (!client) {
+    return NextResponse.json({ error: 'PostgreSQL Oracle indisponível.' }, { status: 503, headers: corsHeaders });
   }
 
   const claims = extractAuthenticatedUser(req, { returnCsrfError: true });
   if (claims?.csrfError) {
+    client.release();
     return NextResponse.json({ error: claims.reason }, { status: 403, headers: corsHeaders });
   }
   if (!claims?.sub) {
+    client.release();
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: corsHeaders });
   }
 
@@ -88,7 +92,6 @@ export async function PATCH(req) {
   const markAll = body?.markAll === true;
   const notifId = body?.id ? String(body.id).trim() : '';
 
-  const client = await pool.connect();
   try {
     await ensureOraclePostgresSchema(client);
     const active = await verifyActiveSessionInDb(client, claims);

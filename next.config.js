@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
+const isProd = process.env.NODE_ENV === 'production';
+const DEV_ASSET_PREFIX = '/_dev_v2';
+
 const nextConfig = {
   ...(process.env.NEXT_STANDALONE === 'true' ? { output: 'standalone' } : {}),
+  ...(!isProd ? { assetPrefix: DEV_ASSET_PREFIX } : {}),
   reactStrictMode: true,
   env: {
     NEXT_PUBLIC_APP_URL:
@@ -8,10 +12,7 @@ const nextConfig = {
       'https://medicare-cuidador.duckdns.org',
   },
   compiler: {
-    removeConsole:
-      process.env.NODE_ENV === 'production'
-        ? { exclude: ['error', 'warn'] }
-        : false,
+    removeConsole: isProd ? { exclude: ['error', 'warn'] } : false,
   },
   images: {
     formats: ['image/avif', 'image/webp'],
@@ -32,18 +33,32 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    return [
-      {
-        source: '/rest/v1/:path*',
-        destination: '/api/rest/v1/:path*',
-      },
-      {
-        source: '/auth/v1/:path*',
-        destination: '/api/auth/v1/:path*',
-      },
-    ];
+    return {
+      beforeFiles: !isProd
+        ? [
+            {
+              source: `${DEV_ASSET_PREFIX}/_next/:path*`,
+              destination: '/_next/:path*',
+            },
+          ]
+        : [],
+      afterFiles: [
+        {
+          source: '/rest/v1/:path*',
+          destination: '/api/rest/v1/:path*',
+        },
+        {
+          source: '/auth/v1/:path*',
+          destination: '/api/auth/v1/:path*',
+        },
+      ],
+    };
   },
   async headers() {
+    const staticCacheValue = isProd
+      ? 'public, max-age=31536000, immutable'
+      : 'no-store, must-revalidate';
+
     return [
       {
         source: '/sw.js',
@@ -71,11 +86,17 @@ const nextConfig = {
       {
         source: '/_next/static/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+          { key: 'Cache-Control', value: staticCacheValue },
         ],
       },
       {
-        source: '/((?!_next/static|sw\\.js).*)',
+        source: `${DEV_ASSET_PREFIX}/_next/static/:path*`,
+        headers: [
+          { key: 'Cache-Control', value: 'no-store, must-revalidate' },
+        ],
+      },
+      {
+        source: '/((?!_next/static|_dev_v2/_next/static|sw\\.js).*)',
         headers: [
           { key: 'Cache-Control',          value: 'no-cache, no-store, must-revalidate' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },

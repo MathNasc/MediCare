@@ -1,5 +1,10 @@
 import crypto from 'crypto';
 import webpush from 'web-push';
+import {
+  DEFAULT_CARE_SETTINGS,
+  fetchCareSettingsMapForPatients,
+  formatMinutesLabelPt,
+} from '@/lib/careSettings';
 
 const WEEKDAY_NAMES_PT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
 
@@ -188,12 +193,70 @@ export async function notifyCaregiversOfDoseRequest(
 }
 
 /**
- * Verifica doses previstas há 1 hora ou mais (>= 60 min) sem confirmação/justificativa
- * e dispara notificações persistentes + Web Push para os cuidadores vinculados.
+ * Notifica cuidadores ativos quando o paciente registra uma dose SOS.
+ */
+export async function notifyCaregiversOfSosUsage(
+  client,
+  {
+    patientId,
+    patientName,
+    caregiverIds = [],
+    doseId,
+    medNome,
+    dosagem = '',
+    hora,
+    doseDate,
+    reason = 'Uso SOS',
+  }
+) {
+  const cleanCgIds = Array.from(new Set((caregiverIds || []).filter(Boolean).map(String)));
+  if (cleanCgIds.length === 0) return { alertsCreated: 0, pushSent: 0 };
+
+  const title = `🆘 Uso SOS registrado — ${medNome}`;
+  const body = `${patientName} utilizou ${medNome}${dosagem ? ` (${dosagem})` : ''} em modo SOS às ${hora} (${doseDate}). Motivo: ${reason}.`;
+
+  let alertsCreated = 0;
+  const newCgIds = [];
+
+  for (const cgId of cleanCgIds) {
+    const notifId = toDeterministicUuid(`sos:${cgId}:${doseId}`, `notif:${cgId}`);
+    const insRes = await client
+      .query(
+        `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
+         VALUES ($1, $2, 'alerta', $3, $4, FALSE)
+         ON CONFLICT (id) DO NOTHING
+         RETURNING id`,
+        [notifId, cgId, title, body]
+      )
+      .catch(() => ({ rowCount: 0 }));
+
+    if (insRes.rowCount > 0) {
+      alertsCreated += 1;
+      newCgIds.push(cgId);
+    }
+  }
+
+  let pushSent = 0;
+  if (newCgIds.length > 0) {
+    const pushRes = await sendWebPushToUsers(client, newCgIds, {
+      title,
+      body,
+      tag: `cg-sos-${doseId}`,
+      url: '/cuidador',
+    });
+    pushSent = pushRes.sent;
+  }
+
+  return { alertsCreated, pushSent };
+}
+
+/**
+ * Verifica doses previstas sem confirmação conforme o período configurado por paciente
+ * no Painel de Gerenciamento e também alerta estoque baixo quando habilitado.
  */
 export async function checkOverdueDosesForCaregivers(client, options = {}) {
-  const { caregiverId = null, timeZone = 'America/Sao_Paulo' } = options;
-  const { todayIso, currentMinutes, weekdayIndex } = getLocalDateAndMinutes(timeZone);
+  const { caregiverId = null, timeZone = 'America/Sao_Paulo', now = new Date() } = options;
+  const { todayIso, currentMinutes, weekdayIndex } = getLocalDateAndMinutes(timeZone, now);
 
   const cgParams = [];
   let cgSql = `
@@ -244,8 +307,11 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
     }
   }
 
+  // Carrega configurações efetivas (Grupo -> Global -> Individual) de cada paciente
+  const settingsByPatient = await fetchCareSettingsMapForPatients(client, patientIds, caregiversByPatient);
+
   const medsRes = await client.query(
-    `SELECT id, user_id, nome, dosagem, horarios, dias_semana, treatment_type, start_date, end_date, created_at
+    `SELECT id, user_id, nome, dosagem, unidade, quantidade, horarios, dias_semana, treatment_type, start_date, end_date, created_at
      FROM medicamentos
      WHERE user_id::text = ANY($1::text[])
        AND COALESCE(ativo, TRUE) = TRUE
@@ -257,7 +323,72 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
   let pushSent = 0;
 
   for (const med of medsRes.rows) {
+    const pid = String(med.user_id);
+    const patientName = patientNames.get(pid) || 'Paciente';
+    const cgIds = caregiversByPatient.get(pid) || [];
+    if (cgIds.length === 0) continue;
+
+    const patSettings = settingsByPatient.get(pid) || DEFAULT_CARE_SETTINGS;
+
+    // 1. Verificação de estoque baixo configurada no Painel de Gerenciamento
+    if (patSettings.notify_low_stock) {
+      const qtyNum = Number(med.quantidade);
+      if (Number.isFinite(qtyNum) && qtyNum <= patSettings.low_stock_threshold) {
+        const stockLogCheck = await client
+          .query(
+            `SELECT id FROM notification_logs
+             WHERE med_id::text = $1::text
+               AND dose_hora = 'STOCK'
+               AND data_referencia = $2
+               AND tipo = 'CAREGIVER_LOW_STOCK'
+             LIMIT 1`,
+            [String(med.id), todayIso]
+          )
+          .catch(() => ({ rowCount: 0 }));
+
+        if (stockLogCheck.rowCount === 0) {
+          const stockTitle = `📦 Estoque baixo: ${med.nome}`;
+          const unitLabel = med.unidade || 'unidades';
+          const stockBody = `${patientName} está com apenas ${qtyNum} ${unitLabel} de ${med.nome} (limite configurado: ${patSettings.low_stock_threshold}).`;
+
+          for (const cgId of cgIds) {
+            const notifId = toDeterministicUuid(`lowstock:${cgId}:${med.id}:${todayIso}`, `notif:${cgId}`);
+            const insRes = await client
+              .query(
+                `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
+                 VALUES ($1, $2, 'alerta', $3, $4, FALSE)
+                 ON CONFLICT (id) DO NOTHING
+                 RETURNING id`,
+                [notifId, cgId, stockTitle, stockBody]
+              )
+              .catch(() => ({ rowCount: 0 }));
+            if (insRes.rowCount > 0) alertsCreated += 1;
+          }
+
+          const pushResult = await sendWebPushToUsers(client, cgIds, {
+            title: stockTitle,
+            body: stockBody,
+            tag: `cg-lowstock-${med.id}-${todayIso}`,
+            url: '/cuidador',
+          });
+          pushSent += pushResult.sent;
+
+          await client
+            .query(
+              `INSERT INTO notification_logs (id, user_id, med_id, dose_hora, data_referencia, tipo)
+               VALUES ($1, $2, $3, 'STOCK', $4, 'CAREGIVER_LOW_STOCK')
+               ON CONFLICT DO NOTHING`,
+              [crypto.randomUUID(), pid, med.id, todayIso]
+            )
+            .catch(() => {});
+        }
+      }
+    }
+
+    // 2. Verificação de doses previstas sem confirmação
     if (String(med.treatment_type || '').toLowerCase() === 'sos') continue;
+    const overdueNotifyMinutes = Number(patSettings.overdue_notify_minutes ?? 60);
+    if (overdueNotifyMinutes <= 0) continue;
     if (med.start_date && String(med.start_date).slice(0, 10) > todayIso) continue;
     if (med.end_date && String(med.end_date).slice(0, 10) < todayIso) continue;
     if (!matchesMedicationWeekday(med.dias_semana, weekdayIndex)) continue;
@@ -266,6 +397,7 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
     const medCreatedInfo = med.created_at
       ? getLocalDateAndMinutes(timeZone, new Date(med.created_at))
       : null;
+    const delayLabel = formatMinutesLabelPt(overdueNotifyMinutes);
 
     for (const rawHora of horarios) {
       const hora = String(rawHora || '').trim().slice(0, 5);
@@ -275,8 +407,7 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
       const scheduledMinutes = Number(match[1]) * 60 + Number(match[2]);
       const diffMin = currentMinutes - scheduledMinutes;
 
-      // Alerta após 1 hora do horário previsto no mesmo dia (evita falso alarme se o remédio acabou de ser cadastrado hoje após aquele horário)
-      if (diffMin < 60) continue;
+      if (diffMin < overdueNotifyMinutes) continue;
       if (medCreatedInfo && medCreatedInfo.todayIso === todayIso && medCreatedInfo.currentMinutes > scheduledMinutes) {
         continue;
       }
@@ -297,18 +428,13 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
          WHERE med_id::text = $1::text
            AND dose_hora = $2
            AND data_referencia = $3
-           AND tipo = 'CAREGIVER_OVERDUE_1H'
+           AND tipo IN ('CAREGIVER_OVERDUE_1H', 'CAREGIVER_OVERDUE')
          LIMIT 1`,
         [String(med.id), hora, todayIso]
       );
       if (logCheck.rowCount > 0) continue;
 
-      const pid = String(med.user_id);
-      const patientName = patientNames.get(pid) || 'Paciente';
-      const cgIds = caregiversByPatient.get(pid) || [];
-      if (cgIds.length === 0) continue;
-
-      const title = `⏰ Dose não confirmada (+1h): ${med.nome}`;
+      const title = `⏰ Dose não confirmada (+${delayLabel}): ${med.nome}`;
       const body = `${patientName} ainda não tomou ${med.nome}${med.dosagem ? ` (${med.dosagem})` : ''} previsto para ${hora}.`;
 
       for (const cgId of cgIds) {
@@ -328,7 +454,7 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
       const pushResult = await sendWebPushToUsers(client, cgIds, {
         title,
         body,
-        tag: `cg-overdue-1h-${med.id}-${hora}-${todayIso}`,
+        tag: `cg-overdue-${med.id}-${hora}-${todayIso}`,
         url: '/cuidador',
       });
       pushSent += pushResult.sent;
@@ -336,7 +462,7 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
       await client
         .query(
           `INSERT INTO notification_logs (id, user_id, med_id, dose_hora, data_referencia, tipo)
-           VALUES ($1, $2, $3, $4, $5, 'CAREGIVER_OVERDUE_1H')
+           VALUES ($1, $2, $3, $4, $5, 'CAREGIVER_OVERDUE')
            ON CONFLICT DO NOTHING`,
           [crypto.randomUUID(), pid, med.id, hora, todayIso]
         )

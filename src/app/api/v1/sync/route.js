@@ -1,9 +1,17 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
-import { forwardToOracleBackend } from '@/lib/oracleProxy';
-import { notifyCaregiversOfDoseRequest } from '@/lib/caregiverNotifications';
+import { ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
+import { connectPgOrFallback } from '@/lib/oracleProxy';
+import {
+  getLocalDateAndMinutes,
+  notifyCaregiversOfDoseRequest,
+  notifyCaregiversOfSosUsage,
+} from '@/lib/caregiverNotifications';
 import { ensureOverdueCaregiverScheduler } from '@/lib/reminderWorker';
+import {
+  fetchPatientCareSettings,
+  shouldPatientRequireCaregiverApproval,
+} from '@/lib/careSettings';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -203,12 +211,11 @@ export async function GET(request) {
   const rawUserId = searchParams.get('userId') || searchParams.get('patientId') || '';
   const rawEmail = searchParams.get('email') || '';
 
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(request, '/api/v1/sync');
+  const { client, fallbackResponse } = await connectPgOrFallback(request, '/api/v1/sync');
+  if (fallbackResponse) {
+    return fallbackResponse;
   }
 
-  const client = await pool.connect();
   try {
     await ensureOraclePostgresSchema(client);
 
@@ -218,7 +225,7 @@ export async function GET(request) {
 
     const userId = await resolveTargetUserId(client, rawUserId, { email: rawEmail });
 
-    const [profileRes, medsRes, histRes, eventsRes, notesRes, algRes, condRes, contRes, profRes, cgRes, stockRes, approvalRes, notifRes] =
+    const [profileRes, medsRes, histRes, eventsRes, notesRes, algRes, condRes, contRes, profRes, cgRes, stockRes, approvalRes, notifRes, careSettings] =
       await Promise.all([
         client.query('SELECT * FROM profiles WHERE id = $1 LIMIT 1', [userId]),
         client.query(
@@ -262,6 +269,7 @@ export async function GET(request) {
         client
           .query('SELECT * FROM notificacoes WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [userId])
           .catch(() => ({ rows: [] })),
+        fetchPatientCareSettings(client, userId),
       ]);
 
     const seenDoseSlots = new Set();
@@ -361,6 +369,7 @@ export async function GET(request) {
         approval_requests: approvalRes.rows,
         pending_dose_requests: approvalRes.rows.filter(r => r.status === 'pending'),
         notificacoes: notifRes.rows,
+        care_settings: careSettings,
       },
       { status: 200, headers: corsHeaders }
     );
@@ -375,9 +384,9 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(request, '/api/v1/sync');
+  const { client, fallbackResponse } = await connectPgOrFallback(request, '/api/v1/sync');
+  if (fallbackResponse) {
+    return fallbackResponse;
   }
 
   ensureOverdueCaregiverScheduler();
@@ -386,6 +395,7 @@ export async function POST(request) {
   try {
     body = await request.json();
   } catch {
+    client.release();
     return NextResponse.json({ ok: false, error: 'JSON inválido' }, { status: 400, headers: corsHeaders });
   }
 
@@ -394,7 +404,7 @@ export async function POST(request) {
     const user = body.user || body.profile || {};
     const delUserId = body.userId || user.id || body.patientId || '';
     const delEmail = body.email || user.email || '';
-    return handleDeleteAccountInDb(pool, delUserId, delEmail);
+    return handleDeleteAccountInDb(client, delUserId, delEmail);
   }
 
   const user = body.user || body.profile || {};
@@ -452,10 +462,10 @@ export async function POST(request) {
     ? body.approval_requests
     : [];
 
-  const client = await pool.connect();
   try {
     await ensureOraclePostgresSchema(client);
     const userId = await resolveTargetUserId(client, requestedUserId, user);
+    const careSettings = await fetchPatientCareSettings(client, userId);
 
     // Detecta o tipo da coluna horarios em medicamentos (text[] no schema standalone vs jsonb)
     const horariosColRes = await client.query(
@@ -519,6 +529,11 @@ export async function POST(request) {
       ]
     );
 
+    const isDependentPatientSync =
+      (cleanRole === 'paciente' || cleanRole === 'patient') &&
+      !body.caregiverId &&
+      body.source !== 'caregiver';
+
     // Consolida todos os IDs excluídos (brutos e UUIDs determinísticos) antes dos upserts
     const deletedSet = new Set(deletedRecordIds);
     const deletedMedIdsToMatch = new Set(deletedRecordIds);
@@ -526,12 +541,12 @@ export async function POST(request) {
       const medDetUuid = toDeterministicUuid(rawDelId, `med:${userId}`).toLowerCase();
       deletedMedIdsToMatch.add(medDetUuid);
       deletedSet.add(medDetUuid);
-      for (const pfx of ['event', 'note', 'alg', 'cond', 'ct', 'pr', 'sm', 'cg']) {
+      for (const pfx of ['event', 'note', 'alg', 'cond', 'ct', 'pr', 'sm', 'cg', 'dose']) {
         deletedSet.add(toDeterministicUuid(rawDelId, `${pfx}:${userId}`).toLowerCase());
       }
     }
 
-    if (deletedMedIdsToMatch.size > 0) {
+    if (deletedMedIdsToMatch.size > 0 && (!isDependentPatientSync || careSettings.allow_patient_med_edit)) {
       const delMedArr = Array.from(deletedMedIdsToMatch);
       await client
         .query(
@@ -547,6 +562,11 @@ export async function POST(request) {
 
     if (deletedSet.size > 0) {
       const allDelArr = Array.from(deletedSet);
+      if (!isDependentPatientSync || !careSettings.require_confirm_undo) {
+        await client
+          .query(`DELETE FROM historico_doses WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
+          .catch(() => {});
+      }
       await client
         .query(`DELETE FROM health_events WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
         .catch(() => {});
@@ -678,7 +698,7 @@ export async function POST(request) {
       }
     }
 
-    if (syncAuthoritativeMeds) {
+    if (syncAuthoritativeMeds && (!isDependentPatientSync || careSettings.allow_patient_med_edit)) {
       const activeMedUuids = Array.from(medIdMap.values()).map((id) => String(id).toLowerCase());
       if (activeMedUuids.length > 0) {
         await client.query(
@@ -704,19 +724,27 @@ export async function POST(request) {
       }
     }
 
-    const isDependentPatientSync =
-      (cleanRole === 'paciente' || cleanRole === 'patient') &&
-      !body.caregiverId &&
-      body.source !== 'caregiver';
+    const activeCgLinksRes = await client
+      .query(
+        "SELECT id, caregiver_id FROM caregiver_relationships WHERE patient_id = $1 AND status = 'active'",
+        [userId]
+      )
+      .catch(() => ({ rows: [] }));
+    const activeCaregiverIds = (activeCgLinksRes.rows || [])
+      .map((r) => r.caregiver_id)
+      .filter(Boolean)
+      .map(String);
+    const resolvedPatientName = user.nome || user.full_name || 'Paciente';
 
-    for (const h of isDependentPatientSync ? [] : history) {
+    for (const h of history) {
       const rawMedId = h.med_id || h.medId || '';
       const resolvedMedUuid = medIdMap.get(rawMedId) || (rawMedId ? toDeterministicUuid(rawMedId, `med:${userId}`) : null);
       if (!resolvedMedUuid) continue;
 
       // Verifica se o medicamento existe para não violar FK
-      const medExists = await client.query('SELECT 1 FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
-      if (medExists.rowCount === 0) continue;
+      const medRowRes = await client.query('SELECT id, nome, dosagem, treatment_type FROM medicamentos WHERE id = $1 LIMIT 1', [resolvedMedUuid]);
+      if (medRowRes.rowCount === 0) continue;
+      const matchedMed = medRowRes.rows[0];
 
       const clientTz = cleanNullableText(body.timezone) || 'America/Sao_Paulo';
       const rawDoseDate =
@@ -728,6 +756,41 @@ export async function POST(request) {
       const rawHora = String(h.hora || h.horario || '08:00').trim();
       const hora = parsePgTime(rawHora) || (rawHora.length >= 5 && rawHora[2] === ':' ? rawHora.slice(0, 5) : rawHora);
       const normStatus = normalizeDoseStatus(h.status);
+
+      const isSosDose =
+        hora.toUpperCase() === 'SOS' ||
+        Boolean(h.is_sos) ||
+        String(h.horario_programado || '').toUpperCase() === 'SOS' ||
+        String(h.id || '').startsWith('sos-') ||
+        String(matchedMed.treatment_type || '').toLowerCase() === 'sos' ||
+        String(h.motivo || h.reason || '').trim().toLowerCase().startsWith('uso sos');
+
+      // Respeita regras configuradas no Painel de Gerenciamento para paciente dependente
+      if (isDependentPatientSync && !isSosDose) {
+        if (normStatus === 'pending') {
+          if (shouldPatientRequireCaregiverApproval({ careSettings, actionType: 'undo' })) {
+            continue;
+          }
+        } else {
+          const { todayIso, currentMinutes } = getLocalDateAndMinutes(clientTz);
+          const delayFromPayload = parsePgNumeric(h.atraso_minutos ?? h.delay_minutes);
+          let isDoseMissed = false;
+          if (doseDate < todayIso) {
+            isDoseMissed = delayFromPayload === null || delayFromPayload > careSettings.missed_dose_minutes;
+          } else if (doseDate === todayIso && hora) {
+            const hmMatch = hora.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+            if (hmMatch) {
+              const schedMins = Number(hmMatch[1]) * 60 + Number(hmMatch[2]);
+              if (currentMinutes - schedMins > careSettings.missed_dose_minutes) {
+                isDoseMissed = delayFromPayload === null || delayFromPayload > careSettings.missed_dose_minutes;
+              }
+            }
+          }
+          if (shouldPatientRequireCaregiverApproval({ careSettings, actionType: 'confirm', isDoseMissed })) {
+            continue;
+          }
+        }
+      }
 
       // Se a dose foi desfeita (status = pending / pendente), remove todos os registros correspondentes do banco
       if (normStatus === 'pending') {
@@ -744,13 +807,6 @@ export async function POST(request) {
         }
         continue;
       }
-
-      const isSosDose =
-        hora.toUpperCase() === 'SOS' ||
-        Boolean(h.is_sos) ||
-        String(h.horario_programado || '').toUpperCase() === 'SOS' ||
-        String(h.id || '').startsWith('sos-') ||
-        String(h.motivo || h.reason || '').trim().toLowerCase().startsWith('uso sos');
 
       const doseUuid = isSosDose
         ? toDeterministicUuid(h.id || `${resolvedMedUuid}:${doseDate}:${hora}`, `dose:${userId}`)
@@ -803,6 +859,20 @@ export async function POST(request) {
           h.administered_at || null,
         ]
       );
+
+      if (isSosDose && careSettings.notify_sos_usage && activeCaregiverIds.length > 0 && normStatus === 'confirmed') {
+        await notifyCaregiversOfSosUsage(client, {
+          patientId: userId,
+          patientName: resolvedPatientName,
+          caregiverIds: activeCaregiverIds,
+          doseId: doseUuid,
+          medNome: matchedMed.nome || h.med_nome || 'Medicamento SOS',
+          dosagem: matchedMed.dosagem || '',
+          hora,
+          doseDate,
+          reason: h.motivo || h.reason || 'Uso SOS',
+        }).catch(() => {});
+      }
     }
 
     await client
@@ -1302,6 +1372,7 @@ export async function POST(request) {
         ok: true,
         syncedAt: new Date().toISOString(),
         userId,
+        care_settings: careSettings,
         counts: {
           meds: meds.length,
           history: history.length,
@@ -1328,15 +1399,15 @@ export async function POST(request) {
   }
 }
 
-async function handleDeleteAccountInDb(pool, targetUserId, targetEmail) {
+async function handleDeleteAccountInDb(client, targetUserId, targetEmail) {
   if (!targetUserId && !targetEmail) {
+    client.release();
     return NextResponse.json(
       { ok: false, error: 'Identificador de usuário ou e-mail não fornecido para exclusão.' },
       { status: 400, headers: corsHeaders }
     );
   }
 
-  const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const cleanEmail = (targetEmail || '').trim().toLowerCase();
@@ -1506,9 +1577,9 @@ async function handleDeleteAccountInDb(pool, targetUserId, targetEmail) {
 }
 
 export async function DELETE(request) {
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(request, '/api/v1/sync');
+  const { client, fallbackResponse } = await connectPgOrFallback(request, '/api/v1/sync');
+  if (fallbackResponse) {
+    return fallbackResponse;
   }
 
   const { searchParams } = new URL(request.url);
@@ -1518,5 +1589,5 @@ export async function DELETE(request) {
   const targetUserId = searchParams.get('userId') || searchParams.get('patientId') || searchParams.get('id') || body.userId || body.user_id || body.id;
   const targetEmail = searchParams.get('email') || body.email;
 
-  return handleDeleteAccountInDb(pool, targetUserId, targetEmail);
+  return handleDeleteAccountInDb(client, targetUserId, targetEmail);
 }

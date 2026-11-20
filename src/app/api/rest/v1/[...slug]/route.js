@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
-import { forwardToOracleBackend } from '@/lib/oracleProxy';
+import { ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
+import { connectPgOrFallback } from '@/lib/oracleProxy';
 import {
   canAccessPatientData,
   extractAuthenticatedUser,
@@ -1409,20 +1409,19 @@ async function handleRestRequest(req, { params }) {
     return NextResponse.json({ error: 'Recurso não especificado' }, { status: 400, headers: corsHeaders });
   }
 
-  const pool = getPgPool();
-  if (!pool) {
-    const slugStr = slug.join('/');
-    return forwardToOracleBackend(req, `/api/rest/v1/${slugStr}`);
-  }
-
   const claims = extractAuthenticatedUser(req, { returnCsrfError: true });
   if (claims?.csrfError) {
     return NextResponse.json({ error: claims.reason }, { status: 403, headers: corsHeaders });
   }
 
+  const slugStr = slug.join('/');
+  const { client, fallbackResponse } = await connectPgOrFallback(req, `/api/rest/v1/${slugStr}`);
+  if (fallbackResponse) {
+    return fallbackResponse;
+  }
+
   const userId = claims?.sub || null;
 
-  const client = await pool.connect();
   try {
     await ensureOraclePostgresSchema(client);
     if (claims) {

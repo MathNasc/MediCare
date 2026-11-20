@@ -47,6 +47,13 @@ import {
   Globe,
   ShieldCheck,
   HeartHandshake,
+  SlidersHorizontal,
+  Save,
+  RotateCcw,
+  Building2,
+  Layers,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { formatAuditLogEntry } from '@/lib/auditFormatter';
 import { subscribeToPush } from '@/lib/webPush';
@@ -66,6 +73,16 @@ import {
   buildCalendarMonthData,
   isStockEventRecord,
 } from '@/lib/caregiverCalendar';
+import {
+  DEFAULT_CARE_SETTINGS,
+  GROUP_COLORS,
+  OVERDUE_NOTIFY_OPTIONS,
+  MISSED_DOSE_WINDOW_OPTIONS,
+  CARE_MANAGEMENT_PRESETS,
+  normalizeCareSettings,
+  normalizeConfigMode,
+  formatMinutesLabelPt,
+} from '@/lib/careSettings';
 
 function readCookieValue(name) {
   if (typeof document === 'undefined') return '';
@@ -169,6 +186,37 @@ export default function CuidadorWebPage() {
   const [stockMovements, setStockMovements] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState([]);
+  const [careSettings, setCareSettings] = useState(() => ({ ...DEFAULT_CARE_SETTINGS }));
+  const [careSettingsDraft, setCareSettingsDraft] = useState(() => ({ ...DEFAULT_CARE_SETTINGS }));
+  const [careSettingsLoading, setCareSettingsLoading] = useState(false);
+  const [careSettingsSaving, setCareSettingsSaving] = useState(false);
+  const [managementScope, setManagementScope] = useState('patient'); // 'patient' | 'global' | 'groups'
+  const [patientRuleMeta, setPatientRuleMeta] = useState({
+    config_mode: 'global',
+    group_id: null,
+    group_name: null,
+    group_color: null,
+    effective_source: 'default',
+    custom_settings: { ...DEFAULT_CARE_SETTINGS },
+  });
+  const [patientConfigModeDraft, setPatientConfigModeDraft] = useState('global');
+  const [patientGroupIdDraft, setPatientGroupIdDraft] = useState('');
+  const [globalCareSettings, setGlobalCareSettings] = useState(() => ({ ...DEFAULT_CARE_SETTINGS, is_configured: false }));
+  const [globalCareSettingsDraft, setGlobalCareSettingsDraft] = useState(() => ({ ...DEFAULT_CARE_SETTINGS }));
+  const [careGroups, setCareGroups] = useState([]);
+  const [patientsOverview, setPatientsOverview] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
+  const [groupDraft, setGroupDraft] = useState({
+    id: '',
+    name: '',
+    description: '',
+    color: '#3b82f6',
+    settings: { ...DEFAULT_CARE_SETTINGS },
+    patientIds: [],
+  });
+  const [groupMemberSearch, setGroupMemberSearch] = useState('');
+  const [confirmApplyGlobalToAll, setConfirmApplyGlobalToAll] = useState(false);
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState(null);
 
   // Modals & Mobile Sheets
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -524,6 +572,8 @@ export default function CuidadorWebPage() {
     setStockMovements([]);
     setAuditLogs([]);
     setApprovalRequests([]);
+    setCareSettings({ ...DEFAULT_CARE_SETTINGS });
+    setCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS });
     setNotificationsList([]);
     setUnreadNotifCount(0);
     seenNotifIdsRef.current = null;
@@ -604,6 +654,19 @@ export default function CuidadorWebPage() {
 
       syncCsrfToken();
 
+      const hasCookieSessionHint =
+        typeof document !== 'undefined' &&
+        (document.cookie.includes('medicare_cuidador_logged_in=') ||
+          document.cookie.includes('medicare_csrf_token='));
+
+      if (!hasCookieSessionHint && !legacyJwt && !legacyRefresh) {
+        if (active) {
+          clearClientSession();
+          setAuthChecking(false);
+        }
+        return;
+      }
+
       try {
         const res = await fetch('/api/auth/v1/user', {
           method: 'GET',
@@ -636,21 +699,23 @@ export default function CuidadorWebPage() {
         }
 
         // Tenta renovar via cookie HttpOnly de refresh_token (ou legacyRefresh se em transição)
-        const refreshRes = await fetch('/api/auth/v1/token?grant_type=refresh_token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(legacyRefresh ? { refresh_token: legacyRefresh } : {}),
-          credentials: 'same-origin',
-        });
+        if (hasCookieSessionHint || legacyRefresh) {
+          const refreshRes = await fetch('/api/auth/v1/token?grant_type=refresh_token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(legacyRefresh ? { refresh_token: legacyRefresh } : {}),
+            credentials: 'same-origin',
+          });
 
-        if (refreshRes.ok) {
-          const refreshData = await refreshRes.json().catch(() => ({}));
-          if (active && refreshData?.user) {
-            syncCsrfToken(refreshData.csrf_token);
-            setCurrentUser(refreshData.user);
-            setIsAuthenticated(true);
-            setAuthChecking(false);
-            return;
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json().catch(() => ({}));
+            if (active && refreshData?.user) {
+              syncCsrfToken(refreshData.csrf_token);
+              setCurrentUser(refreshData.user);
+              setIsAuthenticated(true);
+              setAuthChecking(false);
+              return;
+            }
           }
         }
 
@@ -1030,7 +1095,8 @@ export default function CuidadorWebPage() {
       }
 
       if (validTargetId) {
-        const [medsRes, histRes, eventsRes, logsRes, approvalsRes, notesRes, stockRes] = await Promise.all([
+        setCareSettingsLoading(true);
+        const [medsRes, histRes, eventsRes, logsRes, approvalsRes, notesRes, stockRes, settingsRes] = await Promise.all([
           apiFetch(`/api/rest/v1/medicamentos?user_id=eq.${validTargetId}&ativo=eq.true&order=created_at.asc`),
           apiFetch(`/api/rest/v1/historico_doses?user_id=eq.${validTargetId}&order=created_at.desc&limit=350`),
           apiFetch(`/api/rest/v1/health_events?user_id=eq.${validTargetId}&order=date.asc`),
@@ -1041,6 +1107,7 @@ export default function CuidadorWebPage() {
           apiFetch(`/api/rest/v1/approval_requests?patient_id=eq.${validTargetId}&status=eq.pending&order=created_at.desc`),
           apiFetch(`/api/rest/v1/calendar_notes?user_id=eq.${validTargetId}&order=date.desc&limit=200`),
           apiFetch(`/api/rest/v1/stock_movements?user_id=eq.${validTargetId}&order=created_at.desc&limit=200`),
+          apiFetch(`/api/v1/caregiver/settings?patientId=${encodeURIComponent(validTargetId)}`),
         ]);
 
         const meds = medsRes.ok ? await medsRes.json().catch(() => []) : [];
@@ -1050,6 +1117,23 @@ export default function CuidadorWebPage() {
         const approvals = approvalsRes.ok ? await approvalsRes.json().catch(() => []) : [];
         const cNotes = notesRes.ok ? await notesRes.json().catch(() => []) : [];
         const sMoves = stockRes.ok ? await stockRes.json().catch(() => []) : [];
+        const settingsJson = settingsRes.ok ? await settingsRes.json().catch(() => null) : null;
+        const resolvedSettings = normalizeCareSettings(settingsJson?.settings || DEFAULT_CARE_SETTINGS);
+        const resolvedMeta = settingsJson?.meta || {
+          config_mode: 'global',
+          group_id: null,
+          group_name: null,
+          group_color: null,
+          effective_source: 'default',
+          custom_settings: { ...DEFAULT_CARE_SETTINGS },
+        };
+        const resolvedGlobal = {
+          ...normalizeCareSettings(settingsJson?.globalSettings || DEFAULT_CARE_SETTINGS),
+          is_configured: Boolean(settingsJson?.globalSettings?.is_configured),
+          updated_at: settingsJson?.globalSettings?.updated_at || null,
+        };
+        const resolvedGroups = Array.isArray(settingsJson?.groups) ? settingsJson.groups : [];
+        const resolvedOverview = Array.isArray(settingsJson?.patientsOverview) ? settingsJson.patientsOverview : [];
 
         setMedications(Array.isArray(meds) ? meds : []);
         setDoseHistory(Array.isArray(hist) ? hist : []);
@@ -1058,6 +1142,20 @@ export default function CuidadorWebPage() {
         setApprovalRequests(Array.isArray(approvals) ? approvals : []);
         setCalendarNotes(Array.isArray(cNotes) ? cNotes : []);
         setStockMovements(Array.isArray(sMoves) ? sMoves : []);
+        setCareSettings(resolvedSettings);
+        setCareSettingsDraft(
+          resolvedMeta.config_mode === 'custom'
+            ? normalizeCareSettings(resolvedMeta.custom_settings || resolvedSettings)
+            : resolvedSettings
+        );
+        setPatientRuleMeta(resolvedMeta);
+        setPatientConfigModeDraft(normalizeConfigMode(resolvedMeta.config_mode, 'global'));
+        setPatientGroupIdDraft(resolvedMeta.group_id || resolvedGroups[0]?.id || '');
+        setGlobalCareSettings(resolvedGlobal);
+        setGlobalCareSettingsDraft(normalizeCareSettings(resolvedGlobal));
+        setCareGroups(resolvedGroups);
+        setPatientsOverview(resolvedOverview);
+        setCareSettingsLoading(false);
       } else {
         setMedications([]);
         setDoseHistory([]);
@@ -1066,9 +1164,34 @@ export default function CuidadorWebPage() {
         setApprovalRequests([]);
         setCalendarNotes([]);
         setStockMovements([]);
+        setCareSettings({ ...DEFAULT_CARE_SETTINGS });
+        setCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS });
+        setPatientRuleMeta({
+          config_mode: 'global',
+          group_id: null,
+          group_name: null,
+          group_color: null,
+          effective_source: 'default',
+          custom_settings: { ...DEFAULT_CARE_SETTINGS },
+        });
+        setPatientConfigModeDraft('global');
+        setPatientGroupIdDraft('');
+        const emptySetRes = await apiFetch('/api/v1/caregiver/settings').catch(() => null);
+        const emptySetJson = emptySetRes && emptySetRes.ok ? await emptySetRes.json().catch(() => null) : null;
+        const resolvedGlobal = {
+          ...normalizeCareSettings(emptySetJson?.globalSettings || DEFAULT_CARE_SETTINGS),
+          is_configured: Boolean(emptySetJson?.globalSettings?.is_configured),
+          updated_at: emptySetJson?.globalSettings?.updated_at || null,
+        };
+        setGlobalCareSettings(resolvedGlobal);
+        setGlobalCareSettingsDraft(normalizeCareSettings(resolvedGlobal));
+        setCareGroups(Array.isArray(emptySetJson?.groups) ? emptySetJson.groups : []);
+        setPatientsOverview(Array.isArray(emptySetJson?.patientsOverview) ? emptySetJson.patientsOverview : []);
+        setCareSettingsLoading(false);
       }
     } catch (err) {
       console.warn('Erro ao carregar dados:', err);
+      setCareSettingsLoading(false);
     } finally {
       setLoading(false);
     }
@@ -1669,6 +1792,253 @@ export default function CuidadorWebPage() {
     }
   };
 
+  const applyCareSettingsApiResponse = (data) => {
+    if (!data) return;
+    if (data.globalSettings) {
+      const gl = {
+        ...normalizeCareSettings(data.globalSettings),
+        is_configured: Boolean(data.globalSettings.is_configured),
+        updated_at: data.globalSettings.updated_at || null,
+      };
+      setGlobalCareSettings(gl);
+      setGlobalCareSettingsDraft(normalizeCareSettings(gl));
+    }
+    if (Array.isArray(data.groups)) {
+      setCareGroups(data.groups);
+    }
+    if (Array.isArray(data.patientsOverview)) {
+      setPatientsOverview(data.patientsOverview);
+    }
+    if (data.settings) {
+      const eff = normalizeCareSettings(data.settings);
+      setCareSettings(eff);
+      if (data.meta) {
+        setPatientRuleMeta(data.meta);
+        setPatientConfigModeDraft(normalizeConfigMode(data.meta.config_mode, 'global'));
+        setPatientGroupIdDraft(data.meta.group_id || data.groups?.[0]?.id || '');
+        setCareSettingsDraft(
+          data.meta.config_mode === 'custom'
+            ? normalizeCareSettings(data.meta.custom_settings || eff)
+            : eff
+        );
+      } else {
+        setCareSettingsDraft(eff);
+      }
+    }
+  };
+
+  // Salvar configurações individuais do paciente selecionado (ou alterar modo Global / Grupo / Personalizado)
+  const handleSaveCareSettings = async (overrideSettings = null, customReason = '', overrideMode = null, overrideGroupId = null) => {
+    if (!selectedPatientId) return;
+    const modeToSave = normalizeConfigMode(overrideMode || patientConfigModeDraft, 'custom');
+    const groupIdToSave = modeToSave === 'group' ? (overrideGroupId || patientGroupIdDraft || '') : null;
+    if (modeToSave === 'group' && !groupIdToSave) {
+      showToast('Selecione ou crie um grupo antes de vincular o paciente.', 'error');
+      return;
+    }
+    const payload = normalizeCareSettings(overrideSettings || careSettingsDraft);
+    setCareSettingsSaving(true);
+    try {
+      const res = await apiFetch('/api/v1/caregiver/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          scope: 'patient',
+          patientId: selectedPatientId,
+          config_mode: modeToSave,
+          group_id: groupIdToSave,
+          settings: payload,
+          reason: customReason || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Não foi possível salvar as regras de acompanhamento.');
+      }
+      applyCareSettingsApiResponse(data);
+      const toastMsg =
+        modeToSave === 'global'
+          ? 'Paciente configurado para seguir as Regras Globais da clínica!'
+          : modeToSave === 'group'
+          ? 'Paciente vinculado ao grupo com sucesso!'
+          : 'Regras individuais do paciente salvas com sucesso!';
+      showToast(toastMsg);
+      loadData();
+    } catch (err) {
+      showToast(err.message || 'Erro ao salvar configurações.', 'error');
+    } finally {
+      setCareSettingsSaving(false);
+    }
+  };
+
+  // Salvar configurações globais do cuidador/clínica
+  const handleSaveGlobalCareSettings = async ({ applyToAll = false } = {}) => {
+    const payload = normalizeCareSettings(globalCareSettingsDraft);
+    setCareSettingsSaving(true);
+    try {
+      const res = await apiFetch('/api/v1/caregiver/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          scope: 'global',
+          patientId: selectedPatientId || undefined,
+          applyToAll,
+          settings: payload,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Não foi possível salvar as regras globais.');
+      }
+      applyCareSettingsApiResponse(data);
+      setConfirmApplyGlobalToAll(false);
+      showToast(
+        applyToAll
+          ? `Regras globais aplicadas para todos os ${data.appliedCount || patients.length} pacientes!`
+          : 'Padrão global atualizado para pacientes em modo Global e novos cadastros!'
+      );
+      loadData();
+    } catch (err) {
+      showToast(err.message || 'Erro ao salvar regras globais.', 'error');
+    } finally {
+      setCareSettingsSaving(false);
+    }
+  };
+
+  // Iniciar criação/edição de grupo da clínica
+  const startCreateNewGroup = () => {
+    setSelectedGroupId('new');
+    setConfirmDeleteGroupId(null);
+    setGroupMemberSearch('');
+    setGroupDraft({
+      id: '',
+      name: '',
+      description: '',
+      color: '#3b82f6',
+      settings: normalizeCareSettings(globalCareSettings),
+      patientIds: [],
+    });
+  };
+
+  const selectGroupForEdit = (grp) => {
+    if (!grp) return;
+    setSelectedGroupId(grp.id);
+    setConfirmDeleteGroupId(null);
+    setGroupDraft({
+      id: grp.id,
+      name: grp.name || '',
+      description: grp.description || '',
+      color: grp.color || '#3b82f6',
+      settings: normalizeCareSettings(grp.settings || DEFAULT_CARE_SETTINGS),
+      patientIds: Array.isArray(grp.patient_ids) ? [...grp.patient_ids] : [],
+    });
+  };
+
+  // Salvar grupo + membros vinculados
+  const handleSaveCareGroup = async () => {
+    const cleanName = String(groupDraft.name || '').trim();
+    if (!cleanName) {
+      showToast('Informe um nome para o grupo (ex: Ala A - Alta Supervisão).', 'error');
+      return;
+    }
+    setCareSettingsSaving(true);
+    try {
+      const res = await apiFetch('/api/v1/caregiver/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          scope: 'group',
+          patientId: selectedPatientId || undefined,
+          groupId: groupDraft.id || undefined,
+          name: cleanName,
+          description: String(groupDraft.description || '').trim(),
+          color: groupDraft.color || '#3b82f6',
+          settings: normalizeCareSettings(groupDraft.settings),
+          patientIds: Array.isArray(groupDraft.patientIds) ? groupDraft.patientIds : [],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Não foi possível salvar o grupo.');
+      }
+      applyCareSettingsApiResponse(data);
+      if (data.group?.id) {
+        setSelectedGroupId(data.group.id);
+        setGroupDraft({
+          id: data.group.id,
+          name: data.group.name,
+          description: data.group.description || '',
+          color: data.group.color || '#3b82f6',
+          settings: normalizeCareSettings(data.group.settings),
+          patientIds: Array.isArray(data.group.patient_ids) ? data.group.patient_ids : [],
+        });
+      }
+      showToast(`Grupo "${cleanName}" salvo com ${groupDraft.patientIds.length} paciente(s)!`);
+      loadData();
+    } catch (err) {
+      showToast(err.message || 'Erro ao salvar grupo.', 'error');
+    } finally {
+      setCareSettingsSaving(false);
+    }
+  };
+
+  // Excluir grupo de pacientes
+  const handleDeleteCareGroup = async (groupId) => {
+    if (!groupId) return;
+    setCareSettingsSaving(true);
+    try {
+      const query = new URLSearchParams({ groupId });
+      if (selectedPatientId) query.set('patientId', selectedPatientId);
+      const res = await apiFetch(`/api/v1/caregiver/settings?${query.toString()}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Não foi possível excluir o grupo.');
+      }
+      applyCareSettingsApiResponse(data);
+      setConfirmDeleteGroupId(null);
+      const remaining = Array.isArray(data.groups) ? data.groups : [];
+      if (remaining.length > 0) {
+        selectGroupForEdit(remaining[0]);
+      } else {
+        setSelectedGroupId(null);
+      }
+      showToast('Grupo excluído. Os participantes retornaram ao modo Global.');
+      loadData();
+    } catch (err) {
+      showToast(err.message || 'Erro ao excluir grupo.', 'error');
+    } finally {
+      setCareSettingsSaving(false);
+    }
+  };
+
+  // Alterar rapidamente o modo de um paciente pela lista da clínica (Global / Grupo / Personalizar)
+  const handleQuickAssignPatientMode = async (targetPatientId, mode, groupId = null) => {
+    if (!targetPatientId) return;
+    setCareSettingsSaving(true);
+    try {
+      const res = await apiFetch('/api/v1/caregiver/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          scope: 'bulk_assign',
+          patientId: selectedPatientId || undefined,
+          patientIds: [targetPatientId],
+          config_mode: mode,
+          group_id: mode === 'group' ? groupId : null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Não foi possível atualizar o modo do paciente.');
+      }
+      applyCareSettingsApiResponse(data);
+      showToast('Modo de gerenciamento do paciente atualizado!');
+      loadData();
+    } catch (err) {
+      showToast(err.message || 'Erro ao atualizar paciente.', 'error');
+    } finally {
+      setCareSettingsSaving(false);
+    }
+  };
+
   // Doses do dia com distinção semântica precisa entre os 5 estados
   const todayDoses = [];
   const nowObj = new Date();
@@ -1766,6 +2136,7 @@ export default function CuidadorWebPage() {
     monthIndex: calMonthIndex,
     todayIso,
     currentMinutesOfDay,
+    missedDoseMinutes: careSettings.missed_dose_minutes,
     medications,
     doseHistory,
     appointments,
@@ -1778,6 +2149,7 @@ export default function CuidadorWebPage() {
     dateIso: activeSelectedCalDate,
     todayIso,
     currentMinutesOfDay,
+    missedDoseMinutes: careSettings.missed_dose_minutes,
     medications,
     doseHistory,
     appointments,
@@ -1791,6 +2163,7 @@ export default function CuidadorWebPage() {
   const navItems = [
     { id: 'dashboard', label: 'Central de Doses', mobileLabel: 'Doses', icon: Home },
     { id: 'patients', label: 'Pacientes', mobileLabel: 'Pacientes', icon: Users },
+    { id: 'management', label: 'Gerenciamento', mobileLabel: 'Gerenciar', icon: SlidersHorizontal },
     { id: 'meds', label: 'Medicamentos & Estoque', mobileLabel: 'Remédios', icon: Pill },
     { id: 'agenda', label: 'Calendário & Agenda', mobileLabel: 'Agenda', icon: Calendar },
     { id: 'reports', label: 'Indicadores', mobileLabel: 'Indicadores', icon: BarChart3 },
@@ -1810,6 +2183,8 @@ export default function CuidadorWebPage() {
       ? 'Central de Doses'
       : currentTab === 'patients'
       ? 'Pacientes e Vínculos'
+      : currentTab === 'management'
+      ? 'Painel de Gerenciamento'
       : currentTab === 'meds'
       ? 'Medicamentos & Estoque'
       : currentTab === 'agenda'
@@ -2421,14 +2796,25 @@ export default function CuidadorWebPage() {
           </div>
         </header>
 
-        {/* Sub-navegação mobile entre Indicadores, Auditoria e Sobre */}
-        {(currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about') && (
+        {/* Sub-navegação mobile entre Gerenciar, Indicadores, Auditoria e Sobre */}
+        {(currentTab === 'management' || currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about') && (
           <div className="md:hidden px-4 pt-3">
-            <div className="grid grid-cols-3 gap-1 p-1 bg-[#131d31] border border-slate-800 rounded-xl">
+            <div className="grid grid-cols-4 gap-1 p-1 bg-[#131d31] border border-slate-800 rounded-xl">
+              <button
+                type="button"
+                onClick={() => navigateToTab('management')}
+                className={`min-h-[40px] rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                  currentTab === 'management'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Gerenciar
+              </button>
               <button
                 type="button"
                 onClick={() => navigateToTab('reports')}
-                className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                className={`min-h-[40px] rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
                   currentTab === 'reports'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
@@ -2439,7 +2825,7 @@ export default function CuidadorWebPage() {
               <button
                 type="button"
                 onClick={() => navigateToTab('audit')}
-                className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                className={`min-h-[40px] rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
                   currentTab === 'audit'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
@@ -2450,7 +2836,7 @@ export default function CuidadorWebPage() {
               <button
                 type="button"
                 onClick={() => navigateToTab('about')}
-                className={`min-h-[40px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                className={`min-h-[40px] rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
                   currentTab === 'about'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
@@ -2465,7 +2851,7 @@ export default function CuidadorWebPage() {
         {/* Tab Body */}
         <main className="flex-1 px-4 py-5 sm:p-6 lg:p-8 max-w-6xl w-full mx-auto pb-24 md:pb-10">
           {/* Estado vazio quando não há paciente com vínculo ativo */}
-          {patients.length === 0 && currentTab !== 'patients' && currentTab !== 'about' && (
+          {patients.length === 0 && currentTab !== 'patients' && currentTab !== 'about' && currentTab !== 'management' && (
             <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-10 text-center space-y-5 mb-6 max-w-xl mx-auto">
               <div className="w-12 h-12 rounded-2xl bg-blue-600/15 border border-blue-500/30 text-blue-400 flex items-center justify-center mx-auto">
                 <Users size={22} className="w-5 h-5" />
@@ -2519,10 +2905,43 @@ export default function CuidadorWebPage() {
                     <span>
                       Tipo sanguíneo: <strong className="text-slate-200 font-semibold">{selectedPatient.blood_type || 'Não informado'}</strong>
                     </span>
+                    <span aria-hidden="true">·</span>
+                    <button
+                      type="button"
+                      onClick={() => navigateToTab('management')}
+                      className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold underline-offset-2 hover:underline"
+                    >
+                      <SlidersHorizontal size={12} className="w-3 h-3 shrink-0" />
+                      <span>
+                        {patientRuleMeta?.config_mode === 'group' && patientRuleMeta?.group_name
+                          ? `Grupo (${patientRuleMeta.group_name})`
+                          : patientRuleMeta?.config_mode === 'custom'
+                          ? 'Individual'
+                          : 'Global'}
+                        {' · '}
+                        {careSettings.require_caregiver_confirm
+                          ? 'Com validação'
+                          : careSettings.require_confirm_after_missed
+                          ? 'Valida se perdida'
+                          : 'Confirmação direta'}
+                        {' · '}
+                        {careSettings.overdue_notify_minutes > 0
+                          ? `Aviso +${formatMinutesLabelPt(careSettings.overdue_notify_minutes)}`
+                          : 'Aviso atraso desligado'}
+                      </span>
+                    </button>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 sm:flex sm:items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => navigateToTab('management')}
+                    className="col-span-2 sm:col-span-1 min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-200 font-semibold text-xs border border-indigo-500/30 transition-colors whitespace-nowrap"
+                  >
+                    <SlidersHorizontal size={15} className="w-4 h-4 shrink-0 text-indigo-300" />
+                    <span>Gerenciar</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -2888,6 +3307,20 @@ export default function CuidadorWebPage() {
                           <div className="flex items-center gap-1.5 shrink-0">
                             <button
                               type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPatientId(p.patient_id);
+                                navigateToTab('management');
+                              }}
+                              title="Configurar regras de gerenciamento deste paciente"
+                              aria-label={`Gerenciar regras de ${p.nome}`}
+                              className="min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 text-[11px] font-semibold transition-colors whitespace-nowrap"
+                            >
+                              <SlidersHorizontal size={14} className="w-3.5 h-3.5 shrink-0" />
+                              <span className="hidden sm:inline">Gerenciar</span>
+                            </button>
+                            <button
+                              type="button"
                               disabled={pairingLoading}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2920,6 +3353,1539 @@ export default function CuidadorWebPage() {
               )}
             </div>
           )}
+
+          {/* TAB: PAINEL DE GERENCIAMENTO (GLOBAL, GRUPOS E POR PACIENTE) */}
+          {currentTab === 'management' && (() => {
+            const globalCount = patientsOverview.filter((p) => p.config_mode === 'global').length;
+            const groupCount = patientsOverview.filter((p) => p.config_mode === 'group').length;
+            const customCount = patientsOverview.filter((p) => p.config_mode === 'custom').length;
+
+            // Helper reutilizável para editar as regras clínicas em qualquer escopo (Paciente, Global ou Grupo)
+            const renderRuleEditor = ({ draft, onChangeDraft, idPrefix, readOnly = false }) => {
+              const safeDraft = normalizeCareSettings(draft);
+              const matchingPreset = CARE_MANAGEMENT_PRESETS.find(
+                (preset) => JSON.stringify(normalizeCareSettings(preset.settings)) === JSON.stringify(safeDraft)
+              );
+              const isOverduePreset = OVERDUE_NOTIFY_OPTIONS.some(
+                (opt) => opt.minutes === Number(safeDraft.overdue_notify_minutes)
+              );
+              const isMissedWindowPreset = MISSED_DOSE_WINDOW_OPTIONS.some(
+                (opt) => opt.minutes === Number(safeDraft.missed_dose_minutes)
+              );
+
+              const updateDraft = (updater) => {
+                if (readOnly) return;
+                onChangeDraft((prev) => {
+                  const base = normalizeCareSettings(prev);
+                  return typeof updater === 'function' ? updater(base) : { ...base, ...updater };
+                });
+              };
+
+              return (
+                <div className="space-y-5">
+                  {readOnly && (
+                    <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-xs text-blue-200 flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        Modo somente visualização: estas regras estão sendo herdadas automaticamente. Para ajustar os parâmetros aqui, altere no escopo correspondente ou personalize este paciente.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Perfis Rápidos de Acompanhamento */}
+                  <div className={`bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 space-y-3.5 ${readOnly ? 'opacity-80' : ''}`}>
+                    <div>
+                      <h2 className="text-sm font-bold text-white">Perfis Rápidos de Acompanhamento</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Escolha um modelo pronto ou personalize cada regra detalhadamente abaixo.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {CARE_MANAGEMENT_PRESETS.map((preset) => {
+                        const isSelectedPreset = matchingPreset?.id === preset.id;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            disabled={readOnly}
+                            onClick={() => updateDraft(() => normalizeCareSettings(preset.settings))}
+                            className={`text-left p-4 rounded-xl border transition-all space-y-1.5 ${
+                              readOnly ? 'cursor-not-allowed' : ''
+                            } ${
+                              isSelectedPreset
+                                ? 'bg-blue-600/15 border-blue-500 ring-1 ring-blue-500/40'
+                                : 'bg-[#0b1120] border-slate-800 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-white">{preset.label}</span>
+                              {isSelectedPreset && (
+                                <CheckCircle2 size={15} className="w-4 h-4 text-blue-400 shrink-0" />
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-relaxed">{preset.description}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Grid Principal: Validação de Doses + Notificações & Estoque */}
+                  <div className={`grid grid-cols-1 lg:grid-cols-2 gap-5 ${readOnly ? 'opacity-85' : ''}`}>
+                    {/* Bloco 1: Confirmação de Doses e Autonomia */}
+                    <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center justify-center shrink-0">
+                          <ShieldCheck size={18} className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="text-base font-bold text-white">Confirmação e Autonomia de Doses</h2>
+                          <p className="text-xs text-slate-400">
+                            Controle quando o paciente precisa da sua aprovação no aplicativo Android.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Regra 1: Precisa confirmar que o paciente tomou a dose */}
+                      <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="text-sm font-bold text-white">
+                              Precisa confirmar que o paciente tomou a dose?
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              {safeDraft.require_caregiver_confirm
+                                ? 'Ativado: ao tocar em "Tomei", o paciente envia uma solicitação para sua aprovação e o app avança para a próxima dose.'
+                                : 'Desativado: quando estiver dentro do prazo, o paciente confirma a dose diretamente sem aguardar sua validação.'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            disabled={readOnly}
+                            aria-checked={safeDraft.require_caregiver_confirm}
+                            onClick={() =>
+                              updateDraft((prev) => ({
+                                ...prev,
+                                require_caregiver_confirm: !prev.require_caregiver_confirm,
+                              }))
+                            }
+                            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors ${
+                              readOnly ? 'cursor-not-allowed opacity-70' : ''
+                            } ${
+                              safeDraft.require_caregiver_confirm
+                                ? 'bg-blue-600 border-blue-500'
+                                : 'bg-slate-700 border-slate-600'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                safeDraft.require_caregiver_confirm ? 'translate-x-6' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Regra 2: Confirmar após dose perdida */}
+                      <div
+                        className={`p-4 rounded-xl border space-y-3 transition-colors ${
+                          !safeDraft.require_caregiver_confirm
+                            ? 'bg-amber-950/20 border-amber-500/40'
+                            : 'bg-[#0b1120]/60 border-slate-800/80 opacity-80'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-bold text-white">
+                                Confirmar após a dose ser considerada perdida?
+                              </span>
+                              {safeDraft.require_caregiver_confirm && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                                  Aplicado se desativar acima
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              {safeDraft.require_confirm_after_missed
+                                ? `Ativado: mesmo com confirmação direta no horário, se passarem mais de ${formatMinutesLabelPt(
+                                    safeDraft.missed_dose_minutes
+                                  )} (dose perdida), o paciente precisará da sua aprovação para confirmar depois.`
+                                : 'Desativado: mesmo depois que a dose for considerada perdida, o paciente ainda pode confirmar sozinho sem validação.'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            disabled={readOnly}
+                            aria-checked={safeDraft.require_confirm_after_missed}
+                            onClick={() =>
+                              updateDraft((prev) => ({
+                                ...prev,
+                                require_confirm_after_missed: !prev.require_confirm_after_missed,
+                              }))
+                            }
+                            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors ${
+                              readOnly ? 'cursor-not-allowed opacity-70' : ''
+                            } ${
+                              safeDraft.require_confirm_after_missed
+                                ? 'bg-amber-500 border-amber-400'
+                                : 'bg-slate-700 border-slate-600'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                safeDraft.require_confirm_after_missed ? 'translate-x-6' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Regra 3: Exigir aprovação para desfazer dose */}
+                      <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="text-sm font-bold text-white">
+                              Exigir aprovação para desfazer dose tomada?
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              Evita que o paciente desmarque por engano uma medicação já registrada no dia.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            disabled={readOnly}
+                            aria-checked={safeDraft.require_confirm_undo}
+                            onClick={() =>
+                              updateDraft((prev) => ({
+                                ...prev,
+                                require_confirm_undo: !prev.require_confirm_undo,
+                              }))
+                            }
+                            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors ${
+                              readOnly ? 'cursor-not-allowed opacity-70' : ''
+                            } ${
+                              safeDraft.require_confirm_undo
+                                ? 'bg-blue-600 border-blue-500'
+                                : 'bg-slate-700 border-slate-600'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                safeDraft.require_confirm_undo ? 'translate-x-6' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Regra 4: Janela de Dose Perdida */}
+                      <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 space-y-3">
+                        <div className="space-y-1">
+                          <div className="text-sm font-bold text-white">
+                            Prazo para considerar a dose como &ldquo;Perdida&rdquo;
+                          </div>
+                          <p className="text-xs text-slate-400 leading-relaxed">
+                            Após esse tempo sem registro no dia, a dose sai do card principal do paciente e fica marcada como perdida.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {MISSED_DOSE_WINDOW_OPTIONS.map((opt) => {
+                            const activeOpt = Number(safeDraft.missed_dose_minutes) === opt.minutes;
+                            return (
+                              <button
+                                key={opt.minutes}
+                                type="button"
+                                disabled={readOnly}
+                                onClick={() =>
+                                  updateDraft((prev) => ({ ...prev, missed_dose_minutes: opt.minutes }))
+                                }
+                                className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                                  readOnly ? 'cursor-not-allowed' : ''
+                                } ${
+                                  activeOpt
+                                    ? 'bg-blue-600 text-white border-blue-500'
+                                    : 'bg-[#131d31] text-slate-300 border-slate-700 hover:border-slate-600'
+                                }`}
+                              >
+                                {opt.shortLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {!isMissedWindowPreset && (
+                          <p className="text-[11px] text-blue-300 tabular-nums">
+                            Prazo personalizado ativo: {safeDraft.missed_dose_minutes} min ({formatMinutesLabelPt(safeDraft.missed_dose_minutes)})
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bloco 2: Notificações ao Cuidador + Estoque + Prescrição */}
+                    <div className="space-y-5">
+                      <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-5">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-300 flex items-center justify-center shrink-0">
+                            <Bell size={18} className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h2 className="text-base font-bold text-white">Alertas e Notificações ao Cuidador</h2>
+                            <p className="text-xs text-slate-400">
+                              Defina em quanto tempo deseja ser notificado se o paciente não tomar o remédio.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Regra 5: Período para notificar se não tomou */}
+                        <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-bold text-white">
+                              Notificar cuidador se não tomar após:
+                            </div>
+                            <span className="px-2.5 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 text-xs font-bold tabular-nums">
+                              {formatMinutesLabelPt(safeDraft.overdue_notify_minutes)}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {OVERDUE_NOTIFY_OPTIONS.map((opt) => {
+                              const activeOpt = Number(safeDraft.overdue_notify_minutes) === opt.minutes;
+                              return (
+                                <button
+                                  key={opt.minutes}
+                                  type="button"
+                                  disabled={readOnly}
+                                  onClick={() =>
+                                    updateDraft((prev) => ({
+                                      ...prev,
+                                      overdue_notify_minutes: opt.minutes,
+                                    }))
+                                  }
+                                  className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                                    readOnly ? 'cursor-not-allowed' : ''
+                                  } ${
+                                    activeOpt
+                                      ? opt.minutes === 0
+                                        ? 'bg-rose-600 text-white border-rose-500'
+                                        : 'bg-blue-600 text-white border-blue-500'
+                                      : 'bg-[#131d31] text-slate-300 border-slate-700 hover:border-slate-600'
+                                  }`}
+                                >
+                                  {opt.shortLabel}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="pt-1 flex flex-wrap items-center gap-2.5">
+                            <label htmlFor={`${idPrefix}-custom-overdue-mins`} className="text-[11px] text-slate-400">
+                              Ou informe em minutos (0 = desativado):
+                            </label>
+                            <input
+                              id={`${idPrefix}-custom-overdue-mins`}
+                              type="number"
+                              disabled={readOnly}
+                              min={0}
+                              max={720}
+                              step={5}
+                              value={safeDraft.overdue_notify_minutes}
+                              onChange={(e) => {
+                                const val = Math.max(0, Math.min(720, Math.round(Number(e.target.value) || 0)));
+                                updateDraft((prev) => ({ ...prev, overdue_notify_minutes: val }));
+                              }}
+                              className="w-24 bg-[#131d31] border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold tabular-nums focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                            />
+                            {!isOverduePreset && (
+                              <span className="text-[11px] text-blue-300">Personalizado</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Regra 6: Alerta de uso SOS */}
+                        <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="text-sm font-bold text-white">
+                                Alertar uso de medicamento SOS
+                              </div>
+                              <p className="text-xs text-slate-400 leading-relaxed">
+                                Envia uma notificação imediata quando o paciente registrar uma dose eventual (SOS).
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              disabled={readOnly}
+                              aria-checked={safeDraft.notify_sos_usage}
+                              onClick={() =>
+                                updateDraft((prev) => ({
+                                  ...prev,
+                                  notify_sos_usage: !prev.notify_sos_usage,
+                                }))
+                              }
+                              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors ${
+                                readOnly ? 'cursor-not-allowed opacity-70' : ''
+                              } ${
+                                safeDraft.notify_sos_usage
+                                  ? 'bg-blue-600 border-blue-500'
+                                  : 'bg-slate-700 border-slate-600'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                  safeDraft.notify_sos_usage ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Regra 7: Alerta de estoque baixo */}
+                        <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="text-sm font-bold text-white">
+                                Alertar estoque baixo de medicamentos
+                              </div>
+                              <p className="text-xs text-slate-400 leading-relaxed">
+                                Avisa você quando algum medicamento atingir o limite mínimo de unidades.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              disabled={readOnly}
+                              aria-checked={safeDraft.notify_low_stock}
+                              onClick={() =>
+                                updateDraft((prev) => ({
+                                  ...prev,
+                                  notify_low_stock: !prev.notify_low_stock,
+                                }))
+                              }
+                              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors ${
+                                readOnly ? 'cursor-not-allowed opacity-70' : ''
+                              } ${
+                                safeDraft.notify_low_stock
+                                  ? 'bg-blue-600 border-blue-500'
+                                  : 'bg-slate-700 border-slate-600'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                  safeDraft.notify_low_stock ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          {safeDraft.notify_low_stock && (
+                            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+                              <label htmlFor={`${idPrefix}-low-stock-threshold`} className="text-xs text-slate-300">
+                                Avisar quando restarem até (unidades):
+                              </label>
+                              <div className="flex items-center gap-2">
+                                {[3, 5, 7, 10].map((qty) => (
+                                  <button
+                                    key={qty}
+                                    type="button"
+                                    disabled={readOnly}
+                                    onClick={() =>
+                                      updateDraft((prev) => ({ ...prev, low_stock_threshold: qty }))
+                                    }
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors tabular-nums ${
+                                      readOnly ? 'cursor-not-allowed' : ''
+                                    } ${
+                                      Number(safeDraft.low_stock_threshold) === qty
+                                        ? 'bg-emerald-600 text-white border-emerald-500'
+                                        : 'bg-[#131d31] text-slate-300 border-slate-700 hover:border-slate-600'
+                                    }`}
+                                  >
+                                    {qty}
+                                  </button>
+                                ))}
+                                <input
+                                  id={`${idPrefix}-low-stock-threshold`}
+                                  type="number"
+                                  disabled={readOnly}
+                                  min={1}
+                                  max={50}
+                                  value={safeDraft.low_stock_threshold}
+                                  onChange={(e) => {
+                                    const v = Math.max(1, Math.min(50, Math.round(Number(e.target.value) || 1)));
+                                    updateDraft((prev) => ({ ...prev, low_stock_threshold: v }));
+                                  }}
+                                  className="w-16 bg-[#131d31] border border-slate-700 rounded-lg px-2 py-1 text-xs text-white font-semibold tabular-nums focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bloco 3: Controle de Prescrição */}
+                      <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center shrink-0">
+                            <Pill size={18} className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h2 className="text-base font-bold text-white">Controle da Prescrição no App</h2>
+                            <p className="text-xs text-slate-400">
+                              Defina se o paciente pode alterar a lista de medicamentos pelo próprio celular.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="text-sm font-bold text-white">
+                                Permitir paciente adicionar, editar ou excluir medicamentos
+                              </div>
+                              <p className="text-xs text-slate-400 leading-relaxed">
+                                {safeDraft.allow_patient_med_edit
+                                  ? 'Permitido: o paciente pode gerenciar remédios no app Android normalmente.'
+                                  : 'Bloqueado: apenas você (cuidador) altera receitas e horários; o paciente visualiza os medicamentos e confirma doses.'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              disabled={readOnly}
+                              aria-checked={safeDraft.allow_patient_med_edit}
+                              onClick={() =>
+                                updateDraft((prev) => ({
+                                  ...prev,
+                                  allow_patient_med_edit: !prev.allow_patient_med_edit,
+                                }))
+                              }
+                              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors ${
+                                readOnly ? 'cursor-not-allowed opacity-70' : ''
+                              } ${
+                                safeDraft.allow_patient_med_edit
+                                  ? 'bg-emerald-600 border-emerald-500'
+                                  : 'bg-rose-600 border-rose-500'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                  safeDraft.allow_patient_med_edit ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            };
+
+            return (
+              <div className="space-y-5 sm:space-y-6">
+                {/* Cabeçalho Principal + Seletor de Escopo (Paciente / Global / Grupos) */}
+                <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-5">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5 min-w-0">
+                      <div className="w-11 h-11 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 flex items-center justify-center shrink-0">
+                        <SlidersHorizontal size={20} className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                            Painel de Gerenciamento
+                          </h1>
+                          <span className="px-2.5 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-semibold tabular-nums">
+                            {patientsOverview.length} paciente(s) · {globalCount} Global · {groupCount} em Grupos · {customCount} Individual
+                          </span>
+                        </div>
+                        <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+                          Administre regras clínicas no padrão <strong className="text-slate-200">Global</strong> (toda a clínica), por <strong className="text-slate-200">Grupos / Alas</strong> ou de forma <strong className="text-slate-200">Individual</strong> por paciente.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Seletor de Escopo em 3 Abas */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-1.5 rounded-xl bg-[#0b1120] border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setManagementScope('patient')}
+                      className={`min-h-[44px] flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition-all ${
+                        managementScope === 'patient'
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      }`}
+                    >
+                      <User size={15} className="w-4 h-4 shrink-0" />
+                      <span className="truncate">
+                        Por Paciente{selectedPatient ? `: ${selectedPatient.nome.split(' ')[0]}` : ''}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManagementScope('global')}
+                      className={`min-h-[44px] flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition-all ${
+                        managementScope === 'global'
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      }`}
+                    >
+                      <Building2 size={15} className="w-4 h-4 shrink-0" />
+                      <span>Global (Toda a Clínica)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManagementScope('groups')}
+                      className={`min-h-[44px] flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition-all ${
+                        managementScope === 'groups'
+                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      }`}
+                    >
+                      <Layers size={15} className="w-4 h-4 shrink-0" />
+                      <span>Grupos / Alas ({careGroups.length})</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* ================= ESCOPO 1: POR PACIENTE ================= */}
+                {managementScope === 'patient' && (
+                  <>
+                    {!selectedPatient ? (
+                      <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-6 sm:p-8 text-center space-y-4">
+                        <div className="w-11 h-11 rounded-2xl bg-blue-500/15 border border-blue-500/30 text-blue-300 flex items-center justify-center mx-auto">
+                          <Users size={20} className="w-5 h-5" />
+                        </div>
+                        <div className="space-y-1 max-w-md mx-auto">
+                          <h2 className="text-base font-bold text-white">Nenhum paciente selecionado</h2>
+                          <p className="text-xs text-slate-400 leading-relaxed">
+                            Vincule ou selecione um paciente para ajustar regras individuais, ou já deixe configuradas as regras <strong>Globais</strong> e os <strong>Grupos</strong> da sua clínica.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setManagementScope('global')}
+                            className="min-h-[40px] px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors"
+                          >
+                            Configurar Padrão Global
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setManagementScope('groups')}
+                            className="min-h-[40px] px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                          >
+                            Gerenciar Grupos
+                          </button>
+                        </div>
+                      </div>
+                    ) : (() => {
+                      const activeMode = normalizeConfigMode(patientConfigModeDraft, 'global');
+                      const selectedPatientGroup = careGroups.find((g) => g.id === patientGroupIdDraft) || null;
+                      const previewInheritedDraft =
+                        activeMode === 'group'
+                          ? normalizeCareSettings(selectedPatientGroup?.settings || globalCareSettings)
+                          : normalizeCareSettings(globalCareSettings);
+                      const isCustomMode = activeMode === 'custom';
+                      const effectiveRuleDraft = isCustomMode ? careSettingsDraft : previewInheritedDraft;
+
+                      const hasPatientUnsavedChanges =
+                        activeMode !== normalizeConfigMode(patientRuleMeta.config_mode, 'global') ||
+                        (activeMode === 'group' && (patientGroupIdDraft || null) !== (patientRuleMeta.group_id || null)) ||
+                        (isCustomMode &&
+                          JSON.stringify(normalizeCareSettings(careSettingsDraft)) !==
+                            JSON.stringify(normalizeCareSettings(careSettings)));
+
+                      return (
+                        <div className="space-y-5">
+                          {/* Cartão de Herança / Modo do Paciente */}
+                          <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-4">
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h2 className="text-base sm:text-lg font-bold text-white">
+                                    Paciente: {selectedPatient.nome}
+                                  </h2>
+                                  <span
+                                    className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold border ${
+                                      patientRuleMeta.config_mode === 'group'
+                                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                        : patientRuleMeta.config_mode === 'custom'
+                                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                                        : 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300'
+                                    }`}
+                                  >
+                                    {patientRuleMeta.config_mode === 'group'
+                                      ? `Em grupo: ${patientRuleMeta.group_name || 'Grupo'}`
+                                      : patientRuleMeta.config_mode === 'custom'
+                                      ? 'Regras individuais'
+                                      : 'Herdando Global'}
+                                  </span>
+                                  {hasPatientUnsavedChanges && (
+                                    <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-semibold">
+                                      Alterações não salvas
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-400">
+                                  Escolha se este paciente segue o padrão geral da clínica, participa de um grupo ou possui regras próprias.
+                                </p>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                                {isCustomMode && (
+                                  <button
+                                    type="button"
+                                    disabled={careSettingsSaving || careSettingsLoading}
+                                    onClick={() => setCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS })}
+                                    className="min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                                  >
+                                    <RotateCcw size={14} className="w-3.5 h-3.5" />
+                                    <span>Restaurar Padrão</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={careSettingsSaving || careSettingsLoading}
+                                  onClick={() => handleSaveCareSettings()}
+                                  className="min-h-[42px] inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-blue-600/20 transition-colors"
+                                >
+                                  {careSettingsSaving ? (
+                                    <Loader2 size={14} className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Save size={14} className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>
+                                    {careSettingsSaving
+                                      ? 'Salvando...'
+                                      : isCustomMode
+                                      ? 'Salvar Regras Individuais'
+                                      : 'Aplicar Modo ao Paciente'}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* 3 opções de modo para o paciente */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setPatientConfigModeDraft('global')}
+                                className={`text-left p-4 rounded-xl border transition-all space-y-1.5 ${
+                                  activeMode === 'global'
+                                    ? 'bg-indigo-600/15 border-indigo-500 ring-1 ring-indigo-500/40'
+                                    : 'bg-[#0b1120] border-slate-800 hover:border-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white">
+                                    <Globe size={14} className="w-3.5 h-3.5 text-indigo-400" />
+                                    <span>Herdar Global</span>
+                                  </span>
+                                  {activeMode === 'global' && (
+                                    <CheckCircle2 size={15} className="w-4 h-4 text-indigo-400 shrink-0" />
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                  Aplica automaticamente as regras globais configuradas para toda a clínica.
+                                </p>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPatientConfigModeDraft('group');
+                                  if (!patientGroupIdDraft && careGroups.length > 0) {
+                                    setPatientGroupIdDraft(careGroups[0].id);
+                                  }
+                                }}
+                                className={`text-left p-4 rounded-xl border transition-all space-y-1.5 ${
+                                  activeMode === 'group'
+                                    ? 'bg-emerald-600/15 border-emerald-500 ring-1 ring-emerald-500/40'
+                                    : 'bg-[#0b1120] border-slate-800 hover:border-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white">
+                                    <Layers size={14} className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Seguir Grupo</span>
+                                  </span>
+                                  {activeMode === 'group' && (
+                                    <CheckCircle2 size={15} className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                  Compartilha as regras de uma ala ou perfil de cuidado da clínica.
+                                </p>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (activeMode !== 'custom') {
+                                    setCareSettingsDraft(previewInheritedDraft);
+                                  }
+                                  setPatientConfigModeDraft('custom');
+                                }}
+                                className={`text-left p-4 rounded-xl border transition-all space-y-1.5 ${
+                                  activeMode === 'custom'
+                                    ? 'bg-amber-600/15 border-amber-500 ring-1 ring-amber-500/40'
+                                    : 'bg-[#0b1120] border-slate-800 hover:border-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white">
+                                    <SlidersHorizontal size={14} className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>Personalizado</span>
+                                  </span>
+                                  {activeMode === 'custom' && (
+                                    <CheckCircle2 size={15} className="w-4 h-4 text-amber-400 shrink-0" />
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                  Regras exclusivas configuradas individualmente para {selectedPatient.nome.split(' ')[0]}.
+                                </p>
+                              </button>
+                            </div>
+
+                            {/* Seletor do grupo quando Seguir Grupo está ativo */}
+                            {activeMode === 'group' && (
+                              <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                {careGroups.length > 0 ? (
+                                  <>
+                                    <div className="flex-1 min-w-0 space-y-1">
+                                      <label htmlFor="patient-group-select" className="text-xs font-bold text-white block">
+                                        Grupo vinculado a este paciente:
+                                      </label>
+                                      <select
+                                        id="patient-group-select"
+                                        value={patientGroupIdDraft}
+                                        onChange={(e) => setPatientGroupIdDraft(e.target.value)}
+                                        className="w-full sm:max-w-sm bg-[#131d31] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-emerald-500"
+                                      >
+                                        <option value="">Selecione um grupo...</option>
+                                        {careGroups.map((grp) => (
+                                          <option key={grp.id} value={grp.id}>
+                                            {grp.name} ({grp.member_count} paciente{grp.member_count === 1 ? '' : 's'})
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {selectedPatientGroup && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            selectGroupForEdit(selectedPatientGroup);
+                                            setManagementScope('groups');
+                                          }}
+                                          className="min-h-[38px] px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition-colors"
+                                        >
+                                          Editar Grupo
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setCareSettingsDraft(previewInheritedDraft);
+                                          setPatientConfigModeDraft('custom');
+                                        }}
+                                        className="min-h-[38px] px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-semibold text-amber-300 transition-colors"
+                                      >
+                                        Personalizar só para {selectedPatient.nome.split(' ')[0]}
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <p className="text-xs text-slate-400">
+                                      Você ainda não criou nenhum grupo na clínica. Crie seu primeiro grupo para vincular pacientes por ala ou perfil.
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        startCreateNewGroup();
+                                        setManagementScope('groups');
+                                      }}
+                                      className="min-h-[40px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0"
+                                    >
+                                      <Plus size={14} className="w-3.5 h-3.5" />
+                                      <span>Criar Primeiro Grupo</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Atalhos quando Herdar Global está ativo */}
+                            {activeMode === 'global' && (
+                              <div className="p-3.5 rounded-xl bg-[#0b1120] border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                                <span className="text-xs text-slate-400">
+                                  Qualquer alteração no escopo <strong className="text-indigo-300">Global</strong> atualiza este paciente automaticamente.
+                                </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setManagementScope('global')}
+                                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 text-xs font-semibold transition-colors"
+                                  >
+                                    Editar Regras Globais
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCareSettingsDraft(previewInheritedDraft);
+                                      setPatientConfigModeDraft('custom');
+                                    }}
+                                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-semibold transition-colors"
+                                  >
+                                    Personalizar só para {selectedPatient.nome.split(' ')[0]}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Regras efetivas / editáveis do paciente */}
+                          {renderRuleEditor({
+                            draft: effectiveRuleDraft,
+                            onChangeDraft: setCareSettingsDraft,
+                            idPrefix: 'patient',
+                            readOnly: !isCustomMode,
+                          })}
+
+                          {/* Barra de Salvamento no Rodapé */}
+                          <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="text-xs text-slate-400 leading-relaxed">
+                              {hasPatientUnsavedChanges ? (
+                                <span className="text-amber-300 font-semibold">
+                                  Há alterações pendentes para {selectedPatient.nome}. Clique em salvar para aplicar.
+                                </span>
+                              ) : (
+                                <span>
+                                  Configurações sincronizadas para <strong className="text-slate-200">{selectedPatient.nome}</strong>. Alterações ficam registradas na auditoria.
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={careSettingsSaving || careSettingsLoading}
+                              onClick={() => handleSaveCareSettings()}
+                              className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold transition-colors whitespace-nowrap"
+                            >
+                              {careSettingsSaving ? (
+                                <Loader2 size={15} className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Save size={15} className="w-4 h-4" />
+                              )}
+                              <span>
+                                {careSettingsSaving
+                                  ? 'Salvando...'
+                                  : isCustomMode
+                                  ? 'Salvar Configurações Individuais'
+                                  : 'Confirmar Modo do Paciente'}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
+
+                {/* ================= ESCOPO 2: GLOBAL (TODA A CLÍNICA) ================= */}
+                {managementScope === 'global' && (() => {
+                  const hasGlobalUnsaved =
+                    JSON.stringify(normalizeCareSettings(globalCareSettingsDraft)) !==
+                    JSON.stringify(normalizeCareSettings(globalCareSettings));
+
+                  return (
+                    <div className="space-y-5">
+                      <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-4">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h2 className="text-base sm:text-lg font-bold text-white">
+                                Regras Globais da Clínica
+                              </h2>
+                              <span
+                                className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold border ${
+                                  globalCareSettings.is_configured
+                                    ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300'
+                                    : 'bg-slate-800 border-slate-700 text-slate-300'
+                                }`}
+                              >
+                                {globalCareSettings.is_configured ? 'Personalizado na clínica' : 'Padrão MediCare'}
+                              </span>
+                              {hasGlobalUnsaved && (
+                                <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-semibold">
+                                  Alterações não salvas
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              Aplicado automaticamente a todos os pacientes em modo <strong className="text-slate-200">Global</strong> ({globalCount}) e a novos pacientes vinculados.
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={careSettingsSaving}
+                              onClick={() => setGlobalCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS })}
+                              className="min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                            >
+                              <RotateCcw size={14} className="w-3.5 h-3.5" />
+                              <span>Restaurar Padrão</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={careSettingsSaving}
+                              onClick={() => handleSaveGlobalCareSettings({ applyToAll: false })}
+                              className="min-h-[42px] inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-indigo-600/20 transition-colors"
+                            >
+                              {careSettingsSaving ? (
+                                <Loader2 size={14} className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Save size={14} className="w-3.5 h-3.5" />
+                              )}
+                              <span>{careSettingsSaving ? 'Salvando...' : 'Salvar Padrão Global'}</span>
+                            </button>
+                            {patientsOverview.length > 0 && (
+                              <button
+                                type="button"
+                                disabled={careSettingsSaving}
+                                onClick={() => setConfirmApplyGlobalToAll((v) => !v)}
+                                className="min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold transition-colors"
+                              >
+                                <Users size={14} className="w-3.5 h-3.5" />
+                                <span>Aplicar a Todos ({patientsOverview.length})</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {confirmApplyGlobalToAll && (
+                          <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-start gap-2.5 text-xs text-amber-200 leading-relaxed">
+                              <AlertTriangle size={16} className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                              <span>
+                                Isso vai sobrescrever o modo atual de <strong>todos os {patientsOverview.length} paciente(s)</strong> (inclusive os que estão em Grupos ou Personalizado) para seguirem estas regras Globais. Deseja confirmar?
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setConfirmApplyGlobalToAll(false)}
+                                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={careSettingsSaving}
+                                onClick={() => handleSaveGlobalCareSettings({ applyToAll: true })}
+                                className="min-h-[36px] px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold"
+                              >
+                                Confirmar para Todos
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Editor de Regras Globais */}
+                      {renderRuleEditor({
+                        draft: globalCareSettingsDraft,
+                        onChangeDraft: setGlobalCareSettingsDraft,
+                        idPrefix: 'global',
+                        readOnly: false,
+                      })}
+
+                      {/* Quadro de Pacientes da Clínica */}
+                      <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <h3 className="text-base font-bold text-white">Quadro de Pacientes da Clínica</h3>
+                            <p className="text-xs text-slate-400">
+                              Veja rapidamente qual regra cada paciente utiliza hoje e altere em um clique.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setManagementScope('groups')}
+                            className="self-start sm:self-auto min-h-[36px] px-3.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+                          >
+                            Gerenciar Grupos ({careGroups.length})
+                          </button>
+                        </div>
+
+                        {patientsOverview.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-4 text-center bg-[#0b1120] rounded-xl border border-slate-800">
+                            Nenhum paciente vinculado ainda. Quando um paciente for cadastrado ou vinculado, ele herdará automaticamente este padrão Global.
+                          </p>
+                        ) : (
+                          <div className="space-y-2.5">
+                            {patientsOverview.map((pat) => {
+                              const modeLabel =
+                                pat.config_mode === 'group'
+                                  ? `Grupo: ${pat.group_name || 'Sem nome'}`
+                                  : pat.config_mode === 'custom'
+                                  ? 'Individual'
+                                  : 'Global';
+                              return (
+                                <div
+                                  key={pat.patient_id}
+                                  className="p-3.5 rounded-xl bg-[#0b1120] border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3"
+                                >
+                                  <div className="min-w-0 space-y-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="text-sm font-bold text-white truncate">{pat.nome}</span>
+                                      <span
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                                          pat.config_mode === 'group'
+                                            ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                            : pat.config_mode === 'custom'
+                                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                                            : 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300'
+                                        }`}
+                                      >
+                                        {modeLabel}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">
+                                      {pat.relationship_label} · Atraso: {formatMinutesLabelPt(pat.settings.overdue_notify_minutes)} ·{' '}
+                                      {pat.settings.require_caregiver_confirm ? 'Exige aprovação' : 'Confirmação livre'}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                    <button
+                                      type="button"
+                                      disabled={careSettingsSaving || pat.config_mode === 'global'}
+                                      onClick={() => handleQuickAssignPatientMode(pat.patient_id, 'global')}
+                                      className={`min-h-[34px] px-3 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
+                                        pat.config_mode === 'global'
+                                          ? 'bg-indigo-600 text-white border-indigo-500'
+                                          : 'bg-[#131d31] text-slate-300 border-slate-700 hover:border-slate-600'
+                                      }`}
+                                    >
+                                      Global
+                                    </button>
+                                    {careGroups.length > 0 && (
+                                      <select
+                                        aria-label={`Vincular ${pat.nome} a grupo`}
+                                        disabled={careSettingsSaving}
+                                        value={pat.config_mode === 'group' ? pat.group_id || '' : ''}
+                                        onChange={(e) => {
+                                          if (e.target.value) {
+                                            handleQuickAssignPatientMode(pat.patient_id, 'group', e.target.value);
+                                          }
+                                        }}
+                                        className="min-h-[34px] bg-[#131d31] border border-slate-700 rounded-lg px-2.5 py-1 text-[11px] text-slate-200 font-semibold focus:outline-none focus:border-emerald-500"
+                                      >
+                                        <option value="">Mover para Grupo...</option>
+                                        {careGroups.map((grp) => (
+                                          <option key={grp.id} value={grp.id}>
+                                            Grupo: {grp.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedPatientId(pat.patient_id);
+                                        setPatientConfigModeDraft('custom');
+                                        setCareSettingsDraft(normalizeCareSettings(pat.settings));
+                                        setManagementScope('patient');
+                                      }}
+                                      className="min-h-[34px] px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-[11px] font-semibold transition-colors"
+                                    >
+                                      Personalizar
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ================= ESCOPO 3: GRUPOS / ALAS DA CLÍNICA ================= */}
+                {managementScope === 'groups' && (() => {
+                  const filteredGroupPatients = patientsOverview.filter((p) => {
+                    const q = groupMemberSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      String(p.nome || '').toLowerCase().includes(q) ||
+                      String(p.relationship_label || '').toLowerCase().includes(q)
+                    );
+                  });
+
+                  return (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                      {/* Coluna Esquerda: Lista de Grupos */}
+                      <div className="lg:col-span-4 bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 space-y-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <h2 className="text-base font-bold text-white">Grupos / Alas</h2>
+                            <p className="text-[11px] text-slate-400">
+                              Agrupe pacientes por ala, turno ou grau de dependência.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={startCreateNewGroup}
+                            className="min-h-[38px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0 transition-colors"
+                          >
+                            <Plus size={14} className="w-3.5 h-3.5" />
+                            <span>Novo Grupo</span>
+                          </button>
+                        </div>
+
+                        {careGroups.length === 0 ? (
+                          <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 text-center space-y-2">
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              Nenhum grupo criado ainda. Exemplos: <em>Ala A - Supervisão Total</em>, <em>Autônomos</em> ou <em>Turno Noite</em>.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5">
+                            {careGroups.map((grp) => {
+                              const isSelected = selectedGroupId === grp.id;
+                              return (
+                                <button
+                                  key={grp.id}
+                                  type="button"
+                                  onClick={() => selectGroupForEdit(grp)}
+                                  className={`w-full text-left p-3.5 rounded-xl border transition-all space-y-1.5 ${
+                                    isSelected
+                                      ? 'bg-emerald-600/15 border-emerald-500 ring-1 ring-emerald-500/40'
+                                      : 'bg-[#0b1120] border-slate-800 hover:border-slate-700'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="inline-flex items-center gap-2 min-w-0">
+                                      <span
+                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                        style={{ backgroundColor: grp.color || '#3b82f6' }}
+                                      />
+                                      <span className="text-xs font-bold text-white truncate">{grp.name}</span>
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-[10px] font-semibold tabular-nums shrink-0">
+                                      {grp.member_count} pac.
+                                    </span>
+                                  </div>
+                                  {grp.description && (
+                                    <p className="text-[11px] text-slate-400 line-clamp-2">{grp.description}</p>
+                                  )}
+                                  <p className="text-[10px] text-slate-500">
+                                    Atraso: {formatMinutesLabelPt(grp.settings?.overdue_notify_minutes)} ·{' '}
+                                    {grp.settings?.require_caregiver_confirm ? 'Exige validação' : 'Confirmação livre'}
+                                  </p>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Coluna Direita: Editor do Grupo + Membros + Regras */}
+                      <div className="lg:col-span-8 space-y-5">
+                        {!selectedGroupId ? (
+                          <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-8 text-center space-y-4">
+                            <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center mx-auto">
+                              <Layers size={22} className="w-5 h-5" />
+                            </div>
+                            <div className="space-y-1 max-w-md mx-auto">
+                              <h3 className="text-base font-bold text-white">
+                                {careGroups.length > 0 ? 'Selecione um grupo para editar' : 'Crie o primeiro grupo da clínica'}
+                              </h3>
+                              <p className="text-xs text-slate-400 leading-relaxed">
+                                Cada grupo possui um conjunto próprio de regras clínicas aplicadas automaticamente a todos os pacientes vinculados a ele.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={startCreateNewGroup}
+                              className="min-h-[42px] inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+                            >
+                              <Plus size={15} className="w-4 h-4" />
+                              <span>Criar Grupo Agora</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-5 sm:p-6 space-y-5">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <h3 className="text-base sm:text-lg font-bold text-white">
+                                  {selectedGroupId === 'new' ? 'Novo Grupo de Pacientes' : `Editar Grupo: ${groupDraft.name || 'Grupo'}`}
+                                </h3>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {groupDraft.id && (
+                                    <button
+                                      type="button"
+                                      disabled={careSettingsSaving}
+                                      onClick={() =>
+                                        setConfirmDeleteGroupId((prev) => (prev === groupDraft.id ? null : groupDraft.id))
+                                      }
+                                      className="min-h-[38px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition-colors"
+                                    >
+                                      <Trash2 size={14} className="w-3.5 h-3.5" />
+                                      <span>Excluir Grupo</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={careSettingsSaving}
+                                    onClick={handleSaveCareGroup}
+                                    className="min-h-[40px] inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition-colors"
+                                  >
+                                    {careSettingsSaving ? (
+                                      <Loader2 size={14} className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Save size={14} className="w-3.5 h-3.5" />
+                                    )}
+                                    <span>{careSettingsSaving ? 'Salvando...' : 'Salvar Grupo e Membros'}</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              {groupDraft.id && confirmDeleteGroupId === groupDraft.id && (
+                                <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                  <span className="text-xs text-rose-200">
+                                    Ao excluir este grupo, os {groupDraft.patientIds.length} paciente(s) vinculados voltarão ao modo <strong>Global</strong>. Confirmar exclusão?
+                                  </span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteGroupId(null)}
+                                      className="min-h-[34px] px-3 py-1 rounded-lg bg-slate-800 text-slate-300 text-xs font-semibold"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={careSettingsSaving}
+                                      onClick={() => handleDeleteCareGroup(groupDraft.id)}
+                                      className="min-h-[34px] px-4 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold"
+                                    >
+                                      Confirmar Exclusão
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Campos de Identificação e Cor do Grupo */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                  <label htmlFor="group-name-input" className="text-xs font-semibold text-slate-300 block">
+                                    Nome do Grupo / Ala *
+                                  </label>
+                                  <input
+                                    id="group-name-input"
+                                    type="text"
+                                    maxLength={80}
+                                    value={groupDraft.name}
+                                    onChange={(e) => setGroupDraft((prev) => ({ ...prev, name: e.target.value }))}
+                                    placeholder="Ex: Ala A - Idosos Dependentes"
+                                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                                  />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <label htmlFor="group-desc-input" className="text-xs font-semibold text-slate-300 block">
+                                    Descrição (opcional)
+                                  </label>
+                                  <input
+                                    id="group-desc-input"
+                                    type="text"
+                                    maxLength={180}
+                                    value={groupDraft.description}
+                                    onChange={(e) => setGroupDraft((prev) => ({ ...prev, description: e.target.value }))}
+                                    placeholder="Ex: Pacientes acamados ou com risco de atraso"
+                                    className="w-full bg-[#0b1120] border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2.5">
+                                <span className="text-xs font-semibold text-slate-300 mr-1">Cor de destaque:</span>
+                                {GROUP_COLORS.map((clr) => {
+                                  const selectedClr = groupDraft.color === clr.id;
+                                  return (
+                                    <button
+                                      key={clr.id}
+                                      type="button"
+                                      title={clr.label}
+                                      onClick={() => setGroupDraft((prev) => ({ ...prev, color: clr.id }))}
+                                      className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                                        selectedClr ? 'border-white scale-110' : 'border-transparent opacity-80 hover:opacity-100'
+                                      }`}
+                                      style={{ backgroundColor: clr.id }}
+                                    />
+                                  );
+                                })}
+                              </div>
+
+                              {/* Checklist de Pacientes no Grupo */}
+                              <div className="p-4 rounded-xl bg-[#0b1120] border border-slate-800 space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                  <div>
+                                    <div className="text-sm font-bold text-white">
+                                      Pacientes neste Grupo ({groupDraft.patientIds.length} selecionado{groupDraft.patientIds.length === 1 ? '' : 's'})
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">
+                                      Marque os pacientes que devem seguir as regras deste grupo.
+                                    </p>
+                                  </div>
+                                  {patientsOverview.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setGroupDraft((prev) => ({
+                                            ...prev,
+                                            patientIds: Array.from(
+                                              new Set([
+                                                ...prev.patientIds,
+                                                ...filteredGroupPatients.map((p) => p.patient_id),
+                                              ])
+                                            ),
+                                          }))
+                                        }
+                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200"
+                                      >
+                                        Marcar Todos
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setGroupDraft((prev) => ({ ...prev, patientIds: [] }))}
+                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-400"
+                                      >
+                                        Limpar
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {patientsOverview.length > 0 ? (
+                                  <>
+                                    <div className="relative">
+                                      <Search size={14} className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                      <input
+                                        type="text"
+                                        value={groupMemberSearch}
+                                        onChange={(e) => setGroupMemberSearch(e.target.value)}
+                                        placeholder="Buscar paciente por nome..."
+                                        className="w-full bg-[#131d31] border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                                      />
+                                    </div>
+                                    <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                                      {filteredGroupPatients.map((pat) => {
+                                        const isMember = groupDraft.patientIds.includes(pat.patient_id);
+                                        const otherGroupBadge =
+                                          pat.config_mode === 'group' && pat.group_id !== groupDraft.id
+                                            ? `No grupo: ${pat.group_name}`
+                                            : pat.config_mode === 'custom'
+                                            ? 'Hoje: Individual'
+                                            : 'Hoje: Global';
+                                        return (
+                                          <button
+                                            key={pat.patient_id}
+                                            type="button"
+                                            onClick={() =>
+                                              setGroupDraft((prev) => ({
+                                                ...prev,
+                                                patientIds: isMember
+                                                  ? prev.patientIds.filter((id) => id !== pat.patient_id)
+                                                  : [...prev.patientIds, pat.patient_id],
+                                              }))
+                                            }
+                                            className={`w-full text-left px-3 py-2.5 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
+                                              isMember
+                                                ? 'bg-emerald-600/15 border-emerald-500/50 text-white'
+                                                : 'bg-[#131d31] border-slate-800 text-slate-300 hover:border-slate-700'
+                                            }`}
+                                          >
+                                            <span className="inline-flex items-center gap-2.5 min-w-0">
+                                              {isMember ? (
+                                                <CheckSquare size={16} className="w-4 h-4 text-emerald-400 shrink-0" />
+                                              ) : (
+                                                <Square size={16} className="w-4 h-4 text-slate-500 shrink-0" />
+                                              )}
+                                              <span className="text-xs font-semibold truncate">{pat.nome}</span>
+                                            </span>
+                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800/90 text-slate-300 shrink-0">
+                                              {otherGroupBadge}
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
+                                      {filteredGroupPatients.length === 0 && (
+                                        <p className="text-xs text-slate-500 text-center py-3">
+                                          Nenhum paciente encontrado para &ldquo;{groupMemberSearch}&rdquo;.
+                                        </p>
+                                      )}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <p className="text-xs text-slate-400">
+                                    Você pode salvar este grupo agora e vincular pacientes depois conforme forem cadastrados.
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Editor de Regras do Grupo */}
+                            {renderRuleEditor({
+                              draft: groupDraft.settings,
+                              onChangeDraft: (updater) =>
+                                setGroupDraft((prev) => {
+                                  const nextSettings =
+                                    typeof updater === 'function'
+                                      ? updater(normalizeCareSettings(prev.settings))
+                                      : normalizeCareSettings(updater);
+                                  return { ...prev, settings: nextSettings };
+                                }),
+                              idPrefix: 'group',
+                              readOnly: false,
+                            })}
+
+                            {/* Rodapé Salvar Grupo */}
+                            <div className="bg-[#131d31] rounded-2xl border border-slate-800/90 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <span className="text-xs text-slate-400">
+                                Todas as alterações aplicadas a este grupo valerão para os <strong className="text-slate-200">{groupDraft.patientIds.length}</strong> paciente(s) selecionados.
+                              </span>
+                              <button
+                                type="button"
+                                disabled={careSettingsSaving}
+                                onClick={handleSaveCareGroup}
+                                className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold transition-colors whitespace-nowrap"
+                              >
+                                {careSettingsSaving ? (
+                                  <Loader2 size={15} className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Save size={15} className="w-4 h-4" />
+                                )}
+                                <span>{careSettingsSaving ? 'Salvando...' : 'Salvar Grupo e Regras'}</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
 
           {/* TAB 3: MEDICAMENTOS & ESTOQUE */}
           {currentTab === 'meds' && selectedPatient && (
@@ -4243,6 +6209,18 @@ export default function CuidadorWebPage() {
             <div className="space-y-2">
               <button
                 type="button"
+                onClick={() => navigateToTab('management')}
+                className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-100 text-sm font-semibold"
+              >
+                <span className="flex items-center gap-3">
+                  <SlidersHorizontal size={18} className="w-4 h-4 text-indigo-300" />
+                  Painel de Gerenciamento
+                </span>
+                <ChevronRight size={16} className="w-4 h-4 text-indigo-300" />
+              </button>
+
+              <button
+                type="button"
                 onClick={() => navigateToTab('reports')}
                 className="w-full min-h-[50px] flex items-center justify-between px-4 py-3 rounded-xl bg-[#0b1120] border border-slate-800 text-slate-100 text-sm font-semibold"
               >
@@ -5357,12 +7335,12 @@ export default function CuidadorWebPage() {
             type="button"
             onClick={() => setShowMobileMenuSheet(true)}
             className={`relative flex flex-col items-center justify-center gap-1 min-h-[52px] px-1 rounded-xl transition-colors focus:outline-none ${
-              currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about' || showMobileMenuSheet
+              currentTab === 'management' || currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about' || showMobileMenuSheet
                 ? 'text-blue-400 font-semibold'
                 : 'text-slate-400 hover:text-slate-200 font-medium'
             }`}
           >
-            {(currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about') && (
+            {(currentTab === 'management' || currentTab === 'reports' || currentTab === 'audit' || currentTab === 'about') && (
               <span className="absolute top-1 w-5 h-0.5 rounded-full bg-blue-400" aria-hidden="true" />
             )}
             <LayoutGrid size={20} className="w-5 h-5 shrink-0" />

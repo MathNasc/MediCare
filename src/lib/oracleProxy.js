@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { getPgPool, isPgConnectionNetworkError } from './oraclePostgres';
 import {
   ACCESS_COOKIE_NAME,
   CSRF_COOKIE_NAME,
@@ -16,9 +17,63 @@ import {
 export const ORACLE_BACKEND_URL =
   process.env.ORACLE_BACKEND_URL || 'http://144.22.160.191:3009';
 
+const PG_UNREACHABLE_CACHE_MS = 60_000;
+let pgUnreachableUntil = 0;
+
+export function canUseOracleHttpFallback(req) {
+  if (!ORACLE_BACKEND_URL) return false;
+  if (req?.headers?.get?.('x-medicare-proxy-hop') === '1') return false;
+  try {
+    const upstreamHost = new URL(ORACLE_BACKEND_URL).host.toLowerCase();
+    const reqHost = String(req?.headers?.get?.('host') || '').trim().toLowerCase();
+    if (reqHost && reqHost === upstreamHost) return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Tenta abrir conexão direta com o PostgreSQL quando configurado.
+ * Se o banco ainda não estiver configurado OU a porta 5432 estiver bloqueada por firewall
+ * (como em ambientes de preview externos ao servidor Oracle), faz fallback automático
+ * para a API HTTP oficial na Oracle Cloud, evitando timeouts de 8s.
+ */
+export async function connectPgOrFallback(req, targetPath) {
+  if (Date.now() < pgUnreachableUntil && canUseOracleHttpFallback(req)) {
+    return {
+      client: null,
+      fallbackResponse: await forwardToOracleBackend(req, targetPath),
+    };
+  }
+
+  const pool = getPgPool();
+  if (!pool) {
+    return {
+      client: null,
+      fallbackResponse: await forwardToOracleBackend(req, targetPath),
+    };
+  }
+
+  try {
+    const client = await pool.connect();
+    pgUnreachableUntil = 0;
+    return { client, fallbackResponse: null };
+  } catch (err) {
+    if (isPgConnectionNetworkError(err) && canUseOracleHttpFallback(req)) {
+      pgUnreachableUntil = Date.now() + PG_UNREACHABLE_CACHE_MS;
+      return {
+        client: null,
+        fallbackResponse: await forwardToOracleBackend(req, targetPath),
+      };
+    }
+    throw err;
+  }
+}
+
 /**
  * Encaminha a requisição HTTP para o backend MediCare ativo na Oracle Cloud
- * quando o banco de dados PostgreSQL local não estiver configurado no ambiente atual,
+ * quando o banco de dados PostgreSQL local não estiver configurado ou acessível no ambiente atual,
  * preservando cookies HttpOnly, proteção CSRF e compatibilidade com Bearer Android.
  */
 export async function forwardToOracleBackend(req, targetPath) {
@@ -67,11 +122,12 @@ export async function forwardToOracleBackend(req, targetPath) {
     }
   });
 
-  // Preserva host original para validação de Origin no upstream quando aplicável
+  // Preserva host original e evita loop de proxy no upstream
   const origHost = req.headers.get('x-forwarded-host') || req.headers.get('host');
   if (origHost) {
     headers.set('x-forwarded-host', origHost);
   }
+  headers.set('x-medicare-proxy-hop', '1');
 
   // Converte cookie HttpOnly em Bearer ao encaminhar para o backend Oracle
   if (!headers.has('authorization') && accessCookie) {

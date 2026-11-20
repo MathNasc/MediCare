@@ -109,6 +109,7 @@ public class MainActivity extends Activity {
     private JSONArray contacts;
     private JSONArray doseLogs;
     private JSONArray pendingDoseRequests = new JSONArray();
+    private volatile String pendingRejectedFeedback = null;
     private JSONArray events;
     private JSONArray aiMessages = new JSONArray();
     private JSONArray meds;
@@ -167,6 +168,7 @@ public class MainActivity extends Activity {
     private String chatInputDraft = "";
     private String profileSubView = "main";
     private String selectedStockMedId = "";
+    private JSONObject careSettings = createDefaultCareSettings();
     private String lastSyncTimestamp = "Sincronização automática ativa";
     private boolean backendStatusOk = true;
     private volatile boolean hasUnsyncedLocalChanges = false;
@@ -1871,6 +1873,101 @@ public class MainActivity extends Activity {
         return p;
     }
 
+    private static JSONObject createDefaultCareSettings() {
+        JSONObject cfg = new JSONObject();
+        try {
+            cfg.put("overdue_notify_minutes", 60);
+            cfg.put("require_caregiver_confirm", true);
+            cfg.put("require_confirm_after_missed", true);
+            cfg.put("require_confirm_undo", true);
+            cfg.put("missed_dose_minutes", 180);
+            cfg.put("allow_patient_med_edit", true);
+            cfg.put("notify_low_stock", true);
+            cfg.put("low_stock_threshold", 5);
+            cfg.put("notify_sos_usage", true);
+        } catch (Exception ignored) {}
+        return cfg;
+    }
+
+    private JSONObject sanitizeCareSettings(JSONObject raw) {
+        JSONObject def = createDefaultCareSettings();
+        if (raw == null) return def;
+        try {
+            int overdueMins = Math.max(0, Math.min(720, raw.optInt("overdue_notify_minutes", 60)));
+            def.put("overdue_notify_minutes", overdueMins);
+            def.put("require_caregiver_confirm", raw.optBoolean("require_caregiver_confirm", true));
+            def.put("require_confirm_after_missed", raw.optBoolean("require_confirm_after_missed", true));
+            def.put("require_confirm_undo", raw.optBoolean("require_confirm_undo", true));
+            int missedMins = Math.max(30, Math.min(720, raw.optInt("missed_dose_minutes", 180)));
+            def.put("missed_dose_minutes", missedMins);
+            def.put("allow_patient_med_edit", raw.optBoolean("allow_patient_med_edit", true));
+            def.put("notify_low_stock", raw.optBoolean("notify_low_stock", true));
+            int stockThresh = Math.max(1, Math.min(50, raw.optInt("low_stock_threshold", 5)));
+            def.put("low_stock_threshold", stockThresh);
+            def.put("notify_sos_usage", raw.optBoolean("notify_sos_usage", true));
+        } catch (Exception ignored) {}
+        return def;
+    }
+
+    private int getCareMissedDoseMinutes() {
+        if (this.careSettings == null) return 180;
+        return Math.max(30, Math.min(720, this.careSettings.optInt("missed_dose_minutes", 180)));
+    }
+
+    private int getCareLowStockThreshold() {
+        if (this.careSettings == null) return 5;
+        return Math.max(1, Math.min(50, this.careSettings.optInt("low_stock_threshold", 5)));
+    }
+
+    private boolean isCareSettingPatientMedEditAllowed() {
+        if (!isPatientProfileRole()) return true;
+        if (this.careSettings == null) return true;
+        return this.careSettings.optBoolean("allow_patient_med_edit", true);
+    }
+
+    private boolean isDoseConsideredMissedLocal(String dateStr, String horaStr) {
+        try {
+            int limitMins = getCareMissedDoseMinutes();
+            String today = todayIso();
+            String normDate = (dateStr != null && dateStr.length() >= 10) ? dateStr.substring(0, 10) : today;
+            int nowMins = Calendar.getInstance().get(Calendar.HOUR_OF_DAY) * 60 + Calendar.getInstance().get(Calendar.MINUTE);
+            int schedMins = 480;
+            if (horaStr != null && horaStr.contains(":")) {
+                String[] parts = horaStr.trim().split(":");
+                schedMins = Integer.parseInt(parts[0].trim()) * 60 + Integer.parseInt(parts[1].trim());
+            }
+            if (normDate.compareTo(today) < 0) {
+                if (normDate.equals(yesterdayIso())) {
+                    int diffAcrossMidnight = (1440 - schedMins) + nowMins;
+                    return diffAcrossMidnight > limitMins;
+                }
+                return true;
+            }
+            if (normDate.equals(today)) {
+                return (nowMins - schedMins) > limitMins;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean shouldRequireCaregiverApprovalForAction(String dateStr, String horaStr, String targetStatus) {
+        if (!isPatientProfileRole()) return false;
+        JSONObject cfg = this.careSettings != null ? this.careSettings : createDefaultCareSettings();
+        String normTarget = normalizeDoseStatusLocal(targetStatus);
+        if ("pendente".equals(normTarget)) {
+            return cfg.optBoolean("require_confirm_undo", true);
+        }
+        if (cfg.optBoolean("require_caregiver_confirm", true)) {
+            return true;
+        }
+        if (isDoseConsideredMissedLocal(dateStr, horaStr)) {
+            return cfg.optBoolean("require_confirm_after_missed", true);
+        }
+        return false;
+    }
+
     private void resetActiveSessionData() {
         this.profile = createEmptyProfile();
         this.meds = new JSONArray();
@@ -1886,6 +1983,7 @@ public class MainActivity extends Activity {
         this.professionals = new JSONArray();
         this.caregivers = new JSONArray();
         this.aiMessages = new JSONArray();
+        this.careSettings = createDefaultCareSettings();
         this.onboardingStep = 0;
         this.activeTab = "home";
         this.profileSubView = "main";
@@ -1957,6 +2055,7 @@ public class MainActivity extends Activity {
             snap.put("caregivers", this.caregivers != null ? new JSONArray(this.caregivers.toString()) : new JSONArray());
             snap.put("ai_messages", this.aiMessages != null ? new JSONArray(this.aiMessages.toString()) : new JSONArray());
             snap.put("pending_dose_requests", this.pendingDoseRequests != null ? new JSONArray(this.pendingDoseRequests.toString()) : new JSONArray());
+            snap.put("care_settings", this.careSettings != null ? new JSONObject(this.careSettings.toString()) : createDefaultCareSettings());
             snap.put("onboarding_completed", this.prefs.getBoolean("onboarding_completed", false));
             this.prefs.edit().putString("user_snapshot_" + emailKey, snap.toString()).apply();
         } catch (Exception ignored) {}
@@ -1992,6 +2091,7 @@ public class MainActivity extends Activity {
             this.caregivers = snap.optJSONArray("caregivers") != null ? snap.optJSONArray("caregivers") : new JSONArray();
             this.aiMessages = snap.optJSONArray("ai_messages") != null ? snap.optJSONArray("ai_messages") : new JSONArray();
             this.pendingDoseRequests = snap.optJSONArray("pending_dose_requests") != null ? snap.optJSONArray("pending_dose_requests") : new JSONArray();
+            this.careSettings = sanitizeCareSettings(snap.optJSONObject("care_settings"));
             sanitizeAllInMemoryData();
             deduplicateStockMovements();
             boolean snapOnboard = snap.optBoolean("onboarding_completed", true) || this.meds.length() > 0;
@@ -2034,6 +2134,10 @@ public class MainActivity extends Activity {
                 this.caregivers = new JSONArray(this.prefs.getString("caregivers", "[]"));
                 this.aiMessages = new JSONArray(this.prefs.getString("ai_messages", "[]"));
                 this.pendingDoseRequests = new JSONArray(this.prefs.getString("pending_dose_requests", "[]"));
+                String rawCareCfg = this.prefs.getString("care_settings", null);
+                this.careSettings = (rawCareCfg != null && !rawCareCfg.isEmpty())
+                    ? sanitizeCareSettings(new JSONObject(rawCareCfg))
+                    : createDefaultCareSettings();
                 sanitizeAllInMemoryData();
                 deduplicateStockMovements();
 
@@ -2085,6 +2189,7 @@ public class MainActivity extends Activity {
             .putString("caregivers", this.caregivers.toString())
             .putString("ai_messages", this.aiMessages.toString())
             .putString("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests.toString() : "[]")
+            .putString("care_settings", (this.careSettings != null ? this.careSettings : createDefaultCareSettings()).toString())
             .commit();
         if (this.isLoggedIn) {
             saveUserSnapshot();
@@ -2260,8 +2365,8 @@ public class MainActivity extends Activity {
                                     String[] p = h.split(":");
                                     hMins = Integer.parseInt(p[0].trim()) * 60 + Integer.parseInt(p[1].trim());
                                 } catch (Exception ignored) {}
-                                // After 3 hours (180 minutes), dose is considered missed ("Perdida"), not pending
-                                if ((nowMins - hMins) <= 180) {
+                                // After missed_dose_minutes (default 180), dose is considered missed ("Perdida"), not pending
+                                if ((nowMins - hMins) <= getCareMissedDoseMinutes()) {
                                     count++;
                                 }
                             }
@@ -2275,11 +2380,12 @@ public class MainActivity extends Activity {
 
     private int getCriticalStockCount() {
         int count = 0;
+        int lowThreshold = getCareLowStockThreshold();
         for (int i = 0; i < this.meds.length(); i++) {
             JSONObject med = this.meds.optJSONObject(i);
             if (med != null && med.optBoolean("ativo", true)) {
                 int q = getMedStock(med);
-                if (q <= 5) {
+                if (q <= lowThreshold) {
                     count++;
                 }
             }
@@ -4239,6 +4345,39 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    private boolean hasPendingCaregiverConfirmRequest(JSONObject doseItem) {
+        if (doseItem == null) return false;
+        JSONObject med = doseItem.optJSONObject("med");
+        if (med == null) return false;
+        String dateStr = doseItem.optString("date", todayIso());
+        String horaStr = doseItem.optString("hora", "");
+        JSONObject req = getPendingCaregiverRequest(med.optString("id"), dateStr, horaStr);
+        if (req == null) return false;
+        String actionType = req.optString("action_type", "").trim().toLowerCase(Locale.ROOT);
+        String reqTarget = normalizeDoseStatusLocal(req.optString("requested_status", "confirmed"));
+        return !"undo_dose".equals(actionType) && !"pendente".equals(reqTarget);
+    }
+
+    private long parseServerIsoToMillis(String raw) {
+        if (raw == null) return 0L;
+        String s = raw.trim();
+        if (s.isEmpty()) return 0L;
+        try {
+            String clean = s.replaceAll("\\.[0-9]+", "");
+            if (clean.endsWith("Z")) {
+                clean = clean.substring(0, clean.length() - 1);
+            } else if (clean.matches(".*[+-]\\d{2}:\\d{2}$")) {
+                clean = clean.substring(0, clean.length() - 6);
+            }
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+            sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Date parsed = sdf.parse(clean);
+            return parsed != null ? parsed.getTime() : 0L;
+        } catch (Exception ignored) {
+            return 0L;
+        }
+    }
+
     private void submitCaregiverDoseRequest(JSONObject med, String dateStr, String horaStr, String targetStatus, String reasonText, int qtyUsed) {
         try {
             if (med == null) return;
@@ -4290,6 +4429,9 @@ public class MainActivity extends Activity {
 
             cleanedReqs.put(reqObj);
             this.pendingDoseRequests = cleanedReqs;
+            if (!isUndo) {
+                DoseAlarmReceiver.cancelSnoozeForDose(this, medId, normHora);
+            }
 
             saveAll();
             render();
@@ -4297,7 +4439,7 @@ public class MainActivity extends Activity {
                 this,
                 isUndo
                     ? "📩 Solicitação de desfazimento enviada ao cuidador para validação!"
-                    : "📩 Solicitação de confirmação enviada ao cuidador para validação!",
+                    : "📩 Solicitação enviada ao cuidador! Avançando para a próxima dose.",
                 1
             ).show();
         } catch (Exception ignored) {}
@@ -4549,7 +4691,7 @@ public class MainActivity extends Activity {
             if (liveMed != null) {
                 med = liveMed;
             }
-            if (isPatientProfileRole()) {
+            if (shouldRequireCaregiverApprovalForAction(dateStr, horaStr, targetStatus)) {
                 showCaregiverDoseRequestDialog(med, dateStr, horaStr, targetStatus);
                 return;
             }
@@ -4770,7 +4912,7 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "⏰ Lembrete de " + med.optString("nome") + " agendado para daqui a 15 minutos", 0).show();
                 return;
             }
-            if (isPatientProfileRole()) {
+            if (shouldRequireCaregiverApprovalForAction(dateStr, horaStr, "tomado")) {
                 showCaregiverDoseRequestDialog(med, dateStr, horaStr, "tomado");
                 return;
             }
@@ -4819,7 +4961,7 @@ public class MainActivity extends Activity {
     }
 
     private void showUndoConfirmDialog(final JSONObject med, final String dateStr, final String horaStr) {
-        if (isPatientProfileRole()) {
+        if (shouldRequireCaregiverApprovalForAction(dateStr, horaStr, "pendente")) {
             showCaregiverDoseRequestDialog(med, dateStr, horaStr, "pendente");
             return;
         }
@@ -4914,11 +5056,14 @@ public class MainActivity extends Activity {
         int criticalCount = 0;
         final ArrayList<JSONObject> doseItems = new ArrayList<>();
 
+        final int missedLimitMins = getCareMissedDoseMinutes();
+        final int lowStockThresh = getCareLowStockThreshold();
+
         for (int i = 0; i < this.meds.length(); i++) {
             JSONObject med = this.meds.optJSONObject(i);
             if (med != null && med.optBoolean("ativo", true)) {
                 int stock = getMedStock(med);
-                if (stock <= 5) {
+                if (stock <= lowStockThresh) {
                     if (criticalCount > 0) criticalSb.append(" · ");
                     criticalSb.append(med.optString("nome")).append(" (").append(stock).append(")");
                     criticalCount++;
@@ -4927,7 +5072,7 @@ public class MainActivity extends Activity {
                 if (!"sos".equals(tType)) {
                     JSONArray horarios = med.optJSONArray("horarios");
                     if (horarios != null) {
-                        // 2a. Check yesterday's late-night unconfirmed doses within 3-hour (180 min) grace window across midnight
+                        // 2a. Check yesterday's late-night unconfirmed doses within configured grace window across midnight
                         if (wasMedActiveOnDate(med, yesterday)) {
                             for (int j = 0; j < horarios.length(); j++) {
                                 String hYd = horarios.optString(j, "08:00");
@@ -4939,7 +5084,7 @@ public class MainActivity extends Activity {
                                         hYdMins = Integer.parseInt(p[0]) * 60 + Integer.parseInt(p[1]);
                                     } catch (Exception ignored) {}
                                     int diffAcrossMidnight = (1440 - hYdMins) + nowMins;
-                                    if (diffAcrossMidnight > 0 && diffAcrossMidnight <= 180) {
+                                    if (diffAcrossMidnight > 0 && diffAcrossMidnight <= missedLimitMins) {
                                         try {
                                             JSONObject ydItem = new JSONObject();
                                             ydItem.put("med", med);
@@ -4955,7 +5100,7 @@ public class MainActivity extends Activity {
                             }
                         }
 
-                        // 2b. Today's scheduled doses (3-hour / 180-minute limit before becoming "missed" / Perdida)
+                        // 2b. Today's scheduled doses (missed_dose_minutes limit before becoming "missed" / Perdida)
                         for (int j = 0; j < horarios.length(); j++) {
                             String h = horarios.optString(j, "08:00");
                             String rawSt = getDoseStatus(med.optString("id"), today, h);
@@ -4971,7 +5116,7 @@ public class MainActivity extends Activity {
                                 uiSt = "missed";
                             } else {
                                 int diff = nowMins - hMins;
-                                if (diff > 180) {
+                                if (diff > missedLimitMins) {
                                     uiSt = "missed";
                                     DoseAlarmReceiver.cancelSnoozeForDose(this, med.optString("id"), h);
                                 } else if (diff > 30) {
@@ -5134,36 +5279,49 @@ public class MainActivity extends Activity {
         }
 
         // 4. NextDoseHero (only doses within the 3h window or upcoming; >3h overdue becomes "missed" / Perdida and advances to the next dose)
+        // Doses with an active caregiver confirmation request yield the Hero card to the next dose; if rejected before becoming missed, they return here.
         JSONObject nextDose = null;
-        // Priority 1: Doses due right now ("pending")
+        // Priority 1: Doses due right now ("pending") without an active caregiver confirmation request
         for (int i = 0; i < doseItems.size(); i++) {
             JSONObject d = doseItems.get(i);
-            if ("pending".equals(d.optString("status"))) {
+            if ("pending".equals(d.optString("status")) && !hasPendingCaregiverConfirmRequest(d)) {
                 nextDose = d;
                 break;
             }
         }
-        // Priority 2: Overdue unconfirmed doses within the 3-hour window ("late")
+        // Priority 2: Overdue unconfirmed doses within the 3-hour window ("late") without an active caregiver confirmation request
         if (nextDose == null) {
             for (int i = 0; i < doseItems.size(); i++) {
                 JSONObject d = doseItems.get(i);
-                if ("late".equals(d.optString("status"))) {
+                if ("late".equals(d.optString("status")) && !hasPendingCaregiverConfirmRequest(d)) {
                     nextDose = d;
                     break;
                 }
             }
         }
-        // Priority 3: Upcoming doses ("soon" or "upcoming")
+        // Priority 3: Upcoming doses ("soon" or "upcoming") without an active caregiver confirmation request
         if (nextDose == null) {
             for (int i = 0; i < doseItems.size(); i++) {
                 JSONObject d = doseItems.get(i);
                 String st = d.optString("status");
-                if ("soon".equals(st) || "upcoming".equals(st)) {
+                if (("soon".equals(st) || "upcoming".equals(st)) && !hasPendingCaregiverConfirmRequest(d)) {
                     nextDose = d;
                     break;
                 }
             }
         }
+        // Priority 4: Fallback if every remaining non-confirmed dose of the day is awaiting caregiver validation
+        if (nextDose == null) {
+            for (int i = 0; i < doseItems.size(); i++) {
+                JSONObject d = doseItems.get(i);
+                String st = d.optString("status");
+                if ("pending".equals(st) || "late".equals(st) || "soon".equals(st) || "upcoming".equals(st)) {
+                    nextDose = d;
+                    break;
+                }
+            }
+        }
+        // Priority 5: Confirmed doses when the whole day is completed
         if (nextDose == null && !doseItems.isEmpty()) {
             for (int i = 0; i < doseItems.size(); i++) {
                 if ("confirmed".equals(doseItems.get(i).optString("status"))) {
@@ -5475,9 +5633,14 @@ public class MainActivity extends Activity {
                 boolean isPendingDose = "pending".equals(dStatus);
                 boolean isSoonDose = "soon".equals(dStatus);
 
-                int stColor = isConfirmed ? this.cSuccess : ((isMissed || isLateDose) ? this.cDanger : ((isPendingDose || isSoonDose) ? this.cWarning : this.cTextLight));
-                String stLabel = isSosItem ? "🆘 Uso SOS • Tomado" : (dIsYesterday ? "Ontem • Pendente" : (isConfirmed ? "Tomado" : (isLateDose ? "Atrasado" : (isPendingDose ? "Agora" : (isMissed ? "Perdida" : (isSoonDose ? "Em breve" : "Agendado"))))));
-                String stIcon = isConfirmed ? "✓" : (isMissed ? "✕" : (isLateDose ? "!" : (isPendingDose ? "●" : "○")));
+                JSONObject tlRowPendingReq = (!isConfirmed && !isMissed)
+                    ? getPendingCaregiverRequest(dMed.optString("id"), dDate, dHora)
+                    : null;
+                boolean isAwaitingValidation = tlRowPendingReq != null;
+
+                int stColor = isConfirmed ? this.cSuccess : (isAwaitingValidation ? this.cWarning : ((isMissed || isLateDose) ? this.cDanger : ((isPendingDose || isSoonDose) ? this.cWarning : this.cTextLight)));
+                String stLabel = isSosItem ? "🆘 Uso SOS • Tomado" : (isAwaitingValidation ? "⏳ Em validação" : (dIsYesterday ? "Ontem • Pendente" : (isConfirmed ? "Tomado" : (isLateDose ? "Atrasado" : (isPendingDose ? "Agora" : (isMissed ? "Perdida" : (isSoonDose ? "Em breve" : "Agendado")))))));
+                String stIcon = isConfirmed ? "✓" : (isAwaitingValidation ? "⏳" : (isMissed ? "✕" : (isLateDose ? "!" : (isPendingDose ? "●" : "○"))));
 
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(0);
@@ -5792,21 +5955,52 @@ public class MainActivity extends Activity {
         titleWrap.addView(subTitleTv);
         headerRow.addView(titleWrap);
 
-        TextView addBtn = new TextView(this);
-        addBtn.setText("＋ Novo");
-        addBtn.setTextColor(-1);
-        addBtn.setTextSize(sp(14.0f));
-        addBtn.setTypeface(null, 1);
-        addBtn.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
-        addBtn.setPadding(dp(18), dp(10), dp(18), dp(10));
-        addBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showMedModal(null, -1);
-            }
-        });
-        headerRow.addView(addBtn);
+        final boolean canPatientEditMeds = isCareSettingPatientMedEditAllowed();
+        if (canPatientEditMeds) {
+            TextView addBtn = new TextView(this);
+            addBtn.setText("＋ Novo");
+            addBtn.setTextColor(-1);
+            addBtn.setTextSize(sp(14.0f));
+            addBtn.setTypeface(null, 1);
+            addBtn.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
+            addBtn.setPadding(dp(18), dp(10), dp(18), dp(10));
+            addBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMedModal(null, -1);
+                }
+            });
+            headerRow.addView(addBtn);
+        } else {
+            TextView lockBadge = new TextView(this);
+            lockBadge.setText("🔒 Via cuidador");
+            lockBadge.setTextColor(this.cTextMuted);
+            lockBadge.setTextSize(sp(11.5f));
+            lockBadge.setTypeface(null, 1);
+            lockBadge.setBackground(shape(this.cSurfaceHover, 12, this.cBorder, 1));
+            lockBadge.setPadding(dp(12), dp(8), dp(12), dp(8));
+            headerRow.addView(lockBadge);
+        }
         linearLayout.addView(headerRow);
+
+        if (!canPatientEditMeds) {
+            LinearLayout lockBanner = new LinearLayout(this);
+            lockBanner.setOrientation(0);
+            lockBanner.setGravity(16);
+            lockBanner.setBackground(shape(Color.parseColor("#1A3B82F6"), 14, Color.parseColor("#4D3B82F6"), 1));
+            lockBanner.setPadding(dp(14), dp(11), dp(14), dp(11));
+            LinearLayout.LayoutParams lbLp = new LinearLayout.LayoutParams(-1, -2);
+            lbLp.bottomMargin = dp(14);
+            lockBanner.setLayoutParams(lbLp);
+
+            TextView lockTv = new TextView(this);
+            lockTv.setText("🔒 Prescrição gerenciada pelo cuidador: somente seu cuidador pode adicionar, editar ou excluir medicamentos.");
+            lockTv.setTextColor(this.isDarkMode ? Color.parseColor("#93C5FD") : Color.parseColor("#1D4ED8"));
+            lockTv.setTextSize(sp(12.0f));
+            lockTv.setTypeface(null, 1);
+            lockBanner.addView(lockTv);
+            linearLayout.addView(lockBanner);
+        }
 
         // 1. Primary Filter Row: Por Tipo de Tratamento (Todos | Contínuo | Temporário | SOS)
         TextView typeFilterLbl = new TextView(this);
@@ -6143,21 +6337,23 @@ public class MainActivity extends Activity {
                 emptyCard.addView(btnShowAll);
             }
 
-            TextView eBtn = new TextView(this);
-            eBtn.setText("+ Adicionar medicamento");
-            eBtn.setTextColor(-1);
-            eBtn.setTextSize(sp(14.5f));
-            eBtn.setTypeface(null, 1);
-            eBtn.setGravity(17);
-            eBtn.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
-            eBtn.setPadding(dp(24), dp(13), dp(24), dp(13));
-            eBtn.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showMedModal(null, -1);
-                }
-            });
-            emptyCard.addView(eBtn);
+            if (canPatientEditMeds) {
+                TextView eBtn = new TextView(this);
+                eBtn.setText("+ Adicionar medicamento");
+                eBtn.setTextColor(-1);
+                eBtn.setTextSize(sp(14.5f));
+                eBtn.setTypeface(null, 1);
+                eBtn.setGravity(17);
+                eBtn.setBackground(gradientShape(Color.parseColor("#3B82F6"), Color.parseColor("#6366F1"), 13));
+                eBtn.setPadding(dp(24), dp(13), dp(24), dp(13));
+                eBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showMedModal(null, -1);
+                    }
+                });
+                emptyCard.addView(eBtn);
+            }
             linearLayout.addView(emptyCard);
             return;
         }
@@ -6273,36 +6469,38 @@ public class MainActivity extends Activity {
             titleCol.addView(subBadgeRow);
             topRow.addView(titleCol);
 
-            // Edit & Delete buttons
-            TextView editBtn = new TextView(this);
-            editBtn.setText("✏️");
-            editBtn.setTextSize(sp(13.0f));
-            editBtn.setGravity(17);
-            editBtn.setBackground(shape(this.cSurfaceHover, 10, this.cBorder, 1));
-            LinearLayout.LayoutParams ebLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-            ebLp.rightMargin = dp(6);
-            editBtn.setLayoutParams(ebLp);
-            editBtn.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showMedModal(med, medIndex);
-                }
-            });
-            topRow.addView(editBtn);
+            // Edit & Delete buttons (only when allowed by caregiver management settings)
+            if (canPatientEditMeds) {
+                TextView editBtn = new TextView(this);
+                editBtn.setText("✏️");
+                editBtn.setTextSize(sp(13.0f));
+                editBtn.setGravity(17);
+                editBtn.setBackground(shape(this.cSurfaceHover, 10, this.cBorder, 1));
+                LinearLayout.LayoutParams ebLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+                ebLp.rightMargin = dp(6);
+                editBtn.setLayoutParams(ebLp);
+                editBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showMedModal(med, medIndex);
+                    }
+                });
+                topRow.addView(editBtn);
 
-            TextView delBtn = new TextView(this);
-            delBtn.setText("🗑");
-            delBtn.setTextSize(sp(13.0f));
-            delBtn.setGravity(17);
-            delBtn.setBackground(shape(Color.parseColor("#1AEF4444"), 10, Color.parseColor("#40EF4444"), 1));
-            delBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
-            delBtn.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showConfirmDeleteMedDialog(med, medIndex);
-                }
-            });
-            topRow.addView(delBtn);
+                TextView delBtn = new TextView(this);
+                delBtn.setText("🗑");
+                delBtn.setTextSize(sp(13.0f));
+                delBtn.setGravity(17);
+                delBtn.setBackground(shape(Color.parseColor("#1AEF4444"), 10, Color.parseColor("#40EF4444"), 1));
+                delBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+                delBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        showConfirmDeleteMedDialog(med, medIndex);
+                    }
+                });
+                topRow.addView(delBtn);
+            }
             col.addView(topRow);
 
             // Full-width Dosage + Unit line (never truncated!)
@@ -6359,7 +6557,8 @@ public class MainActivity extends Activity {
             botRow.setLayoutParams(brLp);
 
             int qty = getMedStock(med);
-            int stColor = qty <= 5 ? this.cDanger : (qty <= 10 ? this.cWarning : this.cSuccess);
+            int lowStockLimit = getCareLowStockThreshold();
+            int stColor = qty <= lowStockLimit ? this.cDanger : (qty <= (lowStockLimit * 2) ? this.cWarning : this.cSuccess);
             TextView stockPill = new TextView(this);
             stockPill.setText("📦 " + qty + " " + formatMedUnitPlural(qty, unitStr));
             stockPill.setTextColor(stColor);
@@ -6430,6 +6629,10 @@ public class MainActivity extends Activity {
     }
 
     private void showConfirmDeleteMedDialog(final JSONObject med, final int index) {
+        if (!isCareSettingPatientMedEditAllowed()) {
+            Toast.makeText(this, "🔒 Somente o cuidador pode excluir medicamentos", 1).show();
+            return;
+        }
         String msg = "Tem certeza que deseja excluir " + med.optString("nome") + "? O histórico de doses anteriores será mantido.";
         showStyledConfirmDialog("🗑 Excluir medicamento?", msg, "Excluir", "Cancelar", this.cDanger, new Runnable() {
             @Override
@@ -6494,7 +6697,9 @@ public class MainActivity extends Activity {
         box.addView(qtyInput);
 
         sv.addView(box);
-        String sosConfirmText = isPatientProfileRole() ? "📩 Solicitar ao Cuidador" : "Confirmar Uso SOS";
+        final boolean sosRequiresCaregiverApproval = isPatientProfileRole()
+            && (this.careSettings == null || this.careSettings.optBoolean("require_caregiver_confirm", true));
+        String sosConfirmText = sosRequiresCaregiverApproval ? "📩 Solicitar ao Cuidador" : "Confirmar Uso SOS";
         showStyledFormModal("🆘 Registrar Uso SOS — " + med.optString("nome"), sv, sosConfirmText, "Cancelar", this.cPrimary, new Runnable() {
             @Override
             public void run() {
@@ -6511,7 +6716,7 @@ public class MainActivity extends Activity {
                             synchronized (MainActivity.this.syncNetworkLock) {
                                 try {
                                     JSONObject targetMed = findLiveMed(liveTarget) != null ? findLiveMed(liveTarget) : liveTarget;
-                                    if (isPatientProfileRole()) {
+                                    if (sosRequiresCaregiverApproval) {
                                         String sosReason = mot.isEmpty() ? "Uso SOS solicitado pelo paciente" : ("Uso SOS: " + mot);
                                         submitCaregiverDoseRequest(targetMed, effectiveDate, h, "tomado", sosReason, qUsed);
                                         if (onAfterSave != null) onAfterSave.run();
@@ -6875,6 +7080,10 @@ public class MainActivity extends Activity {
     }
 
     private void showMedModal(final JSONObject jSONObject, final int i) {
+        if (!isCareSettingPatientMedEditAllowed()) {
+            Toast.makeText(this, "🔒 Somente o cuidador pode adicionar ou editar medicamentos", 1).show();
+            return;
+        }
         if (jSONObject != null) {
             showMedFormStepDialog(jSONObject, i, null, getMedType(jSONObject));
         } else {
@@ -10123,7 +10332,7 @@ public class MainActivity extends Activity {
                         @Override
                         public void onClick(View v) {
                             dlg.dismiss();
-                            if (isPatientProfileRole()) {
+                            if (shouldRequireCaregiverApprovalForAction(dateStr, scheduledHora, "tomado")) {
                                 showCaregiverDoseRequestDialog(m, dateStr, scheduledHora, "tomado");
                             } else {
                                 confirmWithZeroStockCheck(m, 1, new Runnable() {
@@ -16716,6 +16925,15 @@ public class MainActivity extends Activity {
                 changed = true;
             }
 
+            JSONObject remoteCareCfg = resp.optJSONObject("care_settings");
+            if (remoteCareCfg != null) {
+                JSONObject normalizedRemoteCfg = sanitizeCareSettings(remoteCareCfg);
+                if (this.careSettings == null || !normalizedRemoteCfg.toString().equals(this.careSettings.toString())) {
+                    this.careSettings = normalizedRemoteCfg;
+                    changed = true;
+                }
+            }
+
             return changed;
         } catch (Exception e) {
             return false;
@@ -16727,15 +16945,14 @@ public class MainActivity extends Activity {
             if (this.pendingDoseRequests == null) {
                 this.pendingDoseRequests = new JSONArray();
             }
-            Set<String> resolvedIds = new HashSet<>();
+            ArrayList<JSONObject> resolvedRemotes = new ArrayList<>();
             if (remoteApprovals != null) {
                 for (int i = 0; i < remoteApprovals.length(); i++) {
                     JSONObject ra = remoteApprovals.optJSONObject(i);
                     if (ra == null) continue;
-                    String rId = optCleanString(ra, "id", "").toLowerCase(Locale.ROOT);
                     String rSt = optCleanString(ra, "status", "pending").toLowerCase(Locale.ROOT);
-                    if (!rId.isEmpty() && (!"pending".equals(rSt) && !"pendente".equals(rSt))) {
-                        resolvedIds.add(rId);
+                    if (!"pending".equals(rSt) && !"pendente".equals(rSt)) {
+                        resolvedRemotes.add(ra);
                     }
                 }
             }
@@ -16744,14 +16961,51 @@ public class MainActivity extends Activity {
                 JSONObject req = this.pendingDoseRequests.optJSONObject(i);
                 if (req == null) continue;
                 String reqId = optCleanString(req, "id", "").toLowerCase(Locale.ROOT);
-                if (!reqId.isEmpty() && resolvedIds.contains(reqId)) {
-                    continue;
-                }
                 String mId = optCleanString(req, "med_id", "");
                 String d = optCleanString(req, "dose_date", optCleanString(req, "data", ""));
                 if (d.length() >= 10) d = d.substring(0, 10);
                 String h = optCleanString(req, "hora", optCleanString(req, "horario", ""));
                 if (h.length() >= 5 && h.charAt(2) == ':') h = h.substring(0, 5);
+                String reqActionType = optCleanString(req, "action_type", "").toLowerCase(Locale.ROOT);
+                long clientCreatedMs = req.optLong("created_at_ms", 0L);
+
+                JSONObject matchedResolved = null;
+                for (int j = 0; j < resolvedRemotes.size(); j++) {
+                    JSONObject ra = resolvedRemotes.get(j);
+                    String rId = optCleanString(ra, "id", "").toLowerCase(Locale.ROOT);
+                    boolean idMatch = !reqId.isEmpty() && reqId.equals(rId);
+
+                    String rmId = optCleanString(ra, "med_id", "");
+                    String rDate = optCleanString(ra, "dose_date", optCleanString(ra, "data", ""));
+                    if (rDate.length() >= 10) rDate = rDate.substring(0, 10);
+                    String rHora = optCleanString(ra, "hora", optCleanString(ra, "horario", ""));
+                    if (rHora.length() >= 5 && rHora.charAt(2) == ':') rHora = rHora.substring(0, 5);
+                    String rActionType = optCleanString(ra, "action_type", "").toLowerCase(Locale.ROOT);
+                    boolean slotMatch = !mId.isEmpty()
+                        && doesDoseLogMatchMed(ra, mId)
+                        && d.equals(rDate)
+                        && h.equals(rHora)
+                        && (reqActionType.isEmpty() || rActionType.isEmpty() || reqActionType.equals(rActionType));
+
+                    if (idMatch || slotMatch) {
+                        long serverUpdatedMs = parseServerIsoToMillis(optCleanString(ra, "updated_at", optCleanString(ra, "created_at", "")));
+                        if (clientCreatedMs > 0L && serverUpdatedMs > 0L && clientCreatedMs > (serverUpdatedMs + 5000L)) {
+                            continue;
+                        }
+                        matchedResolved = ra;
+                        break;
+                    }
+                }
+
+                if (matchedResolved != null) {
+                    String resolvedSt = optCleanString(matchedResolved, "status", "").toLowerCase(Locale.ROOT);
+                    if ("rejected".equals(resolvedSt) || "rejeitado".equals(resolvedSt)) {
+                        String medNome = optCleanString(req, "med_nome", optCleanString(matchedResolved, "med_nome", "Medicamento"));
+                        this.pendingRejectedFeedback = "⚠️ Solicitação recusada pelo cuidador: " + medNome + " (" + h + ")";
+                    }
+                    continue;
+                }
+
                 String reqTarget = normalizeDoseStatusLocal(req.optString("requested_status", "confirmed"));
                 String curDoseSt = getDoseStatus(mId, d, h);
                 if (reqTarget.equals(curDoseSt)) {
@@ -16934,6 +17188,10 @@ public class MainActivity extends Activity {
                     this.profile.put("id", returnedUserId);
                     this.prefs.edit().putString("profile", this.profile.toString()).apply();
                 }
+                JSONObject syncedCareCfg = jSONObject2.optJSONObject("care_settings");
+                if (syncedCareCfg != null) {
+                    this.careSettings = sanitizeCareSettings(syncedCareCfg);
+                }
                 final boolean optBoolean = (responseCode >= 200 && responseCode < 300) && jSONObject2.optBoolean("ok", z2);
                 final boolean noNewerLocalMutation = (this.localMutationVersion == syncVersionAtStart);
                 if (optBoolean && noNewerLocalMutation) {
@@ -16960,6 +17218,11 @@ public class MainActivity extends Activity {
                             if (pulledChanges && !("ai".equals(MainActivity.this.activeTab) && "chat".equals(MainActivity.this.aiSubView))) {
                                 MainActivity.this.render();
                             }
+                        }
+                        if (MainActivity.this.pendingRejectedFeedback != null) {
+                            String rejMsg = MainActivity.this.pendingRejectedFeedback;
+                            MainActivity.this.pendingRejectedFeedback = null;
+                            Toast.makeText(MainActivity.this, rejMsg, 1).show();
                         }
                         MainActivity.this.m22xc335e10a(optBoolean, format, z);
                     }
@@ -17010,6 +17273,11 @@ public class MainActivity extends Activity {
                                     MainActivity.this.scheduleAllMedicationAlarms();
                                     if (!("ai".equals(MainActivity.this.activeTab) && "chat".equals(MainActivity.this.aiSubView))) {
                                         MainActivity.this.render();
+                                    }
+                                    if (MainActivity.this.pendingRejectedFeedback != null) {
+                                        String rejMsg = MainActivity.this.pendingRejectedFeedback;
+                                        MainActivity.this.pendingRejectedFeedback = null;
+                                        Toast.makeText(MainActivity.this, rejMsg, 1).show();
                                     }
                                     if (notifyOnRestore && medsCountBefore == 0 && MainActivity.this.meds != null && MainActivity.this.meds.length() > 0) {
                                         Toast.makeText(MainActivity.this, "✓ Dados e medicamentos restaurados da nuvem!", 0).show();

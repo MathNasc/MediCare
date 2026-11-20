@@ -18,7 +18,9 @@ import {
   ensureOraclePostgresSchema,
   resetSchemaVerificationCache,
   REQUIRED_CORE_TABLES,
+  isPgConnectionNetworkError,
 } from '@/lib/oraclePostgres';
+import { canUseOracleHttpFallback, ORACLE_BACKEND_URL } from '@/lib/oracleProxy';
 
 function buildMockRequest({
   method = 'GET',
@@ -227,5 +229,33 @@ describe('Separação entre Conexão, Verificação de Versão e Migrações do 
     await expect(runDatabaseMigrations(mockClient, { authorized: false })).rejects.toThrow(
       /requer autorização explícita/i
     );
+  });
+});
+
+describe('Detecção de Rede PostgreSQL e Fallback Anti-Loop Oracle', () => {
+  it('identifica timeouts e falhas de rede PostgreSQL como erros elegíveis ao fallback', () => {
+    expect(isPgConnectionNetworkError(new Error('Connection terminated due to connection timeout'))).toBe(true);
+    expect(isPgConnectionNetworkError({ code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' })).toBe(true);
+    expect(isPgConnectionNetworkError({ code: 'ETIMEDOUT', message: 'timeout' })).toBe(true);
+    expect(isPgConnectionNetworkError({ code: '23505', message: 'duplicate key value' })).toBe(false);
+    expect(isPgConnectionNetworkError(null)).toBe(false);
+  });
+
+  it('impede loop quando a requisição já passou pelo proxy ou veio do próprio host Oracle upstream', () => {
+    const externalReq = buildMockRequest({
+      headers: { Host: 'localhost:3000' },
+    });
+    expect(canUseOracleHttpFallback(externalReq)).toBe(true);
+
+    const proxiedReq = buildMockRequest({
+      headers: { Host: 'localhost:3000', 'x-medicare-proxy-hop': '1' },
+    });
+    expect(canUseOracleHttpFallback(proxiedReq)).toBe(false);
+
+    const upstreamHost = new URL(ORACLE_BACKEND_URL).host;
+    const sameUpstreamReq = buildMockRequest({
+      headers: { Host: upstreamHost },
+    });
+    expect(canUseOracleHttpFallback(sameUpstreamReq)).toBe(false);
   });
 });

@@ -137,16 +137,8 @@ describe('caregiverNotifications', () => {
     const insertedLogs = [];
 
     // Escolhe um horário garantidamente >= 2h atrás em America/Sao_Paulo hoje
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    const spTime = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'America/Sao_Paulo',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(twoHoursAgo);
-    // Só executa a verificação do horário se ainda estiver no mesmo dia civil SP (>= 02:00 SP)
-    const [hh, mm] = spTime.split(':').map(Number);
-    const createdYesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const fixedNow = new Date('2026-11-19T14:00:00-03:00');
+    const createdYesterday = '2026-11-18T12:00:00.000Z';
 
     const mockClient = {
       query: jest.fn(async (sql, params) => {
@@ -171,7 +163,7 @@ describe('caregiverNotifications', () => {
                 user_id: '11111111-1111-4111-a111-111111111111',
                 nome: 'Hidantal',
                 dosagem: '100mg',
-                horarios: [hh >= 2 ? spTime : '00:01'],
+                horarios: ['12:00'],
                 dias_semana: [],
                 treatment_type: 'continuo',
                 start_date: null,
@@ -196,13 +188,15 @@ describe('caregiverNotifications', () => {
       }),
     };
 
-    const res = await checkOverdueDosesForCaregivers(mockClient);
+    const res = await checkOverdueDosesForCaregivers(mockClient, {
+      timeZone: 'America/Sao_Paulo',
+      now: fixedNow,
+    });
     expect(res.alertsCreated).toBe(1);
     expect(insertedNotifs.length).toBe(1);
     expect(insertedNotifs[0].sql).toContain("'atraso'");
     expect(insertedNotifs[0].params[2]).toContain('Hidantal');
     expect(insertedNotifs[0].params[3]).toContain('Marcela');
     expect(insertedLogs.length).toBe(1);
-    expect(mm).toBeGreaterThanOrEqual(0);
   });
 });

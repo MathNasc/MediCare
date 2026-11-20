@@ -22,6 +22,9 @@ export const OPTIONAL_COMPATIBILITY_TABLES = [
   'custom_medications',
   'notificacoes',
   'approval_requests',
+  'patient_care_settings',
+  'caregiver_global_settings',
+  'caregiver_patient_groups',
   'schema_migrations',
 ];
 
@@ -120,7 +123,95 @@ export const VERSIONED_MIGRATIONS = [
       )`,
     ],
   },
+  {
+    version: '04_caregiver_management_settings',
+    description: 'Tabela patient_care_settings para o painel de gerenciamento do cuidador',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS public.patient_care_settings (
+        patient_id uuid PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+        overdue_notify_minutes int NOT NULL DEFAULT 60,
+        require_caregiver_confirm boolean NOT NULL DEFAULT true,
+        require_confirm_after_missed boolean NOT NULL DEFAULT true,
+        require_confirm_undo boolean NOT NULL DEFAULT true,
+        missed_dose_minutes int NOT NULL DEFAULT 180,
+        allow_patient_med_edit boolean NOT NULL DEFAULT true,
+        notify_low_stock boolean NOT NULL DEFAULT true,
+        low_stock_threshold int NOT NULL DEFAULT 5,
+        notify_sos_usage boolean NOT NULL DEFAULT true,
+        updated_by uuid REFERENCES public.app_users(id) ON DELETE SET NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_patient_care_settings_updated ON public.patient_care_settings (updated_at DESC)`,
+    ],
+  },
+  {
+    version: '05_caregiver_groups_and_global_settings',
+    description: 'Suporte a regras globais do cuidador, grupos de pacientes e modo de heranca por paciente',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS public.caregiver_global_settings (
+        caregiver_id uuid PRIMARY KEY REFERENCES public.app_users(id) ON DELETE CASCADE,
+        overdue_notify_minutes int NOT NULL DEFAULT 60,
+        require_caregiver_confirm boolean NOT NULL DEFAULT true,
+        require_confirm_after_missed boolean NOT NULL DEFAULT true,
+        require_confirm_undo boolean NOT NULL DEFAULT true,
+        missed_dose_minutes int NOT NULL DEFAULT 180,
+        allow_patient_med_edit boolean NOT NULL DEFAULT true,
+        notify_low_stock boolean NOT NULL DEFAULT true,
+        low_stock_threshold int NOT NULL DEFAULT 5,
+        notify_sos_usage boolean NOT NULL DEFAULT true,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS public.caregiver_patient_groups (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        caregiver_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        description text,
+        color text DEFAULT '#3b82f6',
+        overdue_notify_minutes int NOT NULL DEFAULT 60,
+        require_caregiver_confirm boolean NOT NULL DEFAULT true,
+        require_confirm_after_missed boolean NOT NULL DEFAULT true,
+        require_confirm_undo boolean NOT NULL DEFAULT true,
+        missed_dose_minutes int NOT NULL DEFAULT 180,
+        allow_patient_med_edit boolean NOT NULL DEFAULT true,
+        notify_low_stock boolean NOT NULL DEFAULT true,
+        low_stock_threshold int NOT NULL DEFAULT 5,
+        notify_sos_usage boolean NOT NULL DEFAULT true,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_caregiver_patient_groups_cg ON public.caregiver_patient_groups (caregiver_id, name)`,
+      `ALTER TABLE public.patient_care_settings ADD COLUMN IF NOT EXISTS config_mode text NOT NULL DEFAULT 'custom'`,
+      `ALTER TABLE public.patient_care_settings ADD COLUMN IF NOT EXISTS group_id uuid REFERENCES public.caregiver_patient_groups(id) ON DELETE SET NULL`,
+      `ALTER TABLE public.patient_care_settings ADD COLUMN IF NOT EXISTS caregiver_id uuid REFERENCES public.app_users(id) ON DELETE SET NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_patient_care_settings_group ON public.patient_care_settings (group_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_patient_care_settings_mode ON public.patient_care_settings (config_mode)`,
+    ],
+  },
 ];
+
+export function isPgConnectionNetworkError(err) {
+  if (!err) return false;
+  const code = String(err.code || '').toUpperCase();
+  if (['ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'ECONNRESET', 'EAI_AGAIN'].includes(code)) {
+    return true;
+  }
+  const msg = String(err.message || '').toLowerCase();
+  return (
+    msg.includes('connection terminated due to connection timeout') ||
+    msg.includes('timeout exceeded when trying to connect') ||
+    msg.includes('econnrefused') ||
+    msg.includes('etimedout') ||
+    msg.includes('ehostunreach') ||
+    msg.includes('getaddrinfo')
+  );
+}
+
+function isLocalHostname(hostname) {
+  const h = String(hostname || '').trim().toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+}
 
 export function getOraclePgConfig() {
   const connectionString = process.env.DATABASE_URL?.trim();
@@ -132,6 +223,13 @@ export function getOraclePgConfig() {
   const useSsl = process.env.ORACLE_PG_SSL === 'true';
 
   if (connectionString) {
+    let localConn = false;
+    try {
+      const parsed = new URL(connectionString);
+      localConn = isLocalHostname(parsed.hostname);
+    } catch {
+      localConn = false;
+    }
     return {
       configured: true,
       mode: 'DATABASE_URL',
@@ -140,7 +238,7 @@ export function getOraclePgConfig() {
         ssl: useSsl ? { rejectUnauthorized: false } : false,
         max: 10,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 8000,
+        connectionTimeoutMillis: localConn ? 5000 : 2500,
       },
     };
   }
@@ -158,7 +256,7 @@ export function getOraclePgConfig() {
         ssl: useSsl ? { rejectUnauthorized: false } : false,
         max: 10,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 8000,
+        connectionTimeoutMillis: isLocalHostname(host) ? 5000 : 2500,
       },
     };
   }

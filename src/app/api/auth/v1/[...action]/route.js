@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { getPgPool, ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
-import { forwardToOracleBackend } from '@/lib/oracleProxy';
+import { ensureOraclePostgresSchema } from '@/lib/oraclePostgres';
+import { connectPgOrFallback } from '@/lib/oracleProxy';
 import {
   CSRF_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
@@ -30,18 +30,19 @@ export async function OPTIONS() {
 
 export async function GET(req, { params }) {
   const action = (await params).action?.[0] || '';
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(req, `/api/auth/v1/${action}`);
+  const { client, fallbackResponse } = await connectPgOrFallback(req, `/api/auth/v1/${action}`);
+  if (fallbackResponse) return fallbackResponse;
+  if (!client) {
+    return NextResponse.json({ error: 'PostgreSQL Oracle indisponível.' }, { status: 503, headers: corsHeaders });
   }
 
   if (action === 'user') {
     const claims = extractAuthenticatedUser(req, { enforceCsrf: false });
     if (!claims?.sub) {
+      client.release();
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: corsHeaders });
     }
 
-    const client = await pool.connect();
     try {
       await ensureOraclePostgresSchema(client);
       const isActiveSession = await verifyActiveSessionInDb(client, claims);
@@ -107,6 +108,7 @@ export async function GET(req, { params }) {
       client.release();
     }
   }
+  client.release();
   return NextResponse.json({ error: 'Rota não encontrada' }, { status: 404, headers: corsHeaders });
 }
 
@@ -121,12 +123,11 @@ export async function POST(req, { params }) {
     );
   }
 
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(req, `/api/auth/v1/${action}`);
+  const { client, fallbackResponse } = await connectPgOrFallback(req, `/api/auth/v1/${action}`);
+  if (fallbackResponse) return fallbackResponse;
+  if (!client) {
+    return NextResponse.json({ error: 'PostgreSQL Oracle indisponível.' }, { status: 503, headers: corsHeaders });
   }
-
-  const client = await pool.connect();
   try {
     await ensureOraclePostgresSchema(client);
 
@@ -710,16 +711,19 @@ async function executeDeleteUserRecords(client, targetId, targetEmail) {
 
 export async function DELETE(req, { params }) {
   const action = (await params).action?.[0] || '';
-  const pool = getPgPool();
-  if (!pool) {
-    return forwardToOracleBackend(req, `/api/auth/v1/${action}`);
+  const { client, fallbackResponse } = await connectPgOrFallback(req, `/api/auth/v1/${action}`);
+  if (fallbackResponse) return fallbackResponse;
+  if (!client) {
+    return NextResponse.json({ error: 'PostgreSQL Oracle indisponível.' }, { status: 503, headers: corsHeaders });
   }
 
   const claims = extractAuthenticatedUser(req, { returnCsrfError: true });
   if (claims?.csrfError) {
+    client.release();
     return NextResponse.json({ error: claims.reason }, { status: 403, headers: corsHeaders });
   }
   if (!claims?.sub) {
+    client.release();
     return NextResponse.json(
       { error: 'Autenticação necessária para exclusão de conta.' },
       { status: 401, headers: corsHeaders }
@@ -734,13 +738,13 @@ export async function DELETE(req, { params }) {
 
   const requestedId = searchParams.get('userId') || searchParams.get('id') || body.userId || body.id;
   if (requestedId && String(requestedId) !== String(claims.sub)) {
+    client.release();
     return NextResponse.json(
       { error: 'Acesso negado: você só pode excluir a própria conta.' },
       { status: 403, headers: corsHeaders }
     );
   }
 
-  const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await executeDeleteUserRecords(client, claims.sub, claims.email);
@@ -775,15 +779,15 @@ export async function PUT(req, { params }) {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: corsHeaders });
   }
 
-  const pool = getPgPool();
-  if (!pool) {
+  const { client, fallbackResponse } = await connectPgOrFallback(req, `/api/auth/v1/${action}`);
+  if (fallbackResponse) return fallbackResponse;
+  if (!client) {
     return NextResponse.json(
       { error: 'PostgreSQL Oracle ainda não configurado no servidor.' },
       { status: 503, headers: corsHeaders }
     );
   }
 
-  const client = await pool.connect();
   try {
     await ensureOraclePostgresSchema(client);
     const body = await req.json();

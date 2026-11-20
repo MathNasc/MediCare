@@ -112,6 +112,7 @@ export function getDayDetails({
   dateIso,
   todayIso,
   currentMinutesOfDay = 0,
+  missedDoseMinutes = 60,
   medications = [],
   doseHistory = [],
   appointments = [],
@@ -161,7 +162,7 @@ export function getDayDetails({
       const isMissed =
         ['missed', 'pulada'].includes(rawStatus) ||
         (!isTaken && dateIso < todayIso) ||
-        (!isTaken && dateIso === todayIso && currentMinutesOfDay > scheduledMinutes + 60);
+        (!isTaken && dateIso === todayIso && currentMinutesOfDay > scheduledMinutes + Math.max(30, Number(missedDoseMinutes || 60)));
 
       scheduledDoses.push({
         id: `${med.id}-${dateIso}-${hora}`,
@@ -205,6 +206,7 @@ export function buildCalendarMonthData({
   monthIndex,
   todayIso,
   currentMinutesOfDay = 0,
+  missedDoseMinutes = 60,
   medications = [],
   doseHistory = [],
   appointments = [],
@@ -237,6 +239,7 @@ export function buildCalendarMonthData({
       dateIso,
       todayIso,
       currentMinutesOfDay,
+      missedDoseMinutes,
       medications,
       doseHistory,
       appointments,

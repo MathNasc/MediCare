@@ -44,11 +44,19 @@ async function main() {
       return;
     }
 
-    const migrationPath = path.join(__dirname, '..', 'database', 'migrations', '03_incremental_compatibility.sql');
-    const sql = fs.readFileSync(migrationPath, 'utf8');
-    console.log('Aplicando migração incremental 03_incremental_compatibility.sql...');
-    await client.query(sql);
-    console.log('✓ Migração 03_incremental_compatibility.sql aplicada com sucesso.');
+    const migrationFiles = [
+      '03_incremental_compatibility.sql',
+      '04_caregiver_management_settings.sql',
+      '05_caregiver_groups_and_global_settings.sql',
+    ];
+
+    for (const fileName of migrationFiles) {
+      const migrationPath = path.join(__dirname, '..', 'database', 'migrations', fileName);
+      const sql = fs.readFileSync(migrationPath, 'utf8');
+      console.log(`Aplicando migração incremental ${fileName}...`);
+      await client.query(sql);
+      console.log(`✓ Migração ${fileName} aplicada com sucesso.`);
+    }
   } finally {
     client.release();
     await pool.end();

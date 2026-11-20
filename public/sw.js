@@ -1,9 +1,9 @@
-const CACHE_VERSION = 'medicare-cuidador-v5';
+const CACHE_VERSION = 'medicare-cuidador-v7';
 const SHELL_ASSETS = [
-  '/manifest.json?v=5',
-  '/icon-192.png?v=5',
-  '/icon-512.png?v=5',
-  '/apple-touch-icon.png?v=5',
+  '/manifest.json?v=6',
+  '/icon-192.png?v=6',
+  '/icon-512.png?v=6',
+  '/apple-touch-icon.png?v=6',
 ];
 
 const OFFLINE_FALLBACK_HTML = `<!DOCTYPE html>
@@ -122,9 +122,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets estáticos (/icon-*, /_next/static/*): Stale-While-Revalidate seguro
+  // Chunks JS/CSS do Next.js: Network-First com cache: no-store para nunca ler HTTP cache antigo
+  if (url.pathname.includes('/_next/static/')) {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' })
+        .then((response) => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy)).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Assets estáticos (/icon-*, manifest): Stale-While-Revalidate
   if (
-    url.pathname.startsWith('/_next/static/') ||
     url.pathname.endsWith('.png') ||
     url.pathname.endsWith('.ico') ||
     url.pathname.endsWith('.json')
