@@ -1,6 +1,6 @@
 ---
 name: medicare-diretriz-permanente
-description: "Diretriz permanente de desenvolvimento do MediCare: MediCare Paciente Android e MediCare Cuidador Web oficial integrados ao backend Next.js e PostgreSQL Oracle."
+description: "Diretriz permanente de desenvolvimento do MediCare: MediCare Paciente Android e MediCare Cuidador Web/Android integrados ao backend Next.js e PostgreSQL Oracle."
 ---
 
 # MEDICARE — DIRETRIZ PERMANENTE DE DESENVOLVIMENTO
@@ -9,8 +9,9 @@ As seguintes regras são **obrigatórias e permanentes** para todas as alteraç�
 
 ## 1. Aplicações Oficiais Ativas
 - **MediCare Paciente Android** (`/apps/paciente-android` em Kotlin/Jetpack Compose e empacotamento nativo em `/src-apk` / `MediCare-Paciente.apk`): única aplicação para uso direto pelo paciente (independente ou dependente).
-- **MediCare Cuidador Web** (`/src/app/cuidador/page.jsx`): única aplicação web oficial para cuidadores e familiares autorizados, servida diretamente pelo Next.js App Router.
-- **Portal MediCare** (`/src/app/page.jsx`): página pública institucional com acesso ao MediCare Cuidador e download direto do instalador Android (`/api/apk`).
+- **MediCare Cuidador Web** (`/src/app/cuidador/page.jsx`): única aplicação web/PWA oficial para cuidadores, familiares e clínicas autorizadas, servida diretamente pelo Next.js App Router com fuso oficial `America/Sao_Paulo`.
+- **MediCare Cuidador Android** (`/src-apk-cuidador` / `MediCare-Cuidador.apk`): empacotamento Android oficial do painel do cuidador, distribuído via `/api/apk/cuidador`.
+- **Portal MediCare** (`/src/app/page.jsx`): página pública institucional com acesso ao MediCare Cuidador e download direto das versões mobile (`/api/apk` e `/api/apk/cuidador`).
 
 ## 2. Proibição de Frontends Paralelos ou Duplicados
 - Não crie aplicações paralelas (como projetos Vite separados em `/apps/cuidador-web`) nem recrie telas web legadas de paciente.
@@ -24,15 +25,16 @@ As seguintes regras são **obrigatórias e permanentes** para todas as alteraç�
 - **Formulários Clínicos:** Nunca utilizar valores clínicos predefinidos (como tipo sanguíneo `'O+'`, datas de nascimento fictícias ou dosagens padrão) em formulários de pacientes e medicamentos.
 
 ## 4. Banco de Dados e Migrações
-- O banco PostgreSQL na Oracle Cloud (`medicare_db`) utiliza migrações explícitas, versionadas e não destrutivas em `/database/migrations`.
+- O banco PostgreSQL na Oracle Cloud (`medicare_db`) utiliza migrações explícitas, versionadas e não destrutivas em `/database/migrations` (`02`, `03`, `04`, `05`).
 - Nenhuma alteração de esquema (`ALTER TABLE` / `CREATE TABLE`) deve ser executada silenciosamente durante requisições HTTP normais. Utilize `scripts/run_migrations.js`.
 
-## 5. Atualização do APK Android
-- Após qualquer alteração que afete o aplicativo Android (`/apps/paciente-android` ou `/src-apk`), execute obrigatoriamente:
+## 5. Atualização dos APKs Android
+- Após qualquer alteração que afete os aplicativos Android (`/apps/paciente-android`, `/src-apk` ou `/src-apk-cuidador`), execute conforme aplicável:
   ```bash
   bash scripts/rebuild_and_sign_apk.sh
+  bash scripts/rebuild_and_sign_cuidador_apk.sh
   ```
-- Mantenha o arquivo `MediCare-Paciente.apk` validado e assinado na raiz do repositório.
+- Mantenha os arquivos `MediCare-Paciente.apk` e `MediCare-Cuidador.apk` validados e assinados na raiz do repositório.
 
 ---
 name: cleanup-test-files

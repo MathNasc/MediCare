@@ -1,101 +1,69 @@
 # Modelo de Dados e Identidade — MediCare
 
-**Versão:** 2.0 (Consolidada)  
+**Versão:** 2.1 (Atualizada)  
 **Banco Alvo:** PostgreSQL 16 (Oracle Cloud — `medicare_db`)
 
 ---
 
-## 1. Estrutura de Tabelas e Relacionamentos
+## 1. Estrutura de Tabelas e Migrações Versionadas
 
-O esquema do MediCare utiliza chaves `uuid` e restrições de integridade referencial, gerenciadas por migrações versionadas em `database/migrations/`:
+O esquema do MediCare utiliza chaves `uuid` e integridade referencial, gerenciadas explicitamente em `database/migrations/`:
 
-- `01_schema_completo.sql`: Esquema original com suporte Supabase/RLS.
-- `02_schema_oracle_standalone.sql`: Esquema standalone para PostgreSQL 16 na Oracle Cloud.
-- `03_incremental_compatibility.sql`: Migração incremental não destrutiva que consolida colunas de rastreabilidade de doses (`administered_at`, `confirmed_by_role`, `origin`, `atraso_minutos`), tabelas de validação (`approval_requests`, `notificacoes`) e controle de versão (`schema_migrations`).
+- `02_schema_oracle_standalone.sql`: Esquema standalone completo para PostgreSQL 16 na Oracle Cloud.
+- `03_incremental_compatibility.sql`: Colunas de rastreabilidade de doses (`administered_at`, `confirmed_by_role`, `origin`, `atraso_minutos`), `approval_requests`, `notificacoes`, `push_subscriptions` e tabela de controle `schema_migrations`.
+- `04_caregiver_management_settings.sql`: Cria `patient_care_settings` com parâmetros de acompanhamento clínico configuráveis pelo cuidador.
+- `05_caregiver_groups_and_global_settings.sql`: Cria `caregiver_global_settings` e `caregiver_patient_groups`, adicionando `config_mode` (`global` | `group` | `custom`), `group_id` e `caregiver_id` em `patient_care_settings`.
 
 ```text
 app_users (Contas e Autenticação)
-    │
-    ├── 1:N ── auth_sessions (Sessões Isoladas por Dispositivo / sid)
-    │
+    ├── 1:N ── auth_sessions (Sessões Isoladas / sid)
     ├── 1:1 ── profiles (Dados Cadastrais, Papel e Pacientes Gerenciados)
-    │
-    ├── 1:N ── medicamentos (Tratamentos do Paciente)
-    │              │
-    │              ├── 1:N ── historico_doses (Registros de Administração)
-    │              │              │
-    │              │              └── 1:N ── dose_observations (Observações de Sintomas)
-    │              │
-    │              └── 1:N ── stock_movements (Histórico e Movimentação de Estoque)
-    │
-    ├── 1:N ── approval_requests (Solicitações de Validação de Dose do Paciente ao Cuidador)
-    │
-    ├── 1:N ── caregiver_relationships (Vínculos Cuidador <-> Paciente)
-    │              │
-    │              ├── 1:N ── caregiver_notes (Anotações do Cuidador)
-    │              │
-    │              └── 1:N ── caregiver_audit_log (Auditoria do Vínculo)
-    │
-    └── 1:N ── audit_logs (Trilha de Auditoria Geral e Histórico de Correções)
+    ├── 1:1 ── caregiver_global_settings (Padrão Global da Clínica/Cuidador)
+    ├── 1:N ── caregiver_patient_groups (Grupos de Pacientes com Regras Próprias)
+    ├── 1:1 ── patient_care_settings (Herança: global | group | custom)
+    ├── 1:N ── medicamentos ── historico_doses & stock_movements
+    ├── 1:N ── approval_requests & notificacoes & push_subscriptions
+    ├── 1:N ── caregiver_relationships ── caregiver_notes & caregiver_audit_log
+    └── 1:N ── audit_logs (Trilha de Auditoria Imutável)
 ```
 
 ---
 
 ## 2. Dicionário das Tabelas Principais
 
-### 2.1. `app_users` e `auth_sessions`
-- `app_users`: Contas de usuário com `password_hash` bcrypt (`pgcrypto`).
-- `auth_sessions`: Sessões ativas isoladas por `id` (`sid` no JWT), `refresh_token_hash` (SHA-256), `expires_at` e `revoked_at`.
+### 2.1. `app_users`, `auth_sessions` e `profiles`
+- `app_users`: Contas com senha criptografada (`pgcrypto`).
+- `auth_sessions`: Sessões individuais (`id` / `sid`, `refresh_token_hash` SHA-256, `expires_at`, `revoked_at`).
+- `profiles`: `id`, `nome`, `social_name`, `email`, `role` (`paciente`, `cuidador`, `independente`), `is_managed`, `managed_by`, `dob`, `sex`, `blood_type` (`NULL` quando não informado), `cpf`, `phone`, `address`, `weight`, `height`.
 
-### 2.2. `profiles`
-- `id` (`uuid`, PK, FK `app_users.id` ON DELETE CASCADE).
-- `nome` (`text`, NOT NULL), `social_name` (`text`), `email` (`text`).
-- `role` (`text`, FK `roles.code`): `paciente`, `cuidador` ou `independente`.
-- `is_managed` (`boolean`, DEFAULT false): Perfil criado e gerenciado por cuidador.
-- `managed_by` (`uuid`, FK `app_users.id`): Cuidador responsável pelo cadastro.
-- `dob` (`date`), `sex` (`text`), `blood_type` (`text` — opcional, `NULL` quando não informado; sem valor padrão fictício), `cpf` (`text`), `phone` (`text`), `address` (`text`), `weight` (`numeric`), `height` (`numeric`).
+### 2.2. Gerenciamento Clínico (`caregiver_global_settings`, `caregiver_patient_groups`, `patient_care_settings`)
+Campos compartilhados pelos 3 níveis (com precedência `custom` → `group` → `global`):
+- `overdue_notify_minutes` (`int`, padrão `60`): Tempo em minutos após o horário previsto para notificar o cuidador caso não haja registro.
+- `require_caregiver_confirm` (`boolean`, padrão `true`): Exige validação do cuidador quando o paciente dependente registra dose dentro da janela normal.
+- `require_confirm_after_missed` (`boolean`, padrão `true`): Exige validação do cuidador quando a dose já ultrapassou a janela de dose perdida.
+- `require_confirm_undo` (`boolean`, padrão `true`): Exige validação do cuidador para desfazer uma dose já confirmada.
+- `missed_dose_minutes` (`int`, padrão `180`): Limite em minutos para considerar uma dose pendente como perdida.
+- `allow_patient_med_edit` (`boolean`, padrão `true`): Permite ou bloqueia edição/cadastro de medicamentos pelo paciente.
+- `notify_low_stock` (`boolean`, padrão `true`) e `low_stock_threshold` (`int`, padrão `5`): Alertas de reposição de estoque.
+- `notify_sos_usage` (`boolean`, padrão `true`): Alerta imediato ao cuidador quando o paciente registra medicamento SOS.
+- Em `patient_care_settings`: `config_mode` (`global` | `group` | `custom`), `group_id` (FK opcional para `caregiver_patient_groups`), `caregiver_id`.
 
-### 2.3. `medicamentos`
-- `id` (`uuid`, PK), `user_id` (`uuid`, FK `app_users.id`).
-- `nome` (`text`, NOT NULL), `principio_ativo` / `active_ingredient` (`text`, opcional).
-- `dosagem` (`text`, NOT NULL), `unidade` (`text`), `quantidade` (`int`, CHECK >= 0).
-- `horarios` (`text[]`): Horários diários previstos no formato `HH:MM`.
-- `treatment_type` (`text`): `continuous`, `temporary` ou `sos`.
-- `status` (`text`): `ativo`, `pausado`, `concluido`, `cancelado`.
+### 2.3. `medicamentos`, `historico_doses` e `approval_requests`
+- `medicamentos`: `id`, `user_id`, `nome`, `principio_ativo`, `dosagem`, `unidade`, `quantidade`, `horarios` (`text[]` em `HH:MM`), `treatment_type` (`continuous` | `temporary` | `sos`), `status`.
+- `historico_doses`: Separa horário previsto (`hora`, `dose_date` em `America/Sao_Paulo`), horário real (`administered_at`), momento do registro (`created_at`, `corrected_at`), `status` (`confirmed` | `missed` | `pending` | `late`), `atraso_minutos`, `performed_by`, `confirmed_by_name`, `confirmed_by_role`, `origin`, `is_retroactive`, `correction_reason`.
+- `approval_requests`: Solicitações de confirmação ou desfazimento (`confirm_dose` | `undo_dose`) com `status` (`pending` | `approved` | `rejected`).
 
-### 2.4. `historico_doses`
-Separa claramente o horário previsto, o horário real da administração e o momento em que o registro foi realizado:
-- `id` (`uuid`, PK), `med_id` (`uuid`, FK `medicamentos.id`), `user_id` (`uuid`, FK `app_users.id`).
-- `hora` (`text`, NOT NULL) e `dose_date` (`date`): **Horário e data previstos** na prescrição.
-- `administered_at` (`timestamptz`): **Horário real da administração** da dose.
-- `created_at` (`timestamptz`) e `corrected_at` (`timestamptz`): **Momento exato em que o registro ou retificação foi gravado** no sistema.
-- `status` (`text`, NOT NULL): `confirmed`, `missed`, `pending`, `late`.
-- `atraso_minutos` (`int`, DEFAULT 0): Diferença em minutos entre o horário previsto e a administração real.
-- `performed_by` (`uuid`, FK `app_users.id`): Identificador do autor da ação.
-- `confirmed_by_name` (`text`) e `confirmed_by_role` (`text`): Nome e papel do autor (`paciente` ou `cuidador`).
-- `origin` (`text`): Origem da ação (`patient_app`, `caregiver_web`, `android_sync`).
-- `is_retroactive` (`boolean`, DEFAULT false): Indica exclusivamente se o registro foi lançado retroativamente (> 30 min após o horário previsto, em data anterior ou como retificação de registro prévio). Não é ativado automaticamente apenas por ter sido registrado pelo cuidador.
-- `correction_reason` / `motivo` (`text`): Justificativa clínica ou observação.
-
-### 2.5. `approval_requests`
-Solicitações enviadas por pacientes dependentes ao cuidador para confirmar ou desfazer uma dose:
-- `id` (`uuid`, PK), `patient_id` (`uuid`), `caregiver_id` (`uuid`), `med_id` (`text`), `med_nome` (`text`).
-- `dose_date` (`date`), `hora` (`text`), `action_type` (`confirm_dose` | `undo_dose`), `requested_status` (`text`), `reason` (`text`).
-- `status` (`text`): `pending`, `approved`, `rejected`.
-
-### 2.6. `schema_migrations`
-Controle explícito de versão do esquema do banco de dados:
-- `version` (`text`, PK), `description` (`text`), `applied_at` (`timestamptz`).
+### 2.4. `schema_migrations`
+Registra todas as migrações aplicadas (`03_incremental_compatibility`, `04_caregiver_management_settings`, `05_caregiver_groups_and_global_settings`).
 
 ---
 
-## 3. Classificação dos Estados de Administração de Doses
+## 3. Estados Clínicos de Administração de Doses
 
 | Estado Clínico | Campo `status` | Condição Fática | Rastreabilidade |
 | :--- | :--- | :--- | :--- |
-| **Dose Prevista** | `pending` | Horário agendado futuro ou dentro da janela atual (≤ 30 min) sem registro. | Calculada a partir de `medicamentos.horarios`. |
-| **Dose sem Confirmação** | `pending` (expirado) | Horário previsto ultrapassado há mais de 30 minutos sem confirmação nem recusa. | Exibida como `Sem Confirmação` para alerta ao cuidador, sem ser confundida com recusa explícita. |
-| **Dose Confirmada pelo Paciente** | `confirmed` | Paciente independente confirmou no app (ou cuidador aprovou solicitação do paciente). | `confirmed_by_role = 'paciente'`, `origin = 'patient_app'`, `administered_at` preenchido. |
-| **Dose Registrada pelo Cuidador** | `confirmed` | Cuidador registrou a administração em nome do paciente. | `confirmed_by_role = 'cuidador'`, `origin = 'caregiver_web'`. `is_retroactive = true` apenas se lançada fora da janela (> 30 min) ou em retificação. |
-| **Dose Atrasada** | `late` (ou `confirmed` com `atraso_minutos > 15`) | Administração realizada com atraso significativo em relação ao horário previsto. | `atraso_minutos` calculado entre o horário previsto e `administered_at`. |
-| **Dose Não Administrada** | `missed` | Paciente ou cuidador registrou recusa, suspensão ou impossibilidade clínica. | `status = 'missed'`, `correction_reason` / `motivo` obrigatório. |
+| **Dose Prevista** | `pending` | Horário agendado futuro ou dentro da janela atual sem registro. | Calculada a partir de `medicamentos.horarios` no fuso `America/Sao_Paulo`. |
+| **Dose Atrasada / Sem Confirmação** | `pending` (expirado) | Horário previsto ultrapassado há mais de 30 min (até `missed_dose_minutes`). | Gera alerta ao cuidador após `overdue_notify_minutes`. |
+| **Dose Confirmada** | `confirmed` | Confirmada pelo paciente independente, diretamente pelo cuidador ou aprovada via solicitação. | `confirmed_by_role`, `origin`, `administered_at` preenchidos. |
+| **Dose Atrasada Tomada** | `late` / `confirmed` | Confirmada com atraso significativo após o horário previsto. | `atraso_minutos` calculado em relação a `America/Sao_Paulo`. |
+| **Dose Perdida / Não Administrada** | `missed` | Recusa explícita registrada ou janela `missed_dose_minutes` expirada. | `correction_reason` / `motivo` preservado. |

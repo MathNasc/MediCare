@@ -6,25 +6,40 @@ Este documento descreve a arquitetura consolidada do ecossistema MediCare e a se
 
 ## 1. Visão Geral dos Componentes
 
-O MediCare é estruturado como um monorepo self-hosted que integra o aplicativo nativo Android do paciente, a aplicação web oficial do cuidador e o backend compartilhado em Next.js com PostgreSQL 16:
+O MediCare é estruturado como um monorepo self-hosted que integra os aplicativos nativos Android, a aplicação web/PWA oficial do cuidador e o backend compartilhado em Next.js 14 com PostgreSQL 16:
 
 ```text
-MediCare Monorepo
+MediCare/
 ├── apps/
-│   └── paciente-android/    # App nativo Android (Kotlin / Jetpack Compose) [ATIVO]
-├── src-apk/                 # Empacotamento Dalvik, Manifesto e Recursos Android [ATIVO]
+│   └── paciente-android/          # App nativo Android do Paciente (Kotlin / Jetpack Compose)
+├── src-apk/                       # Empacotamento Dalvik, Manifesto e Recursos -> MediCare-Paciente.apk
+├── src-apk-cuidador/              # Empacotamento Dalvik, Manifesto e Recursos -> MediCare-Cuidador.apk
 ├── src/
 │   ├── app/
-│   │   ├── api/             # Endpoints REST e RPC (Next.js App Router)
-│   │   ├── cuidador/        # Aplicação oficial MediCare Cuidador Web (page.jsx) [ATIVA]
-│   │   └── page.jsx         # Portal institucional e distribuição do APK
-│   ├── lib/                 # Autenticação (HttpOnly/Bearer + CSRF), PostgreSQL e domínio
-│   ├── data/                # Catálogo farmacêutico estático
-│   └── __tests__/           # Suíte de testes unitários e de integração (Jest)
-├── database/migrations/     # Esquemas SQL e migrações versionadas do PostgreSQL
-├── oracle-migration/        # Scripts de infraestrutura, systemd, Nginx e backup na Oracle Cloud
-├── scripts/                 # Automação de migrações (run_migrations.js) e build do APK
-└── MediCare-Paciente.apk    # Binário Android compilado e assinado na raiz
+│   │   ├── api/                   # Endpoints REST, RPC, Auth, Sync, Caregiver, AI, System e APK
+│   │   ├── cuidador/              # Aplicação oficial MediCare Cuidador Web/PWA (page.jsx)
+│   │   ├── CuidadorAutoRedirect.jsx
+│   │   ├── CuidadorPortalActions.jsx
+│   │   └── page.jsx               # Portal institucional e distribuição mobile (/ e /?portal=1)
+│   ├── lib/
+│   │   ├── appVersions.js         # Versionamento dinâmico Web, SW e APKs Android
+│   │   ├── auditFormatter.js      # Tradução amigável de logs de auditoria clínica
+│   │   ├── brazilTime.js          # Fuso horário oficial America/Sao_Paulo (-03:00)
+│   │   ├── careSettings.js        # Regras Global, Grupos e Por Paciente com resolução por herança
+│   │   ├── caregiverCalendar.js   # Lógica de calendário mensal e eventos diários do cuidador
+│   │   ├── caregiverNotifications.js # Notificações de atraso, solicitações e uso SOS
+│   │   ├── oracleAuth.js          # Sessões isoladas (sid), cookies HttpOnly, CSRF e Bearer
+│   │   ├── oraclePostgres.js      # Pool pg com verificação de esquema sem DDL implícito
+│   │   ├── oracleProxy.js         # Fallback proxy anti-loop para a API Oracle Cloud em previews
+│   │   ├── reminderWorker.js      # Worker de alertas de atraso respeitando overdue_notify_minutes
+│   │   ├── usePWA.js              # Service Worker (v7) e prompt PWA
+│   │   └── webPush.js             # Registro Web Push VAPID
+│   └── __tests__/                 # Suíte Jest (6 arquivos, 49 testes)
+├── database/migrations/           # Esquema standalone e migrações (02, 03, 04, 05)
+├── oracle-migration/              # Infraestrutura Oracle Cloud, systemd, Nginx e backup
+├── scripts/                       # Migrações (run_migrations.js) e builds dos 2 APKs
+├── MediCare-Paciente.apk          # Binário Android do Paciente assinado na raiz
+└── MediCare-Cuidador.apk          # Binário Android do Cuidador assinado na raiz
 ```
 
 ---
@@ -32,38 +47,33 @@ MediCare Monorepo
 ## 2. Componentes e Responsabilidades
 
 ### 2.1. MediCare Paciente Android (`apps/paciente-android` & `src-apk/`)
-- **Papel:** Aplicação oficial para uso direto pelo paciente (em perfil Independente ou Paciente Dependente vinculado a cuidador).
-- **Tecnologias:** Kotlin, Jetpack Compose, Android SDK (API 24+ a 33), `AlarmManager`.
+- **Papel:** Aplicação oficial para uso direto pelo paciente (Independente ou Dependente vinculado).
 - **Características:**
   - Operação offline-first com sincronização via `/api/v1/sync` e autenticação `Authorization: Bearer`.
-  - Agendamento exato de alarmes com `AlarmManager.setExactAndAllowWhileIdle`.
-  - Regra de negócio de perfil: apenas o paciente **Independente** confirma ou desfaz doses diretamente; o paciente **Dependente** envia solicitação de validação (`approval_requests`) com motivo ao cuidador responsável.
+  - Consumo das regras clínicas efetivas (`care_settings`) para decidir se confirmação/desfazimento exige validação do cuidador (no horário ou após dose perdida).
+  - Avanço automático para a próxima dose após enviar solicitação de validação ao cuidador, retornando à fila se rejeitada dentro da janela válida.
 
-### 2.2. MediCare Cuidador Web (`src/app/cuidador/page.jsx`)
-- **Papel:** Única aplicação web oficial dedicada a familiares e cuidadores.
-- **Tecnologias:** Next.js 14 (App Router), React 18, Tailwind CSS, Lucide Icons.
+### 2.2. MediCare Cuidador Web & Android (`src/app/cuidador/page.jsx` & `src-apk-cuidador/`)
+- **Papel:** Aplicação web/PWA e empacotamento Android oficial para cuidadores, familiares e clínicas.
+- **Tecnologias:** Next.js 14 (App Router), React 18, Tailwind CSS, Lucide Icons, Service Worker (`sw.js` v7).
 - **Características:**
-  - Sessão autenticada via cookies `HttpOnly`, `Secure`, `SameSite=Lax` e cabeçalho `X-CSRF-Token` (sem armazenamento de tokens em `localStorage`).
-  - Gestão estrita de pacientes com vínculo ativo (`caregiver_relationships.status = 'active'`).
-  - Central de Doses com distinção de 5 estados clínicos, aprovação/recusa de solicitações do paciente, prescrições, controle de estoque, agenda médica, indicadores e trilha de auditoria.
+  - Sessão autenticada via cookies `HttpOnly`, `Secure`, `SameSite=Lax` e cabeçalho `X-CSRF-Token`.
+  - **Fuso horário Brasília (`America/Sao_Paulo`):** Cálculos de data, hora, atrasos e exibição padronizados em `-03:00` via `src/lib/brazilTime.js`.
+  - **Central de Doses, Pacientes, Medicamentos & Estoque, Indicadores e Auditoria.**
+  - **Calendário & Agenda Unificada:** Grade mensal completa com resumo diário de consultas, exames, procedimentos, anotações e movimentações (`src/lib/caregiverCalendar.js`).
+  - **Painel de Gerenciamento:** Escopos **Por Paciente**, **Global (Clínica)** e **Grupos** (`caregiver_patient_groups`), com aplicação individual, em lote ou por herança automática.
+  - **Sobre & Apps:** Informações de versão do Web App e download direto dos APKs de Paciente e Cuidador.
 
-### 2.3. Backend & APIs Compartilhadas (`src/app/api` & `src/lib`)
-- **Papel:** Servidor central de API REST/RPC, autenticação híbrida (Cookie HttpOnly + Bearer) e distribuição do instalador APK.
-- **Principais Módulos:**
-  - `/api/auth/v1/`: Cadastro, login, renovação rotativa de sessão, revogação isolada por `sid` e recuperação de senha (`src/lib/oracleAuth.js`).
-  - `/api/rest/v1/`: Roteador REST compatível com PostgREST e procedimentos RPC com verificação de autorização por paciente e proteção contra IDOR.
-  - `/api/v1/sync`: Sincronização bidirecional para o aplicativo Android.
-  - `/api/apk`: Streaming do instalador `MediCare-Paciente.apk` assinado.
-  - `/src/lib/oraclePostgres.js`: Pool PostgreSQL com separação estrita entre verificação de conexão, verificação de versão (`schema_migrations`) e execução explícita de migrações.
+### 2.3. Backend, APIs Compartilhadas & Fallback Proxy (`src/app/api` & `src/lib`)
+- `/api/auth/v1/*`: Cadastro, login, rotação de refresh token, perfil, alteração de senha, logout por `sid` e exclusão de conta.
+- `/api/rest/v1/*`: Roteador REST e RPCs com autorização estrita por vínculo ativo (`caregiver_relationships.status = 'active'`) e proteção contra IDOR.
+- `/api/v1/caregiver/settings`: CRUD de regras globais, grupos da clínica, regras por paciente e atribuição em massa.
+- `/api/v1/caregiver/notifications`: Listagem e marcação de leitura de alertas de solicitação, atraso e uso SOS.
+- `/api/v1/sync`: Sincronização bidirecional do app Android (incluindo `care_settings` efetivo e `pending_dose_requests`).
+- `/api/apk`, `/api/apk/cuidador`, `/api/apk/version`, `/api/system/versions`: Distribuição dos binários APK e metadados de versão.
+- `/api/v1/health`: Saúde do PostgreSQL local e fallback de status proxy.
+- **`oracleProxy.js` (`connectPgOrFallback`):** Em ambientes externos de preview onde a porta TCP do PostgreSQL Oracle esteja bloqueada por firewall, detecta timeout/falha de rede (`isPgConnectionNetworkError`), faz cache negativo temporário (60s) e encaminha com proteção anti-loop (`x-medicare-proxy-hop: 1` e checagem de host) para o backend HTTP oficial da Oracle Cloud.
 
-### 2.4. Banco de Dados PostgreSQL Standalone (`database/migrations`)
-- **Hospedagem:** Instância PostgreSQL 16 isolada no servidor Oracle Cloud (`medicare_db`).
-- **Tabelas Reais do Esquema:**
-  - `app_users` & `auth_sessions` & `password_reset_tokens`: Identidade, sessões isoladas e credenciais (`pgcrypto`).
-  - `profiles` & `roles`: Dados cadastrais, tipo de perfil (`paciente`, `cuidador`, `independente`) e flag de dependente gerenciado (`is_managed`, `managed_by`).
-  - `medicamentos` & `stock_movements`: Tratamentos contínuos, temporários e SOS, horários (`text[]`) e movimentações de estoque.
-  - `historico_doses` & `dose_observations`: Registros de administração com horário previsto (`hora`), horário real (`administered_at`), momento do registro (`created_at`), autor (`performed_by`, `confirmed_by_role`) e origem (`origin`).
-  - `caregiver_relationships`, `caregiver_notes` & `caregiver_audit_log`: Vínculos N:M entre cuidadores e pacientes com níveis de permissão (`viewer`, `read_only`, `caregiver`, `read_write`, `admin`).
-  - `approval_requests` & `notificacoes`: Solicitações de confirmação/desfazimento de dose enviadas por pacientes dependentes ao cuidador.
-  - `health_events`, `notes`, `calendar_notes`, `allergies`, `health_conditions`, `emergency_contacts`, `healthcare_professionals`: Prontuário e rotina clínica.
-  - `audit_logs` & `schema_migrations`: Auditoria clínica imutável e controle de versão das migrações SQL.
+### 2.4. Banco de Dados PostgreSQL (`database/migrations`)
+- **Hospedagem:** Container `postgres:16-alpine` (`medicare_db`) isolado em `127.0.0.1:5436` na VM Oracle Cloud.
+- **Migrações aplicáveis:** `02_schema_oracle_standalone.sql`, `03_incremental_compatibility.sql`, `04_caregiver_management_settings.sql`, `05_caregiver_groups_and_global_settings.sql`.

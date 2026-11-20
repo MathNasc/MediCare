@@ -1,52 +1,41 @@
 # MediCare Paciente — Aplicativo Android Nativo (Kotlin + Jetpack Compose)
 
-Este diretório (`/apps/paciente-android`) contém o projeto Android **100% nativo** do **MediCare Paciente**, desenvolvido em **Kotlin** com **Jetpack Compose**, **Clean Architecture + MVVM**, **Room (Offline-First)**, **Hilt**, **AlarmManager** e **WorkManager**.
+Este diretório (`/apps/paciente-android`) contém o projeto Android **100% nativo** do **MediCare Paciente** (versão distribuída `v2.9.0` via `MediCare-Paciente.apk`), desenvolvido em **Kotlin** com **Jetpack Compose**, **Clean Architecture + MVVM**, **Room (Offline-First)**, **AlarmManager** e sincronização bidirecional com o backend compartilhado na Oracle Cloud.
 
 ---
 
 ## 1. Como Abrir e Compilar no Android Studio
 
 1. Abra o **Android Studio Ladybug (2024.2.1)** ou superior (JDK 17 configurado).
-2. Selecione **File → Open** e escolha a pasta `/apps/paciente-android`.
-3. Crie (opcionalmente) o arquivo `/apps/paciente-android/local.properties` na raiz do projeto Android para apontar para o banco de dados compartilhado sem versionar credenciais:
+2. Selecione **File → Open** e escolha `/apps/paciente-android`.
+3. Configure (opcionalmente) `/apps/paciente-android/local.properties` sem versionar credenciais:
    ```properties
    sdk.dir=/caminho/para/seu/Android/Sdk
-   MEDICARE_BACKEND_URL=http://163.176.252.207:3009
-   MEDICARE_AI_PROXY_URL=http://163.176.252.207:3009
+   MEDICARE_BACKEND_URL=https://medicare-cuidador.duckdns.org
+   MEDICARE_AI_PROXY_URL=https://medicare-cuidador.duckdns.org
    ```
-   > **Segurança:** Nunca insira senhas do banco de dados ou `GEMINI_API_KEY` no projeto Android. O assistente de IA consome a rota `/api/ai` do servidor e os dados do paciente são sincronizados de forma segura com o PostgreSQL via API no servidor Oracle Cloud.
+   > **Segurança:** Nunca insira senhas do banco PostgreSQL ou `GEMINI_API_KEY` no projeto Android. O assistente de IA consome `/api/ai` no backend e a sincronização clínica usa `Authorization: Bearer <jwt>` em `/api/v1/sync` e `/api/rest/v1/*`.
 
 ---
 
-## 2. Como Gerar o APK Instalável (Debug e Release)
+## 2. Como Gerar o APK Instalável
 
-### 2.1 Gerar APK de Debug (Instalável diretamente no celular)
-
-No terminal, dentro de `/apps/paciente-android`:
+### 2.1 Via Gradle (`/apps/paciente-android`)
 
 ```bash
 ./gradlew assembleDebug
+# Saída: apps/paciente-android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-O APK será gerado em:
-```text
-apps/paciente-android/app/build/outputs/apk/debug/app-debug.apk
-```
+### 2.2 Pipeline Automatizado do Empacotamento Nativo (`MediCare-Paciente.apk`)
 
-Para instalar em um aparelho Android conectado via USB (com Depuração USB ativa):
+Na raiz do repositório:
+
 ```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+bash scripts/rebuild_and_sign_apk.sh
 ```
 
-### 2.2 Gerar APK de Release Assinado
-
-1. No Android Studio, acesse **Build → Generate Signed App Bundle / APK → APK**.
-2. Crie ou selecione sua Keystore (`.jks`) fora do repositório (nunca faça commit de arquivos `.jks` ou `.keystore`).
-3. Ou via linha de comando:
-   ```bash
-   ./gradlew assembleRelease
-   ```
-   O APK otimizado com R8/ProGuard estará em `app/build/outputs/apk/release/app-release.apk`.
+O script compila os recursos e código nativo de `/src-apk`, alinha com `zipalign`, assina (v1/v2/v3) e gera `MediCare-Paciente.apk` pronto para download em `/api/apk`.
 
 ---
 
@@ -54,19 +43,17 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 | Permissão | Finalidade |
 | :--- | :--- |
-| `INTERNET` / `ACCESS_NETWORK_STATE` | Sincronização com o banco PostgreSQL compartilhado e proxy do Assistente IA. |
+| `INTERNET` / `ACCESS_NETWORK_STATE` | Sincronização com o backend Oracle (`/api/v1/sync`) e proxy do Assistente IA (`/api/ai`). |
 | `POST_NOTIFICATIONS` | Exibição de notificações de medicamentos no Android 13 (API 33) ou superior. |
 | `SCHEDULE_EXACT_ALARM` / `USE_EXACT_ALARM` | Disparo de lembretes nos horários exatos (`setExactAndAllowWhileIdle`). |
-| `RECEIVE_BOOT_COMPLETED` | Reagendamento automático de todos os alarmes ativos quando o celular é reiniciado. |
+| `RECEIVE_BOOT_COMPLETED` | Reagendamento automático de alarmes ativos após reiniciar o aparelho. |
 | `VIBRATE` / `WAKE_LOCK` | Alerta vibratório e despertar da tela no momento da dose. |
 
 ---
 
-## 4. Arquitetura de Notificações e Limitações Documentadas do Android
+## 4. Regras de Negócio, Fluxo Dependente e Notificações
 
-- **Agendamento Exato (`DoseAlarmScheduler`)**: Utiliza `AlarmManager.setExactAndAllowWhileIdle(RTC_WAKEUP, ...)` para atravessar o *Doze Mode* do Android.
-- **Repetição Automática de 15 Minutos**: Ao disparar o alarme no horário programado, caso a dose ainda não esteja confirmada, o `DoseAlarmReceiver` agenda automaticamente um lembrete de repetição para +15 minutos.
-- **Cancelamento Imediato na Confirmação**: Quando o paciente confirma a dose (seja pelo botão `"✓ Tomei agora"` da própria notificação ou dentro do aplicativo), `onDoseConfirmed(medId, hora)` cancela o `PendingIntent` de repetição e remove a notificação ativa da barra de status.
-- **Prevenção de Duplicidade**: Antes de exibir qualquer notificação, o `DoseAlarmReceiver` consulta o banco local Room (`isDoseConfirmedForToday`) — se o paciente já registrou a dose adiantada, a notificação é suprimida.
-- **Limitações de OEMs / Sistema Operacional**:
-  - Em aparelhos com gerenciadores agressivos de bateria (Xiaomi/MIUI, Samsung OneUI, Huawei, Oppo), caso o usuário force a parada manual do aplicativo (*Force Stop* nas configurações do sistema), o Android bloqueia todos os `AlarmManager` e `BroadcastReceiver` até que o app seja aberto novamente pelo usuário. Recomenda-se orientar o paciente a marcar a bateria do MediCare como **"Sem restrições"**.
+- **Sincronização de Regras do Cuidador (`care_settings`):** Ao sincronizar via `/api/v1/sync`, o aplicativo recebe as regras efetivas configuradas pelo cuidador/clínica no Painel de Gerenciamento (`require_caregiver_confirm`, `require_confirm_after_missed`, `require_confirm_undo`, `missed_dose_minutes`, `allow_patient_med_edit`, `notify_sos_usage`).
+- **Envio de Solicitação e Avanço para Próxima Dose:** Quando um paciente dependente envia uma solicitação de confirmação ao cuidador (`pending_dose_requests`), a interface principal avança automaticamente para a próxima dose pendente da fila; caso o cuidador rejeite a solicitação e a dose ainda não tenha ultrapassado o limite de dose perdida, ela retorna para a fila ativa de tomada.
+- **Agendamento Exato e Repetição (`DoseAlarmScheduler` / `DoseAlarmReceiver`):** Utiliza `AlarmManager.setExactAndAllowWhileIdle`, agenda repetição automática de 15 minutos enquanto não houver confirmação e suprime duplicidades consultando o banco local Room.
+- **Limitações de OEMs:** Em aparelhos Xiaomi/Samsung/Huawei, caso o usuário execute *Force Stop* manual nas configurações do Android, os alarmes ficam suspensos até a reabertura do app; recomenda-se configurar a bateria como **"Sem restrições"**.
