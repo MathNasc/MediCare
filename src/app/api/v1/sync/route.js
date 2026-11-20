@@ -328,52 +328,55 @@ export async function GET(request) {
 
     const userId = await resolveTargetUserId(client, rawUserId, { email: rawEmail });
 
-    const [profileRes, medsRes, histRes, eventsRes, notesRes, algRes, condRes, contRes, profRes, cgRes, stockRes, approvalRes, notifRes, careSettings] =
-      await Promise.all([
-        client.query('SELECT * FROM profiles WHERE id = $1 LIMIT 1', [userId]),
-        client.query(
-          "SELECT * FROM medicamentos WHERE user_id = $1 AND COALESCE(ativo, true) = true AND COALESCE(status, 'ativo') <> 'cancelado' ORDER BY created_at ASC",
-          [userId]
-        ),
-        client.query('SELECT * FROM historico_doses WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500', [userId]),
-        client.query(
-          "SELECT * FROM health_events WHERE user_id = $1 AND COALESCE(type, '') <> 'estoque' AND COALESCE(title, '') NOT ILIKE 'Reposição:%' AND COALESCE(title, '') NOT ILIKE 'Ajuste:%' ORDER BY date ASC",
-          [userId]
-        ),
-        client
-          .query('SELECT * FROM notes WHERE user_id = $1 ORDER BY date DESC', [userId])
-          .catch(() => client.query('SELECT * FROM calendar_notes WHERE user_id = $1 ORDER BY date DESC', [userId]))
-          .catch(() => ({ rows: [] })),
-        client.query('SELECT * FROM allergies WHERE user_id = $1', [userId]).catch(() => ({ rows: [] })),
-        client.query('SELECT * FROM health_conditions WHERE user_id = $1', [userId]).catch(() => ({ rows: [] })),
-        client
-          .query('SELECT * FROM emergency_contacts WHERE user_id = $1 ORDER BY priority ASC', [userId])
-          .catch(() => ({ rows: [] })),
-        client.query('SELECT * FROM healthcare_professionals WHERE user_id = $1', [userId]).catch(() => ({ rows: [] })),
-        client
-          .query(
-            `SELECT cr.*,
-                    cp.nome AS caregiver_profile_name,
-                    cp.email AS caregiver_profile_email
-             FROM caregiver_relationships cr
-             LEFT JOIN profiles cp ON cp.id = cr.caregiver_id
-             WHERE cr.patient_id = $1
-               AND cr.status IN ('pending', 'active')
-             ORDER BY cr.created_at DESC`,
-            [userId]
-          )
-          .catch(() => ({ rows: [] })),
-        client
-          .query('SELECT * FROM stock_movements WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200', [userId])
-          .catch(() => ({ rows: [] })),
-        client
-          .query("SELECT * FROM approval_requests WHERE patient_id = $1 ORDER BY created_at DESC LIMIT 100", [userId])
-          .catch(() => ({ rows: [] })),
-        client
-          .query('SELECT * FROM notificacoes WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [userId])
-          .catch(() => ({ rows: [] })),
-        fetchPatientCareSettings(client, userId),
-      ]);
+    const profileRes = await client.query('SELECT * FROM profiles WHERE id = $1 LIMIT 1', [userId]);
+    const medsRes = await client.query(
+      "SELECT * FROM medicamentos WHERE user_id = $1 AND COALESCE(ativo, true) = true AND COALESCE(status, 'ativo') <> 'cancelado' ORDER BY created_at ASC",
+      [userId]
+    );
+    const histRes = await client.query('SELECT * FROM historico_doses WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500', [
+      userId,
+    ]);
+    const eventsRes = await client.query(
+      "SELECT * FROM health_events WHERE user_id = $1 AND COALESCE(type, '') <> 'estoque' AND COALESCE(title, '') NOT ILIKE 'Reposição:%' AND COALESCE(title, '') NOT ILIKE 'Ajuste:%' ORDER BY date ASC",
+      [userId]
+    );
+    const notesRes = await client
+      .query('SELECT * FROM notes WHERE user_id = $1 ORDER BY date DESC', [userId])
+      .catch(() => client.query('SELECT * FROM calendar_notes WHERE user_id = $1 ORDER BY date DESC', [userId]))
+      .catch(() => ({ rows: [] }));
+    const algRes = await client.query('SELECT * FROM allergies WHERE user_id = $1', [userId]).catch(() => ({ rows: [] }));
+    const condRes = await client
+      .query('SELECT * FROM health_conditions WHERE user_id = $1', [userId])
+      .catch(() => ({ rows: [] }));
+    const contRes = await client
+      .query('SELECT * FROM emergency_contacts WHERE user_id = $1 ORDER BY priority ASC', [userId])
+      .catch(() => ({ rows: [] }));
+    const profRes = await client
+      .query('SELECT * FROM healthcare_professionals WHERE user_id = $1', [userId])
+      .catch(() => ({ rows: [] }));
+    const cgRes = await client
+      .query(
+        `SELECT cr.*,
+                cp.nome AS caregiver_profile_name,
+                cp.email AS caregiver_profile_email
+         FROM caregiver_relationships cr
+         LEFT JOIN profiles cp ON cp.id = cr.caregiver_id
+         WHERE cr.patient_id = $1
+           AND cr.status IN ('pending', 'active')
+         ORDER BY cr.created_at DESC`,
+        [userId]
+      )
+      .catch(() => ({ rows: [] }));
+    const stockRes = await client
+      .query('SELECT * FROM stock_movements WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200', [userId])
+      .catch(() => ({ rows: [] }));
+    const approvalRes = await client
+      .query('SELECT * FROM approval_requests WHERE patient_id = $1 ORDER BY created_at DESC LIMIT 100', [userId])
+      .catch(() => ({ rows: [] }));
+    const notifRes = await client
+      .query('SELECT * FROM notificacoes WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [userId])
+      .catch(() => ({ rows: [] }));
+    const careSettings = await fetchPatientCareSettings(client, userId);
 
     const seenDoseSlots = new Set();
     const cleanHistory = [];
@@ -1583,12 +1586,12 @@ export async function POST(request) {
     txOpen = false;
 
     if (deferredPushes.length > 0) {
-      await Promise.race([
-        Promise.allSettled(
-          deferredPushes.map((p) => sendWebPushToUsers(client, p.userIds, p.payload))
-        ),
-        new Promise((resolve) => setTimeout(resolve, 2500)),
-      ]).catch(() => {});
+      const pushDeadline = Date.now() + 2500;
+      for (const p of deferredPushes) {
+        const remainingMs = pushDeadline - Date.now();
+        if (remainingMs <= 100) break;
+        await sendWebPushToUsers(client, p.userIds, p.payload, { timeoutMs: remainingMs }).catch(() => {});
+      }
     }
 
     return NextResponse.json(

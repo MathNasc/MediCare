@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 import webpush from 'web-push';
-import { getPgPool, ensureOraclePostgresSchema } from './oraclePostgres';
+import {
+  getPgPool,
+  ensureOraclePostgresSchema,
+  ensureCleanPgClient,
+  safeReleasePgClient,
+} from './oraclePostgres';
 import {
   checkOverdueDosesForCaregivers,
   configureWebPush,
@@ -27,6 +32,7 @@ export async function runMedicationReminderWorker() {
   let caregiverOverdueAlerts = 0;
 
   try {
+    await ensureCleanPgClient(client);
     await ensureOraclePostgresSchema(client);
     const { todayIso, currentMinutes } = getLocalDateAndMinutes('America/Sao_Paulo');
 
@@ -230,7 +236,7 @@ export async function runMedicationReminderWorker() {
       timestamp: new Date().toISOString(),
     };
   } finally {
-    client.release();
+    await safeReleasePgClient(client);
   }
 }
 

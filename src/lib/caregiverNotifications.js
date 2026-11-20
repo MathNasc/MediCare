@@ -90,7 +90,7 @@ export function matchesMedicationWeekday(diasSemana, weekdayIndex) {
   });
 }
 
-export async function sendWebPushToUsers(client, userIds, payloadObj) {
+export async function sendWebPushToUsers(client, userIds, payloadObj, { timeoutMs = 2500 } = {}) {
   const cleanIds = Array.from(new Set((userIds || []).filter(Boolean).map(String)));
   if (cleanIds.length === 0) return { sent: 0, failed: 0 };
   if (!configureWebPush()) return { sent: 0, failed: 0 };
@@ -106,18 +106,33 @@ export async function sendWebPushToUsers(client, userIds, payloadObj) {
   const payload = JSON.stringify(payloadObj);
 
   for (const sub of subsRes.rows) {
+    let timer = null;
     try {
-      await webpush.sendNotification(
+      const sendPromise = webpush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         payload,
         { urgency: 'high' }
       );
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        const timeoutPromise = new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            const timeoutErr = new Error('Web Push timeout');
+            timeoutErr.code = 'PUSH_TIMEOUT';
+            reject(timeoutErr);
+          }, timeoutMs);
+        });
+        await Promise.race([sendPromise, timeoutPromise]);
+      } else {
+        await sendPromise;
+      }
       sent += 1;
     } catch (err) {
       failed += 1;
       if (err?.statusCode === 404 || err?.statusCode === 410) {
         await client.query(`DELETE FROM push_subscriptions WHERE id = $1`, [sub.id]).catch(() => {});
       }
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 

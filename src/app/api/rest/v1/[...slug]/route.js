@@ -1301,20 +1301,20 @@ async function handleRpcCall(client, fnName, args, userId) {
       if (!allowed) {
         return { status: 403, body: { error: 'Acesso negado ao resumo deste paciente.' } };
       }
-      const [profRes, medsRes, lastDoseRes] = await Promise.all([
-        client.query(`SELECT id, nome, email, role, foto_url, blood_type, dob FROM profiles WHERE id::text = $1::text LIMIT 1`, [
-          String(patientId),
-        ]),
-        client.query(`SELECT COUNT(*)::int AS cnt FROM medicamentos WHERE user_id::text = $1::text AND ativo = TRUE`, [
-          String(patientId),
-        ]),
-        client.query(
-          `SELECT hora, created_at AS at, status FROM historico_doses
-           WHERE user_id::text = $1::text AND status IN ('confirmed', 'late')
-           ORDER BY created_at DESC LIMIT 1`,
-          [String(patientId)]
-        ),
-      ]);
+      const profRes = await client.query(
+        `SELECT id, nome, email, role, foto_url, blood_type, dob FROM profiles WHERE id::text = $1::text LIMIT 1`,
+        [String(patientId)]
+      );
+      const medsRes = await client.query(
+        `SELECT COUNT(*)::int AS cnt FROM medicamentos WHERE user_id::text = $1::text AND ativo = TRUE`,
+        [String(patientId)]
+      );
+      const lastDoseRes = await client.query(
+        `SELECT hora, created_at AS at, status FROM historico_doses
+         WHERE user_id::text = $1::text AND status IN ('confirmed', 'late')
+         ORDER BY created_at DESC LIMIT 1`,
+        [String(patientId)]
+      );
       return {
         status: 200,
         body: {
