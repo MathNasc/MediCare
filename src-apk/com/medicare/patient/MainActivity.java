@@ -166,6 +166,18 @@ public class MainActivity extends Activity {
     private String lastRenderedTabKey = "";
     private boolean shouldScrollChatToBottom = true;
     private String chatInputDraft = "";
+    private JSONArray caregiverChatMessages = new JSONArray();
+    private String selectedChatCaregiverId = "";
+    private String selectedChatCaregiverName = "";
+    private String chatCaregiverDraft = "";
+    private int caregiverChatUnreadCount = 0;
+    private boolean isCaregiverChatLoading = false;
+    private boolean isCaregiverChatSending = false;
+    private String caregiverChatError = "";
+    private ScrollView activeCaregiverChatScrollView = null;
+    private int savedCaregiverChatScrollY = 0;
+    private boolean shouldScrollCaregiverChatToBottom = true;
+    private LinearLayout caregiverChatMsgsLayout = null;
     private String profileSubView = "main";
     private String selectedStockMedId = "";
     private JSONObject careSettings = createDefaultCareSettings();
@@ -175,6 +187,7 @@ public class MainActivity extends Activity {
     private volatile boolean lastPullSucceeded = false;
     private volatile long localMutationVersion = 0L;
     private final Object syncNetworkLock = new Object();
+    private final Object authRefreshLock = new Object();
     private boolean isActivityResumed = false;
     private long lastHandledNotifConfirmMs = 0L;
     private boolean isCheckingApkUpdate = false;
@@ -197,7 +210,12 @@ public class MainActivity extends Activity {
         public void run() {
             if (MainActivity.this.isLoggedIn && MainActivity.this.isActivityResumed) {
                 MainActivity.this.pullFromBackendIfEmptyOrUpdated();
-                MainActivity.this.syncPollHandler.postDelayed(this, 15000L);
+                boolean inCaregiverChat = "ai".equals(MainActivity.this.activeTab)
+                    && "caregiver_chat".equals(MainActivity.this.aiSubView);
+                if (MainActivity.this.canShowCaregiverChat()) {
+                    MainActivity.this.fetchCaregiverChatMessages(true, inCaregiverChat);
+                }
+                MainActivity.this.syncPollHandler.postDelayed(this, inCaregiverChat ? 7000L : 15000L);
             }
         }
     };
@@ -1983,6 +2001,14 @@ public class MainActivity extends Activity {
         this.professionals = new JSONArray();
         this.caregivers = new JSONArray();
         this.aiMessages = new JSONArray();
+        this.caregiverChatMessages = new JSONArray();
+        this.selectedChatCaregiverId = "";
+        this.selectedChatCaregiverName = "";
+        this.chatCaregiverDraft = "";
+        this.caregiverChatUnreadCount = 0;
+        this.caregiverChatError = "";
+        this.isCaregiverChatLoading = false;
+        this.isCaregiverChatSending = false;
         this.careSettings = createDefaultCareSettings();
         this.onboardingStep = 0;
         this.activeTab = "home";
@@ -2205,7 +2231,12 @@ public class MainActivity extends Activity {
         this.isRegisterMode = false;
         scheduleAllMedicationAlarms();
         resetActiveSessionData();
-        this.prefs.edit().putBoolean("onboarding_completed", false).remove("active_user_email").remove("auth_access_token").commit();
+        this.prefs.edit()
+            .putBoolean("onboarding_completed", false)
+            .remove("active_user_email")
+            .remove("auth_access_token")
+            .remove("auth_refresh_token")
+            .commit();
         saveLocalStateOnly();
         render();
     }
@@ -2241,6 +2272,9 @@ public class MainActivity extends Activity {
 
     private void render() {
         applyThemeColors();
+        if ("caregiver_chat".equals(this.aiSubView) && !canShowCaregiverChat()) {
+            this.aiSubView = "main";
+        }
         String currentTabKey = this.activeTab + "|" + ("ai".equals(this.activeTab) ? this.aiSubView : ("profile".equals(this.activeTab) ? this.profileSubView : ""));
         final boolean sameViewAsBefore = currentTabKey.equals(this.lastRenderedTabKey);
         if (this.activeMainScrollView != null) {
@@ -2249,15 +2283,23 @@ public class MainActivity extends Activity {
         if (this.activeChatScrollView != null) {
             this.savedChatScrollY = this.activeChatScrollView.getScrollY();
         }
+        if (this.activeCaregiverChatScrollView != null) {
+            this.savedCaregiverChatScrollY = this.activeCaregiverChatScrollView.getScrollY();
+        }
         if (!sameViewAsBefore) {
             this.savedMainScrollY = 0;
             if ("ai|chat".equals(currentTabKey)) {
                 this.shouldScrollChatToBottom = true;
             }
+            if ("ai|caregiver_chat".equals(currentTabKey)) {
+                this.shouldScrollCaregiverChatToBottom = true;
+            }
         }
         this.lastRenderedTabKey = currentTabKey;
         this.activeMainScrollView = null;
         this.activeChatScrollView = null;
+        this.activeCaregiverChatScrollView = null;
+        this.caregiverChatMsgsLayout = null;
 
         this.rootContainer.removeAllViews();
         this.rootContainer.setBackgroundColor(this.cBgMain);
@@ -2275,14 +2317,18 @@ public class MainActivity extends Activity {
         linearLayout.setFocusable(true);
         linearLayout.setFocusableInTouchMode(true);
         linearLayout.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
-        if ("ai".equals(this.activeTab) && "chat".equals(this.aiSubView)) {
+        if ("ai".equals(this.activeTab) && ("chat".equals(this.aiSubView) || "caregiver_chat".equals(this.aiSubView))) {
             LinearLayout chatViewport = new LinearLayout(this);
             chatViewport.setOrientation(1);
             chatViewport.setFocusable(true);
             chatViewport.setFocusableInTouchMode(true);
             chatViewport.setPadding(dp(14), dp(16), dp(14), dp(10));
             chatViewport.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
-            buildAiChatSubView(chatViewport);
+            if ("caregiver_chat".equals(this.aiSubView)) {
+                buildCaregiverChatSubView(chatViewport);
+            } else {
+                buildAiChatSubView(chatViewport);
+            }
             linearLayout.addView(chatViewport);
         } else {
             final ScrollView scrollView = createStableScrollView();
@@ -3224,6 +3270,7 @@ public class MainActivity extends Activity {
                                         MainActivity.this.prefs.edit().putBoolean("onboarding_completed", true).commit();
                                     }
                                     String accessToken = respObj.optString("access_token", "").trim();
+                                    String refreshToken = respObj.optString("refresh_token", "").trim();
                                     MainActivity.this.hasUnsyncedLocalChanges = false;
                                     MainActivity.this.isLoggedIn = true;
                                     MainActivity.this.isRegisterMode = false;
@@ -3234,6 +3281,11 @@ public class MainActivity extends Activity {
                                         loginEd.putString("auth_access_token", accessToken);
                                     } else {
                                         loginEd.remove("auth_access_token");
+                                    }
+                                    if (!refreshToken.isEmpty()) {
+                                        loginEd.putString("auth_refresh_token", refreshToken);
+                                    } else {
+                                        loginEd.remove("auth_refresh_token");
                                     }
                                     loginEd.commit();
                                     MainActivity.this.saveLocalStateOnly();
@@ -3353,6 +3405,7 @@ public class MainActivity extends Activity {
                                     MainActivity.this.profile.put("full_name", cleanNome);
                                     MainActivity.this.setProfileRoleValue("independente");
                                     String accessToken = respObj.optString("access_token", "").trim();
+                                    String refreshToken = respObj.optString("refresh_token", "").trim();
                                     MainActivity.this.hasUnsyncedLocalChanges = false;
                                     MainActivity.this.isLoggedIn = true;
                                     MainActivity.this.isRegisterMode = false;
@@ -3365,6 +3418,11 @@ public class MainActivity extends Activity {
                                         regEd.putString("auth_access_token", accessToken);
                                     } else {
                                         regEd.remove("auth_access_token");
+                                    }
+                                    if (!refreshToken.isEmpty()) {
+                                        regEd.putString("auth_refresh_token", refreshToken);
+                                    } else {
+                                        regEd.remove("auth_refresh_token");
                                     }
                                     regEd.commit();
                                     MainActivity.this.saveLocalStateOnly();
@@ -3659,6 +3717,7 @@ public class MainActivity extends Activity {
                             MainActivity.this.setProfileRoleValue(userRole);
 
                             String accessToken = finalResp.optString("access_token", "").trim();
+                            String refreshToken = finalResp.optString("refresh_token", "").trim();
                             MainActivity.this.hasUnsyncedLocalChanges = false;
                             MainActivity.this.isLoggedIn = true;
                             MainActivity.this.isRegisterMode = false;
@@ -3671,6 +3730,11 @@ public class MainActivity extends Activity {
                                 claimEd.putString("auth_access_token", accessToken);
                             } else {
                                 claimEd.remove("auth_access_token");
+                            }
+                            if (!refreshToken.isEmpty()) {
+                                claimEd.putString("auth_refresh_token", refreshToken);
+                            } else {
+                                claimEd.remove("auth_refresh_token");
                             }
                             claimEd.commit();
 
@@ -11415,9 +11479,34 @@ public class MainActivity extends Activity {
         styleDialogWindow(dialog);
     }
 
+    private List<JSONObject> getActiveCaregivers() {
+        List<JSONObject> activeList = new ArrayList<JSONObject>();
+        if (this.caregivers == null) return activeList;
+        for (int i = 0; i < this.caregivers.length(); i++) {
+            JSONObject cg = this.caregivers.optJSONObject(i);
+            if (cg == null) continue;
+            String cgId = optCleanString(cg, "caregiver_id", "");
+            if (cgId.isEmpty()) continue;
+            String rawStatus = optCleanString(cg, "raw_status", "").toLowerCase(Locale.ROOT);
+            String status = optCleanString(cg, "status", "").toLowerCase(Locale.ROOT);
+            if ("active".equals(rawStatus) || "ativo".equals(status)) {
+                activeList.add(cg);
+            }
+        }
+        return activeList;
+    }
+
+    private boolean canShowCaregiverChat() {
+        return isPatientProfileRole() && !getActiveCaregivers().isEmpty();
+    }
+
     private void buildAiTab(LinearLayout linearLayout) {
         if ("meds".equals(this.aiSubView) || "attention".equals(this.aiSubView) || "stock".equals(this.aiSubView) || "consult".equals(this.aiSubView)) {
             buildAiStructuredSubView(linearLayout, this.aiSubView);
+            return;
+        }
+        if ("caregiver_chat".equals(this.aiSubView) && canShowCaregiverChat()) {
+            buildCaregiverChatSubView(linearLayout);
             return;
         }
         if ("chat".equals(this.aiSubView)) {
@@ -11563,8 +11652,9 @@ public class MainActivity extends Activity {
         linearLayout.addView(gridRow2);
 
         // 4. Full-width Gradient Button: [ 💬 Falar com o Assistente ]
+        boolean showCaregiverChatOption = canShowCaregiverChat();
         TextView btnChatHero = new TextView(this);
-        btnChatHero.setText("💬   Falar com o Assistente");
+        btnChatHero.setText("💬   Falar com o Assistente (IA Saúde)");
         btnChatHero.setTextColor(Color.WHITE);
         btnChatHero.setTextSize(sp(16.0f));
         btnChatHero.setTypeface(null, 1);
@@ -11577,7 +11667,7 @@ public class MainActivity extends Activity {
         btnChatHero.setBackground(chatBtnGrad);
         btnChatHero.setPadding(dp(18), dp(16), dp(18), dp(16));
         LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(-1, -2);
-        chLp.bottomMargin = dp(20);
+        chLp.bottomMargin = dp(showCaregiverChatOption ? 12 : 20);
         btnChatHero.setLayoutParams(chLp);
         btnChatHero.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -11588,6 +11678,47 @@ public class MainActivity extends Activity {
             }
         });
         linearLayout.addView(btnChatHero);
+
+        if (showCaregiverChatOption) {
+            List<JSONObject> activeCgs = getActiveCaregivers();
+            String cgTitle = "Falar com o Cuidador";
+            if (activeCgs.size() == 1) {
+                String singleName = optCleanString(activeCgs.get(0), "caregiver_name", optCleanString(activeCgs.get(0), "nome", ""));
+                if (!singleName.isEmpty()) {
+                    cgTitle = "Falar com " + singleName.split("\\s+")[0] + " (Cuidador)";
+                }
+            }
+            if (this.caregiverChatUnreadCount > 0) {
+                cgTitle += " • " + this.caregiverChatUnreadCount + " nova(s)";
+            }
+
+            TextView btnCaregiverChatHero = new TextView(this);
+            btnCaregiverChatHero.setText("🤝   " + cgTitle);
+            btnCaregiverChatHero.setTextColor(Color.WHITE);
+            btnCaregiverChatHero.setTextSize(sp(15.5f));
+            btnCaregiverChatHero.setTypeface(null, 1);
+            btnCaregiverChatHero.setGravity(17);
+            GradientDrawable cgBtnGrad = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{Color.parseColor("#059669"), Color.parseColor("#10B981")}
+            );
+            cgBtnGrad.setCornerRadius(dp(18));
+            btnCaregiverChatHero.setBackground(cgBtnGrad);
+            btnCaregiverChatHero.setPadding(dp(18), dp(15), dp(18), dp(15));
+            LinearLayout.LayoutParams cgcLp = new LinearLayout.LayoutParams(-1, -2);
+            cgcLp.bottomMargin = dp(20);
+            btnCaregiverChatHero.setLayoutParams(cgcLp);
+            btnCaregiverChatHero.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.aiSubView = "caregiver_chat";
+                    MainActivity.this.shouldScrollCaregiverChatToBottom = true;
+                    render();
+                    MainActivity.this.fetchCaregiverChatMessages(false, true);
+                }
+            });
+            linearLayout.addView(btnCaregiverChatHero);
+        }
 
         // 5. Card: "Pergunte ao Assistente" with 3 quick questions
         LinearLayout askCard = new LinearLayout(this);
@@ -11808,12 +11939,36 @@ public class MainActivity extends Activity {
         titleCol.addView(tvT);
 
         TextView tvS = new TextView(this);
-        tvS.setText("● Online • Baseado nos seus dados");
+        tvS.setText("● IA exclusiva para saúde e tratamento");
         tvS.setTextColor(this.cSuccess);
-        tvS.setTextSize(sp(11.5f));
+        tvS.setTextSize(sp(11.0f));
         titleCol.addView(tvS);
 
         topRow.addView(titleCol);
+
+        if (canShowCaregiverChat()) {
+            TextView btnSwitchCg = new TextView(this);
+            btnSwitchCg.setText("🤝 Cuidador");
+            btnSwitchCg.setTextColor(Color.parseColor("#10B981"));
+            btnSwitchCg.setTextSize(sp(11.5f));
+            btnSwitchCg.setTypeface(null, 1);
+            btnSwitchCg.setGravity(17);
+            btnSwitchCg.setBackground(shape(Color.parseColor("#1A10B981"), 10, Color.parseColor("#6610B981"), 1));
+            btnSwitchCg.setPadding(dp(10), dp(7), dp(10), dp(7));
+            LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(-2, -2);
+            swLp.rightMargin = dp(6);
+            btnSwitchCg.setLayoutParams(swLp);
+            btnSwitchCg.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.aiSubView = "caregiver_chat";
+                    MainActivity.this.shouldScrollCaregiverChatToBottom = true;
+                    render();
+                    MainActivity.this.fetchCaregiverChatMessages(false, true);
+                }
+            });
+            topRow.addView(btnSwitchCg);
+        }
 
         if (this.aiMessages != null && this.aiMessages.length() > 1) {
             TextView btnClearChat = new TextView(this);
@@ -12095,36 +12250,86 @@ public class MainActivity extends Activity {
             public void run() {
                 String responseText = "";
                 try {
-                    URL url = new URL(EMBEDDED_BACKEND_URL + "/api/ai");
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setConnectTimeout(8000);
-                    conn.setReadTimeout(12000);
-                    conn.setDoOutput(true);
-                    conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                    JSONArray historyArr = new JSONArray();
+                    if (MainActivity.this.aiMessages != null) {
+                        int totalMsgs = MainActivity.this.aiMessages.length();
+                        // Exclui a última mensagem recém-adicionada (user prompt atual) e pega últimos 6 turnos
+                        int endIdx = Math.max(0, totalMsgs - 1);
+                        int startIdx = Math.max(0, endIdx - 6);
+                        for (int i = startIdx; i < endIdx; i++) {
+                            JSONObject m = MainActivity.this.aiMessages.optJSONObject(i);
+                            if (m == null) continue;
+                            String mRole = m.optString("role", "assistant");
+                            String mText = m.optString("text", "").trim();
+                            if (mText.isEmpty() || (!"user".equals(mRole) && !"assistant".equals(mRole))) continue;
+                            JSONObject hItem = new JSONObject();
+                            hItem.put("role", mRole);
+                            hItem.put("text", mText);
+                            historyArr.put(hItem);
+                        }
+                    }
+
+                    JSONObject clinicalCtx = new JSONObject();
+                    clinicalCtx.put("patientName", MainActivity.this.profile.optString("nome", "Paciente"));
+                    clinicalCtx.put("role", isPatientProfileRole() ? "paciente" : "independente");
+                    clinicalCtx.put("medicamentos", MainActivity.this.meds);
+                    clinicalCtx.put("allergies", MainActivity.this.allergies);
+                    clinicalCtx.put("conditions", MainActivity.this.conditions);
+                    clinicalCtx.put("doseLogs", MainActivity.this.doseLogs);
 
                     JSONObject payload = new JSONObject();
+                    payload.put("message", prompt);
                     payload.put("prompt", prompt);
+                    payload.put("history", historyArr);
+                    payload.put("context", clinicalCtx);
                     payload.put("patientName", MainActivity.this.profile.optString("nome", "Paciente"));
-                    payload.put("medicamentos", MainActivity.this.meds);
-                    payload.put("allergies", MainActivity.this.allergies);
-                    payload.put("conditions", MainActivity.this.conditions);
-                    payload.put("doseLogs", MainActivity.this.doseLogs);
 
-                    OutputStream os = conn.getOutputStream();
-                    os.write(payload.toString().getBytes(StandardCharsets.UTF_8));
-                    os.close();
+                    byte[] payloadBytes = payload.toString().getBytes(StandardCharsets.UTF_8);
+                    String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
 
-                    int code = conn.getResponseCode();
-                    if (code == 200) {
-                        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = reader.readLine()) != null) sb.append(line);
-                        reader.close();
+                    for (String base : baseCandidates) {
+                        if (base == null || base.trim().isEmpty()) continue;
+                        HttpURLConnection conn = null;
+                        try {
+                            URL url = new URL(base + "/api/ai");
+                            conn = (HttpURLConnection) url.openConnection();
+                            conn.setRequestMethod("POST");
+                            conn.setConnectTimeout(10000);
+                            conn.setReadTimeout(25000);
+                            conn.setDoOutput(true);
+                            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
 
-                        JSONObject respObj = new JSONObject(sb.toString());
-                        responseText = respObj.optString("text", respObj.optString("resposta", ""));
+                            OutputStream os = conn.getOutputStream();
+                            os.write(payloadBytes);
+                            os.close();
+
+                            int code = conn.getResponseCode();
+                            InputStream respStream = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+                            if (respStream != null) {
+                                BufferedReader reader = new BufferedReader(new InputStreamReader(respStream, StandardCharsets.UTF_8));
+                                StringBuilder sb = new StringBuilder();
+                                String line;
+                                while ((line = reader.readLine()) != null) sb.append(line);
+                                reader.close();
+
+                                JSONObject respObj = new JSONObject(sb.toString());
+                                if (code == 200) {
+                                    String candidateText = respObj.optString("text", respObj.optString("resposta", "")).trim();
+                                    if (!candidateText.isEmpty()) {
+                                        responseText = candidateText;
+                                        break;
+                                    }
+                                } else if (code == 429) {
+                                    responseText = respObj.optString("error", "Muitas mensagens em pouco tempo. Aguarde alguns segundos e tente novamente.");
+                                    break;
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        } finally {
+                            if (conn != null) {
+                                try { conn.disconnect(); } catch (Exception ignored) {}
+                            }
+                        }
                     }
                 } catch (Exception ignored) {}
 
@@ -12152,6 +12357,728 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CHAT DIRETO PACIENTE <-> CUIDADOR (EXCLUSIVO PARA PACIENTES VINCULADOS)
+    // ─────────────────────────────────────────────────────────────────────────
+    private boolean refreshAuthAccessTokenLocked() {
+        synchronized (this.authRefreshLock) {
+            if (this.prefs == null) return false;
+            String refreshToken = this.prefs.getString("auth_refresh_token", "").trim();
+            if (refreshToken.isEmpty()) return false;
+            String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+            for (String base : baseCandidates) {
+                if (base == null || base.trim().isEmpty()) continue;
+                HttpURLConnection conn = null;
+                try {
+                    URL url = new URL(base + "/api/auth/v1/token?grant_type=refresh_token");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(10000);
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                    JSONObject body = new JSONObject();
+                    body.put("refresh_token", refreshToken);
+                    OutputStream os = conn.getOutputStream();
+                    os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                    os.close();
+
+                    int code = conn.getResponseCode();
+                    if (code == 200) {
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) sb.append(line);
+                        reader.close();
+                        JSONObject resp = new JSONObject(sb.toString());
+                        String newAccess = resp.optString("access_token", "").trim();
+                        String newRefresh = resp.optString("refresh_token", "").trim();
+                        if (!newAccess.isEmpty()) {
+                            SharedPreferences.Editor ed = this.prefs.edit().putString("auth_access_token", newAccess);
+                            if (!newRefresh.isEmpty()) {
+                                ed.putString("auth_refresh_token", newRefresh);
+                            }
+                            ed.commit();
+                            return true;
+                        }
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (conn != null) {
+                        try { conn.disconnect(); } catch (Exception ignored) {}
+                    }
+                }
+            }
+            return false;
+        }
+    }
+
+    private JSONObject executeAuthenticatedChatRequest(String method, String pathAndQuery, JSONObject body) {
+        JSONObject result = new JSONObject();
+        try {
+            if (this.prefs == null) {
+                result.put("status", 401);
+                result.put("error", "Sessão indisponível.");
+                return result;
+            }
+            String token = this.prefs.getString("auth_access_token", "").trim();
+            if (token.isEmpty()) {
+                if (refreshAuthAccessTokenLocked()) {
+                    token = this.prefs.getString("auth_access_token", "").trim();
+                }
+            }
+            if (token.isEmpty()) {
+                result.put("status", 401);
+                result.put("error", "Sessão expirada. Faça login novamente na aba Perfil para usar o chat com seu cuidador.");
+                return result;
+            }
+
+            String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
+            boolean retriedAfterRefresh = false;
+
+            for (int attempt = 0; attempt < 2; attempt++) {
+                token = this.prefs.getString("auth_access_token", "").trim();
+                boolean got401 = false;
+
+                for (String base : baseCandidates) {
+                    if (base == null || base.trim().isEmpty()) continue;
+                    HttpURLConnection conn = null;
+                    try {
+                        URL url = new URL(base + pathAndQuery);
+                        conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod(method);
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(12000);
+                        conn.setRequestProperty("Authorization", "Bearer " + token);
+                        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                        if (body != null && ("POST".equals(method) || "PATCH".equals(method))) {
+                            conn.setDoOutput(true);
+                            OutputStream os = conn.getOutputStream();
+                            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                            os.close();
+                        }
+
+                        int code = conn.getResponseCode();
+                        if (code == 401) {
+                            got401 = true;
+                            break;
+                        }
+                        InputStream stream = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+                        String rawResp = "";
+                        if (stream != null) {
+                            BufferedReader br = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                            StringBuilder sb = new StringBuilder();
+                            String line;
+                            while ((line = br.readLine()) != null) sb.append(line);
+                            br.close();
+                            rawResp = sb.toString();
+                        }
+                        JSONObject parsed = rawResp.isEmpty() ? new JSONObject() : new JSONObject(rawResp);
+                        parsed.put("_http_status", code);
+                        return parsed;
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (conn != null) {
+                            try { conn.disconnect(); } catch (Exception ignored) {}
+                        }
+                    }
+                }
+
+                if (got401 && !retriedAfterRefresh) {
+                    retriedAfterRefresh = true;
+                    if (refreshAuthAccessTokenLocked()) {
+                        continue;
+                    }
+                    result.put("_http_status", 401);
+                    result.put("error", "Sessão expirada. Entre novamente na sua conta para continuar conversando.");
+                    return result;
+                }
+                break;
+            }
+            result.put("_http_status", 503);
+            result.put("error", "Não foi possível conectar ao servidor do chat agora.");
+        } catch (Exception e) {
+            try {
+                result.put("_http_status", 500);
+                result.put("error", "Falha inesperada ao comunicar com o chat.");
+            } catch (Exception ignored) {}
+        }
+        return result;
+    }
+
+    private String formatChatTimestampBr(String rawIso) {
+        if (rawIso == null || rawIso.trim().isEmpty()) return "";
+        String[] parsed = parseUtcTimestampToLocalDateAndTime(rawIso);
+        if (parsed != null && parsed.length >= 2) {
+            return parsed[1];
+        }
+        String s = rawIso.trim();
+        int tIdx = s.indexOf('T');
+        if (tIdx >= 0 && s.length() >= tIdx + 6) {
+            return s.substring(tIdx + 1, tIdx + 6);
+        }
+        return "";
+    }
+
+    private JSONObject ensureSelectedChatCaregiver() {
+        List<JSONObject> active = getActiveCaregivers();
+        if (active.isEmpty()) {
+            this.selectedChatCaregiverId = "";
+            this.selectedChatCaregiverName = "";
+            return null;
+        }
+        for (JSONObject cg : active) {
+            String cgId = optCleanString(cg, "caregiver_id", "");
+            if (cgId.equalsIgnoreCase(this.selectedChatCaregiverId)) {
+                this.selectedChatCaregiverName = optCleanString(cg, "caregiver_name", optCleanString(cg, "nome", "Cuidador"));
+                return cg;
+            }
+        }
+        JSONObject first = active.get(0);
+        this.selectedChatCaregiverId = optCleanString(first, "caregiver_id", "");
+        this.selectedChatCaregiverName = optCleanString(first, "caregiver_name", optCleanString(first, "nome", "Cuidador"));
+        return first;
+    }
+
+    private void fetchCaregiverChatMessages(final boolean silent, final boolean markAsReadIfOpen) {
+        if (!canShowCaregiverChat()) return;
+        final JSONObject targetCg = ensureSelectedChatCaregiver();
+        if (targetCg == null) return;
+        final String caregiverId = optCleanString(targetCg, "caregiver_id", "");
+        if (caregiverId.isEmpty()) return;
+
+        if (!silent) {
+            this.isCaregiverChatLoading = true;
+            this.caregiverChatError = "";
+            render();
+        }
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String path = "/api/v1/chat?caregiverId=" + Uri.encode(caregiverId) + "&limit=100";
+                final JSONObject resp = executeAuthenticatedChatRequest("GET", path, null);
+                final int status = resp.optInt("_http_status", 500);
+                final JSONArray msgs = resp.optJSONArray("messages");
+                final int unread = resp.optInt("unreadCount", 0);
+                final boolean markReadNow = status == 200 && markAsReadIfOpen && unread > 0;
+
+                if (markReadNow) {
+                    try {
+                        JSONObject patchBody = new JSONObject();
+                        patchBody.put("caregiverId", caregiverId);
+                        executeAuthenticatedChatRequest("PATCH", "/api/v1/chat", patchBody);
+                    } catch (Exception ignored) {}
+                }
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        MainActivity.this.isCaregiverChatLoading = false;
+                        if (status == 200 && msgs != null) {
+                            String prevJson = MainActivity.this.caregiverChatMessages != null
+                                ? MainActivity.this.caregiverChatMessages.toString() : "[]";
+                            String nextJson = msgs.toString();
+                            boolean listChanged = !prevJson.equals(nextJson);
+
+                            MainActivity.this.caregiverChatError = "";
+                            MainActivity.this.caregiverChatMessages = msgs;
+                            MainActivity.this.caregiverChatUnreadCount = markReadNow ? 0 : unread;
+
+                            if ("ai".equals(MainActivity.this.activeTab) && "caregiver_chat".equals(MainActivity.this.aiSubView)) {
+                                if (MainActivity.this.caregiverChatMsgsLayout != null && MainActivity.this.activeCaregiverChatScrollView != null) {
+                                    if (listChanged || !silent) {
+                                        MainActivity.this.shouldScrollCaregiverChatToBottom = true;
+                                        populateCaregiverChatMessages(MainActivity.this.caregiverChatMsgsLayout, MainActivity.this.activeCaregiverChatScrollView);
+                                    }
+                                } else {
+                                    MainActivity.this.shouldScrollCaregiverChatToBottom = true;
+                                    render();
+                                }
+                            } else if (!silent) {
+                                render();
+                            }
+                        } else {
+                            String err = resp.optString("error", "");
+                            if (!silent || MainActivity.this.caregiverChatError.isEmpty()) {
+                                MainActivity.this.caregiverChatError = err;
+                                if ("ai".equals(MainActivity.this.activeTab) && "caregiver_chat".equals(MainActivity.this.aiSubView)) {
+                                    if (MainActivity.this.caregiverChatMsgsLayout != null && MainActivity.this.activeCaregiverChatScrollView != null) {
+                                        populateCaregiverChatMessages(MainActivity.this.caregiverChatMsgsLayout, MainActivity.this.activeCaregiverChatScrollView);
+                                    } else {
+                                        render();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void sendCaregiverChatMessage(final String text) {
+        final String clean = text != null ? text.trim() : "";
+        if (clean.isEmpty() || this.isCaregiverChatSending) return;
+        final JSONObject targetCg = ensureSelectedChatCaregiver();
+        if (targetCg == null) {
+            Toast.makeText(this, "Nenhum cuidador ativo vinculado.", 0).show();
+            return;
+        }
+        final String caregiverId = optCleanString(targetCg, "caregiver_id", "");
+        if (caregiverId.isEmpty()) return;
+
+        final String msgUuid = UUID.randomUUID().toString();
+        try {
+            JSONObject optMsg = new JSONObject();
+            optMsg.put("id", msgUuid);
+            optMsg.put("caregiver_id", caregiverId);
+            optMsg.put("sender_role", "paciente");
+            optMsg.put("sender_name", optCleanString(this.profile, "nome", "Você"));
+            optMsg.put("message", clean);
+            optMsg.put("created_at", nowUtcIso());
+            optMsg.put("read_at", JSONObject.NULL);
+            if (this.caregiverChatMessages == null) this.caregiverChatMessages = new JSONArray();
+            this.caregiverChatMessages.put(optMsg);
+            this.chatCaregiverDraft = "";
+            this.isCaregiverChatSending = true;
+            this.caregiverChatError = "";
+            this.shouldScrollCaregiverChatToBottom = true;
+            render();
+        } catch (Exception ignored) {
+            this.isCaregiverChatSending = false;
+            return;
+        }
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                JSONObject payload = new JSONObject();
+                try {
+                    payload.put("id", msgUuid);
+                    payload.put("caregiverId", caregiverId);
+                    payload.put("message", clean);
+                } catch (Exception ignored) {}
+
+                final JSONObject resp = executeAuthenticatedChatRequest("POST", "/api/v1/chat", payload);
+                final int status = resp.optInt("_http_status", 500);
+                final JSONObject savedMsg = resp.optJSONObject("message");
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        MainActivity.this.isCaregiverChatSending = false;
+                        if (status == 200 || status == 201) {
+                            if (savedMsg != null && MainActivity.this.caregiverChatMessages != null) {
+                                JSONArray updated = new JSONArray();
+                                for (int i = 0; i < MainActivity.this.caregiverChatMessages.length(); i++) {
+                                    JSONObject item = MainActivity.this.caregiverChatMessages.optJSONObject(i);
+                                    if (item != null && msgUuid.equals(item.optString("id", ""))) {
+                                        updated.put(savedMsg);
+                                    } else if (item != null) {
+                                        updated.put(item);
+                                    }
+                                }
+                                MainActivity.this.caregiverChatMessages = updated;
+                            }
+                        } else {
+                            // Remove mensagem otimista e restaura rascunho
+                            if (MainActivity.this.caregiverChatMessages != null) {
+                                JSONArray rolledBack = new JSONArray();
+                                for (int i = 0; i < MainActivity.this.caregiverChatMessages.length(); i++) {
+                                    JSONObject item = MainActivity.this.caregiverChatMessages.optJSONObject(i);
+                                    if (item != null && !msgUuid.equals(item.optString("id", ""))) {
+                                        rolledBack.put(item);
+                                    }
+                                }
+                                MainActivity.this.caregiverChatMessages = rolledBack;
+                            }
+                            MainActivity.this.chatCaregiverDraft = clean;
+                            String errMsg = resp.optString("error", "Não foi possível enviar a mensagem.");
+                            Toast.makeText(MainActivity.this, errMsg, 1).show();
+                        }
+                        MainActivity.this.shouldScrollCaregiverChatToBottom = true;
+                        render();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void populateCaregiverChatMessages(final LinearLayout msgsLayout, final ScrollView msgsScroll) {
+        if (msgsLayout == null || msgsScroll == null) return;
+        msgsLayout.removeAllViews();
+
+        if (this.isCaregiverChatLoading && (this.caregiverChatMessages == null || this.caregiverChatMessages.length() == 0)) {
+            TextView tvLoad = new TextView(this);
+            tvLoad.setText("⏳ Carregando conversa com seu cuidador...");
+            tvLoad.setTextColor(this.cTextMuted);
+            tvLoad.setTextSize(sp(13.5f));
+            tvLoad.setGravity(17);
+            tvLoad.setPadding(dp(16), dp(24), dp(16), dp(24));
+            msgsLayout.addView(tvLoad);
+            return;
+        }
+
+        if (this.caregiverChatError != null && !this.caregiverChatError.isEmpty()) {
+            LinearLayout errCard = new LinearLayout(this);
+            errCard.setOrientation(1);
+            errCard.setBackground(shape(Color.parseColor("#1AEF4444"), 14, Color.parseColor("#55EF4444"), 1));
+            errCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+            LinearLayout.LayoutParams ecLp = new LinearLayout.LayoutParams(-1, -2);
+            ecLp.bottomMargin = dp(10);
+            errCard.setLayoutParams(ecLp);
+
+            TextView tvErr = new TextView(this);
+            tvErr.setText("⚠️ " + this.caregiverChatError);
+            tvErr.setTextColor(this.cTextMain);
+            tvErr.setTextSize(sp(13.0f));
+            errCard.addView(tvErr);
+
+            TextView btnRetry = createButton("Tentar novamente", this.cPrimary, Color.WHITE);
+            LinearLayout.LayoutParams rtLp = new LinearLayout.LayoutParams(-2, -2);
+            rtLp.topMargin = dp(10);
+            btnRetry.setLayoutParams(rtLp);
+            btnRetry.setPadding(dp(14), dp(8), dp(14), dp(8));
+            btnRetry.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    MainActivity.this.fetchCaregiverChatMessages(false, true);
+                }
+            });
+            errCard.addView(btnRetry);
+            msgsLayout.addView(errCard);
+        }
+
+        if (this.caregiverChatMessages == null || this.caregiverChatMessages.length() == 0) {
+            LinearLayout emptyBox = new LinearLayout(this);
+            emptyBox.setOrientation(1);
+            emptyBox.setBackground(shape(this.cBgMain, 16, this.cBorder, 1));
+            emptyBox.setPadding(dp(16), dp(18), dp(16), dp(18));
+
+            TextView tvEmptyTitle = new TextView(this);
+            tvEmptyTitle.setText("🤝 Canal direto com " + (this.selectedChatCaregiverName.isEmpty() ? "seu cuidador" : this.selectedChatCaregiverName));
+            tvEmptyTitle.setTextColor(this.cTextMain);
+            tvEmptyTitle.setTextSize(sp(14.5f));
+            tvEmptyTitle.setTypeface(null, 1);
+            emptyBox.addView(tvEmptyTitle);
+
+            TextView tvEmptySub = new TextView(this);
+            tvEmptySub.setText("Envie uma mensagem para tirar dúvidas sobre suas doses, avisar como está se sentindo ou combinar lembretes com quem acompanha você.");
+            tvEmptySub.setTextColor(this.cTextMuted);
+            tvEmptySub.setTextSize(sp(13.0f));
+            tvEmptySub.setPadding(0, dp(6), 0, 0);
+            emptyBox.addView(tvEmptySub);
+
+            msgsLayout.addView(emptyBox);
+        } else {
+            for (int i = 0; i < this.caregiverChatMessages.length(); i++) {
+                JSONObject msg = this.caregiverChatMessages.optJSONObject(i);
+                if (msg == null) continue;
+                String sRole = optCleanString(msg, "sender_role", "paciente");
+                String sName = optCleanString(msg, "sender_name", this.selectedChatCaregiverName);
+                String text = msg.optString("message", "");
+                String timeLabel = formatChatTimestampBr(msg.optString("created_at", ""));
+                boolean isRead = !optCleanString(msg, "read_at", "").isEmpty();
+                boolean isPatient = "paciente".equals(sRole);
+
+                LinearLayout msgRow = new LinearLayout(this);
+                msgRow.setOrientation(1);
+                LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
+                rowLp.bottomMargin = dp(10);
+                msgRow.setLayoutParams(rowLp);
+
+                if (isPatient) {
+                    msgRow.setGravity(5);
+                    LinearLayout bubbleBox = new LinearLayout(this);
+                    bubbleBox.setOrientation(1);
+                    bubbleBox.setBackground(gradientShape(Color.parseColor("#059669"), Color.parseColor("#10B981"), 16));
+                    bubbleBox.setPadding(dp(14), dp(10), dp(14), dp(9));
+                    LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
+                    bLp.leftMargin = dp(48);
+                    bubbleBox.setLayoutParams(bLp);
+
+                    TextView tvBody = new TextView(this);
+                    tvBody.setText(text);
+                    tvBody.setTextColor(Color.WHITE);
+                    tvBody.setTextSize(sp(14.0f));
+                    tvBody.setLineSpacing(dp(2), 1.05f);
+                    bubbleBox.addView(tvBody);
+
+                    TextView tvMeta = new TextView(this);
+                    tvMeta.setText((timeLabel.isEmpty() ? "" : timeLabel + " ") + (isRead ? "✓✓ Lida" : "✓ Enviada"));
+                    tvMeta.setTextColor(Color.parseColor("#D1FAE5"));
+                    tvMeta.setTextSize(sp(10.0f));
+                    tvMeta.setGravity(5);
+                    tvMeta.setPadding(0, dp(4), 0, 0);
+                    bubbleBox.addView(tvMeta);
+
+                    msgRow.addView(bubbleBox);
+                } else {
+                    msgRow.setGravity(3);
+                    LinearLayout cgBox = new LinearLayout(this);
+                    cgBox.setOrientation(1);
+                    cgBox.setBackground(shape(this.cBgMain, 16, this.cBorder, 1));
+                    cgBox.setPadding(dp(14), dp(10), dp(14), dp(10));
+                    LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-2, -2);
+                    cLp.rightMargin = dp(42);
+                    cgBox.setLayoutParams(cLp);
+
+                    TextView cgHdr = new TextView(this);
+                    cgHdr.setText("🤝 " + (sName.isEmpty() ? "Cuidador" : sName));
+                    cgHdr.setTextColor(Color.parseColor("#10B981"));
+                    cgHdr.setTextSize(sp(11.0f));
+                    cgHdr.setTypeface(null, 1);
+                    cgHdr.setPadding(0, 0, 0, dp(3));
+                    cgBox.addView(cgHdr);
+
+                    TextView tvBody = new TextView(this);
+                    tvBody.setText(text);
+                    tvBody.setTextColor(this.cTextMain);
+                    tvBody.setTextSize(sp(14.0f));
+                    tvBody.setLineSpacing(dp(2), 1.05f);
+                    cgBox.addView(tvBody);
+
+                    if (!timeLabel.isEmpty()) {
+                        TextView tvMeta = new TextView(this);
+                        tvMeta.setText(timeLabel);
+                        tvMeta.setTextColor(this.cTextLight);
+                        tvMeta.setTextSize(sp(10.0f));
+                        tvMeta.setPadding(0, dp(4), 0, 0);
+                        cgBox.addView(tvMeta);
+                    }
+
+                    msgRow.addView(cgBox);
+                }
+                msgsLayout.addView(msgRow);
+            }
+        }
+
+        final boolean scrollBottomNow = this.shouldScrollCaregiverChatToBottom;
+        final int restoreY = Math.max(0, this.savedCaregiverChatScrollY);
+        this.shouldScrollCaregiverChatToBottom = false;
+        msgsScroll.post(new Runnable() {
+            @Override
+            public void run() {
+                if (scrollBottomNow) {
+                    int targetY = Math.max(0, msgsLayout.getHeight() - msgsScroll.getHeight() + msgsScroll.getPaddingBottom());
+                    msgsScroll.scrollTo(0, targetY);
+                    MainActivity.this.savedCaregiverChatScrollY = targetY;
+                } else {
+                    msgsScroll.scrollTo(0, restoreY);
+                }
+            }
+        });
+    }
+
+    private void buildCaregiverChatSubView(LinearLayout linearLayout) {
+        final List<JSONObject> activeCgs = getActiveCaregivers();
+        final JSONObject currentCg = ensureSelectedChatCaregiver();
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(0);
+        topRow.setGravity(16);
+        LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(-1, -2);
+        trLp.bottomMargin = dp(8);
+        topRow.setLayoutParams(trLp);
+
+        TextView btnBack = new TextView(this);
+        btnBack.setText("‹");
+        btnBack.setTextColor(this.cTextMain);
+        btnBack.setTextSize(sp(22.0f));
+        btnBack.setGravity(17);
+        btnBack.setBackground(shape(this.cSurface, 12, this.cBorder, 1));
+        LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        bkLp.rightMargin = dp(10);
+        btnBack.setLayoutParams(bkLp);
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.aiSubView = "main";
+                render();
+            }
+        });
+        topRow.addView(btnBack);
+
+        TextView tvAvatar = new TextView(this);
+        tvAvatar.setText("🤝");
+        tvAvatar.setTextSize(sp(17.0f));
+        tvAvatar.setGravity(17);
+        tvAvatar.setBackground(gradientShape(Color.parseColor("#059669"), Color.parseColor("#10B981"), 12));
+        LinearLayout.LayoutParams avLp = new LinearLayout.LayoutParams(dp(38), dp(38));
+        avLp.rightMargin = dp(10);
+        tvAvatar.setLayoutParams(avLp);
+        topRow.addView(tvAvatar);
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(1);
+        titleCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        String headerTitle = this.selectedChatCaregiverName.isEmpty() ? "Meu Cuidador" : this.selectedChatCaregiverName;
+        String relLabel = currentCg != null ? optCleanString(currentCg, "relationship_label", optCleanString(currentCg, "relacao", "Cuidador ativo")) : "Cuidador ativo";
+
+        TextView tvT = new TextView(this);
+        tvT.setText(headerTitle);
+        tvT.setTextColor(this.cTextMain);
+        tvT.setTextSize(sp(15.5f));
+        tvT.setTypeface(null, 1);
+        titleCol.addView(tvT);
+
+        TextView tvS = new TextView(this);
+        tvS.setText("● " + relLabel + " • Chat direto");
+        tvS.setTextColor(Color.parseColor("#10B981"));
+        tvS.setTextSize(sp(11.0f));
+        titleCol.addView(tvS);
+
+        topRow.addView(titleCol);
+
+        TextView btnSwitchAi = new TextView(this);
+        btnSwitchAi.setText("🩺 IA Saúde");
+        btnSwitchAi.setTextColor(this.cPrimary);
+        btnSwitchAi.setTextSize(sp(11.5f));
+        btnSwitchAi.setTypeface(null, 1);
+        btnSwitchAi.setGravity(17);
+        btnSwitchAi.setBackground(shape(this.cSurface, 10, this.cBorder, 1));
+        btnSwitchAi.setPadding(dp(10), dp(7), dp(10), dp(7));
+        btnSwitchAi.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.aiSubView = "chat";
+                MainActivity.this.shouldScrollChatToBottom = true;
+                render();
+            }
+        });
+        topRow.addView(btnSwitchAi);
+        linearLayout.addView(topRow);
+
+        if (activeCgs.size() > 1) {
+            HorizontalScrollView cgPickerScroll = new HorizontalScrollView(this);
+            cgPickerScroll.setHorizontalScrollBarEnabled(false);
+            LinearLayout.LayoutParams psLp = new LinearLayout.LayoutParams(-1, -2);
+            psLp.bottomMargin = dp(8);
+            cgPickerScroll.setLayoutParams(psLp);
+
+            LinearLayout cgPickerRow = new LinearLayout(this);
+            cgPickerRow.setOrientation(0);
+            for (int cIdx = 0; cIdx < activeCgs.size(); cIdx++) {
+                final JSONObject cgItem = activeCgs.get(cIdx);
+                final String cgId = optCleanString(cgItem, "caregiver_id", "");
+                final String cgName = optCleanString(cgItem, "caregiver_name", optCleanString(cgItem, "nome", "Cuidador"));
+                boolean isSel = cgId.equalsIgnoreCase(this.selectedChatCaregiverId);
+
+                TextView cgChip = new TextView(this);
+                cgChip.setText(cgName);
+                cgChip.setTextColor(isSel ? Color.WHITE : this.cTextMuted);
+                cgChip.setTextSize(sp(12.0f));
+                cgChip.setTypeface(null, 1);
+                cgChip.setBackground(shape(isSel ? Color.parseColor("#059669") : this.cSurface, 12, isSel ? Color.parseColor("#10B981") : this.cBorder, 1));
+                cgChip.setPadding(dp(12), dp(7), dp(12), dp(7));
+                LinearLayout.LayoutParams ccLp = new LinearLayout.LayoutParams(-2, -2);
+                ccLp.rightMargin = dp(6);
+                cgChip.setLayoutParams(ccLp);
+                cgChip.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        if (!cgId.equalsIgnoreCase(MainActivity.this.selectedChatCaregiverId)) {
+                            MainActivity.this.selectedChatCaregiverId = cgId;
+                            MainActivity.this.selectedChatCaregiverName = cgName;
+                            MainActivity.this.caregiverChatMessages = new JSONArray();
+                            MainActivity.this.shouldScrollCaregiverChatToBottom = true;
+                            render();
+                            MainActivity.this.fetchCaregiverChatMessages(false, true);
+                        }
+                    }
+                });
+                cgPickerRow.addView(cgChip);
+            }
+            cgPickerScroll.addView(cgPickerRow);
+            linearLayout.addView(cgPickerScroll);
+        }
+
+        LinearLayout chatCard = new LinearLayout(this);
+        chatCard.setOrientation(1);
+        chatCard.setFocusable(true);
+        chatCard.setFocusableInTouchMode(true);
+        chatCard.setBackground(shape(this.cSurface, 20, this.cBorder, 1));
+        chatCard.setPadding(dp(12), dp(12), dp(12), dp(12));
+        chatCard.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+
+        final ScrollView msgsScroll = createStableScrollView();
+        msgsScroll.setVerticalScrollBarEnabled(false);
+        msgsScroll.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1.0f));
+        this.activeCaregiverChatScrollView = msgsScroll;
+        msgsScroll.getViewTreeObserver().addOnScrollChangedListener(new android.view.ViewTreeObserver.OnScrollChangedListener() {
+            @Override
+            public void onScrollChanged() {
+                if (MainActivity.this.activeCaregiverChatScrollView == msgsScroll) {
+                    MainActivity.this.savedCaregiverChatScrollY = msgsScroll.getScrollY();
+                }
+            }
+        });
+
+        final LinearLayout msgsLayout = new LinearLayout(this);
+        msgsLayout.setOrientation(1);
+        msgsLayout.setPadding(dp(2), dp(4), dp(2), dp(6));
+        this.caregiverChatMsgsLayout = msgsLayout;
+
+        populateCaregiverChatMessages(msgsLayout, msgsScroll);
+        msgsScroll.addView(msgsLayout);
+        chatCard.addView(msgsScroll);
+
+        LinearLayout inputRow = new LinearLayout(this);
+        inputRow.setOrientation(0);
+        inputRow.setGravity(16);
+        LinearLayout.LayoutParams irLp = new LinearLayout.LayoutParams(-1, -2);
+        irLp.topMargin = dp(8);
+        inputRow.setLayoutParams(irLp);
+
+        final EditText etInput = new EditText(this);
+        etInput.setHint("Escreva para seu cuidador...");
+        etInput.setHintTextColor(this.cTextLight);
+        etInput.setTextColor(this.cTextMain);
+        etInput.setTextSize(sp(14.0f));
+        etInput.setBackground(shape(this.cBgMain, 14, this.cBorder, 1));
+        etInput.setPadding(dp(14), dp(11), dp(14), dp(11));
+        if (this.chatCaregiverDraft != null && !this.chatCaregiverDraft.isEmpty()) {
+            etInput.setText(this.chatCaregiverDraft);
+            etInput.setSelection(this.chatCaregiverDraft.length());
+        }
+        etInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                MainActivity.this.chatCaregiverDraft = s != null ? s.toString() : "";
+            }
+        });
+        LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        etLp.rightMargin = dp(8);
+        etInput.setLayoutParams(etLp);
+        inputRow.addView(etInput);
+
+        TextView btnSend = createButton(this.isCaregiverChatSending ? "..." : "Enviar", Color.parseColor("#059669"), Color.WHITE);
+        btnSend.setPadding(dp(16), dp(11), dp(16), dp(11));
+        btnSend.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String msgText = etInput.getText().toString().trim();
+                if (!msgText.isEmpty() && !MainActivity.this.isCaregiverChatSending) {
+                    sendCaregiverChatMessage(msgText);
+                }
+            }
+        });
+        inputRow.addView(btnSend);
+        chatCard.addView(inputRow);
+
+        linearLayout.addView(chatCard);
     }
 
     private String generateLocalAiFallbackResponse(String prompt) {

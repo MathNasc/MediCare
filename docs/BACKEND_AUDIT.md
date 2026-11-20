@@ -1,6 +1,6 @@
 # Auditoria Técnica do Backend — MediCare
 
-**Versão:** 2.1 (Atualizada)  
+**Versão:** 2.2 (Atualizada)  
 **Contexto:** Integração consolidada entre o **MediCare Paciente Android**, o **MediCare Cuidador Web/Android** (`src/app/cuidador/page.jsx`) e o banco **PostgreSQL 16 na Oracle Cloud (`medicare_db`)**.
 
 ---
@@ -12,7 +12,7 @@
 - **Inicialização e Migrações (`src/lib/oraclePostgres.js`):**
   1. `verifyDatabaseConnection(client)`: Verifica conectividade com `SELECT 1`.
   2. `verifySchemaVersion(client)`: Consulta `schema_migrations` e tabelas essenciais em modo somente leitura, sem executar DDL em requisições HTTP.
-  3. `runDatabaseMigrations(client, { authorized: true })`: Aplica migrações versionadas (`03`, `04` e `05`) dentro de transações explícitas.
+  3. `runDatabaseMigrations(client, { authorized: true })`: Aplica migrações versionadas (`03`, `04`, `05` e `06`) dentro de transações explícitas.
   4. `ensureOraclePostgresSchema(client)`: Apenas valida prontidão do esquema durante requisições normais.
 - **Fallback Proxy Anti-Loop (`src/lib/oracleProxy.js`):**
   - `connectPgOrFallback(req, targetPath)` usa conexão direta ao PostgreSQL quando acessível e encaminha automaticamente para `ORACLE_BACKEND_URL` caso o banco local não esteja configurado ou ocorra timeout/bloqueio TCP na porta `5432` (ex.: previews externos), impedindo loops por cabeçalho `x-medicare-proxy-hop: 1` e comparação de host.
@@ -46,7 +46,9 @@ Todas as tabelas e RPCs validam vínculo ativo (`caregiver_relationships.status 
 | :--- | :--- | :--- |
 | `GET`/`PUT`/`PATCH`/`POST`/`DELETE` `/api/v1/caregiver/settings` | Regras Globais (`caregiver_global_settings`), Grupos (`caregiver_patient_groups`) e regras por paciente (`patient_care_settings`) com herança e atribuição em lote. | Validada |
 | `GET`/`PATCH` `/api/v1/caregiver/notifications` | Alertas do cuidador (solicitações de dose, atrasos, SOS) e marcação de leitura. | Validada |
+| `GET`/`POST`/`PATCH` `/api/v1/chat` & `GET` `/api/v1/chat/stream` | Chat direto em tempo real paciente ↔ cuidador (SSE + Push), exigindo vínculo `active` e bloqueando perfis `independente` (`403`). | Validada |
+| `POST` `/api/ai` | Assistente de Saúde via OpenRouter (`OPENROUTER_API_KEY`) protegido por `aiGuardrails.js` (anti-prompt-injection, zero código e domínio estrito de saúde). | Validada |
 | `GET`/`POST`/`DELETE` `/api/v1/sync` | Sincronização bidirecional Android preservando `care_settings`, `confirmed_by_role`, `origin`, `atraso_minutos` e `administered_at`. | Validada |
 | `POST` `/api/v1/jobs/reminders` & `/api/v1/jobs/alert-caregiver` | Alertas automáticos de atraso configuráveis por `overdue_notify_minutes` e disparo Web Push (`web-push`). | Validada |
 | `GET` `/api/v1/health` | Saúde do PostgreSQL local ou status do upstream Oracle via proxy. | Validada |
-| `GET` `/api/system/versions`, `/api/apk`, `/api/apk/cuidador`, `/api/apk/version` | Metadados de versão e download dos APKs assinados de Paciente e Cuidador. | Validada |
+| `GET` `/api/system/versions`, `/api/apk`, `/api/apk/cuidador`, `/api/apk/version` | Metadados de versão e download dos APKs assinados de Paciente (`v2.9.1`) e Cuidador (`v2.0.0`). | Validada |

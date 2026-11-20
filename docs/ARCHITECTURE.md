@@ -22,20 +22,22 @@ MediCare/
 │   │   ├── CuidadorPortalActions.jsx
 │   │   └── page.jsx               # Portal institucional e distribuição mobile (/ e /?portal=1)
 │   ├── lib/
+│   │   ├── aiGuardrails.js        # Guardrails anti-prompt-injection, zero código e domínio saúde
 │   │   ├── appVersions.js         # Versionamento dinâmico Web, SW e APKs Android
 │   │   ├── auditFormatter.js      # Tradução amigável de logs de auditoria clínica
 │   │   ├── brazilTime.js          # Fuso horário oficial America/Sao_Paulo (-03:00)
 │   │   ├── careSettings.js        # Regras Global, Grupos e Por Paciente com resolução por herança
 │   │   ├── caregiverCalendar.js   # Lógica de calendário mensal e eventos diários do cuidador
 │   │   ├── caregiverNotifications.js # Notificações de atraso, solicitações e uso SOS
+│   │   ├── chatRealtime.js        # SSE e autorização de chat paciente <-> cuidador
 │   │   ├── oracleAuth.js          # Sessões isoladas (sid), cookies HttpOnly, CSRF e Bearer
 │   │   ├── oraclePostgres.js      # Pool pg com verificação de esquema sem DDL implícito
 │   │   ├── oracleProxy.js         # Fallback proxy anti-loop para a API Oracle Cloud em previews
 │   │   ├── reminderWorker.js      # Worker de alertas de atraso respeitando overdue_notify_minutes
 │   │   ├── usePWA.js              # Service Worker (v7) e prompt PWA
 │   │   └── webPush.js             # Registro Web Push VAPID
-│   └── __tests__/                 # Suíte Jest (6 arquivos, 49 testes)
-├── database/migrations/           # Esquema standalone e migrações (02, 03, 04, 05)
+│   └── __tests__/                 # Suíte Jest (7 arquivos, 64 testes)
+├── database/migrations/           # Esquema standalone e migrações (02, 03, 04, 05, 06)
 ├── oracle-migration/              # Infraestrutura Oracle Cloud, systemd, Nginx e backup
 ├── scripts/                       # Migrações (run_migrations.js) e builds dos 2 APKs
 ├── MediCare-Paciente.apk          # Binário Android do Paciente assinado na raiz
@@ -70,10 +72,12 @@ MediCare/
 - `/api/v1/caregiver/settings`: CRUD de regras globais, grupos da clínica, regras por paciente e atribuição em massa.
 - `/api/v1/caregiver/notifications`: Listagem e marcação de leitura de alertas de solicitação, atraso e uso SOS.
 - `/api/v1/sync`: Sincronização bidirecional do app Android (incluindo `care_settings` efetivo e `pending_dose_requests`).
+- `/api/ai`: Assistente de Saúde com OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`), guardrails estritos de saúde, bloqueio anti-prompt-injection e zero geração de código (`src/lib/aiGuardrails.js`).
+- `/api/v1/chat` & `/api/v1/chat/stream`: Chat direto em tempo real (SSE + persistência PostgreSQL + Web Push) liberado exclusivamente quando o paciente possui cuidador ativo (`role !== 'independente'`).
 - `/api/apk`, `/api/apk/cuidador`, `/api/apk/version`, `/api/system/versions`: Distribuição dos binários APK e metadados de versão.
 - `/api/v1/health`: Saúde do PostgreSQL local e fallback de status proxy.
 - **`oracleProxy.js` (`connectPgOrFallback`):** Em ambientes externos de preview onde a porta TCP do PostgreSQL Oracle esteja bloqueada por firewall, detecta timeout/falha de rede (`isPgConnectionNetworkError`), faz cache negativo temporário (60s) e encaminha com proteção anti-loop (`x-medicare-proxy-hop: 1` e checagem de host) para o backend HTTP oficial da Oracle Cloud.
 
 ### 2.4. Banco de Dados PostgreSQL (`database/migrations`)
 - **Hospedagem:** Container `postgres:16-alpine` (`medicare_db`) isolado em `127.0.0.1:5436` na VM Oracle Cloud.
-- **Migrações aplicáveis:** `02_schema_oracle_standalone.sql`, `03_incremental_compatibility.sql`, `04_caregiver_management_settings.sql`, `05_caregiver_groups_and_global_settings.sql`.
+- **Migrações aplicáveis:** `02_schema_oracle_standalone.sql`, `03_incremental_compatibility.sql`, `04_caregiver_management_settings.sql`, `05_caregiver_groups_and_global_settings.sql`, `06_caregiver_patient_chat.sql`.

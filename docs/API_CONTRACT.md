@@ -1,6 +1,6 @@
 # Contrato da API — MediCare (Cuidador Web & Paciente Android)
 
-**Versão:** 2.1 (Atualizada)  
+**Versão:** 2.2 (Atualizada)  
 **Base URL:** `/api`
 
 ---
@@ -52,12 +52,16 @@ Gerencia regras clínicas com herança em 3 níveis (**Global da Clínica**, **G
 
 ## 4. Notificações, Sincronização, Sistema e APKs
 
-- `GET` / `PATCH /api/v1/caregiver/notifications` — Lista alertas do cuidador autenticado e marca notificações como lidas.
-- `GET` / `POST` / `DELETE /api/v1/sync` — Sincronização bidirecional do app Android, incluindo retorno das regras efetivas `care_settings` e criação de `approval_requests` com alertas para cuidadores.
-- `GET /api/v1/health` — Saúde do PostgreSQL (`medicare_db`) ou status do upstream Oracle via proxy.
-- `POST /api/v1/jobs/reminders` & `POST /api/v1/jobs/alert-caregiver` — Disparo de alertas de atraso (respeitando `overdue_notify_minutes`) e Web Push.
-- `GET /api/system/versions` — Retorna versões atuais do MediCare Cuidador Web, `sw.js`, Paciente Android e Cuidador Android.
-- `GET /api/apk` & `GET /api/apk/cuidador` & `GET /api/apk/version` — Download direto dos instaladores `MediCare-Paciente.apk` e `MediCare-Cuidador.apk` e metadados de versão.
+- `GET` / `PATCH` / `POST` / `DELETE` — Rotas complementares:
+  - `GET /api/v1/caregiver/notifications` & `PATCH /api/v1/caregiver/notifications` — Lista alertas do cuidador autenticado e marca notificações como lidas.
+  - `GET /api/v1/chat` (`?summary=1` ou `?patientId=<uuid>` / `?caregiverId=<uuid>`), `POST /api/v1/chat` (idempotente por UUID, com notificação Web Push) e `PATCH /api/v1/chat` (leitura) — Chat direto paciente ↔ cuidador, validando `caregiver_relationships.status = 'active'` e bloqueando perfis `independente` (`403`).
+  - `GET /api/v1/chat/stream` — Stream SSE (`text/event-stream`) de mensagens e confirmações de leitura em tempo real para o MediCare Cuidador Web/Android.
+  - `POST /api/ai` — Assistente de Saúde com OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, fallback opcional Gemini/proxy Oracle) protegido por guardrails (`src/lib/aiGuardrails.js`: domínio estrito de saúde, anti-prompt-injection e bloqueio de código/SQL).
+  - `GET` / `POST` / `DELETE /api/v1/sync` — Sincronização bidirecional do app Android, incluindo retorno das regras efetivas `care_settings` e criação de `approval_requests` com alertas para cuidadores.
+  - `GET /api/v1/health` — Saúde do PostgreSQL (`medicare_db`) ou status do upstream Oracle via proxy.
+  - `POST /api/v1/jobs/reminders` & `POST /api/v1/jobs/alert-caregiver` — Disparo de alertas de atraso (respeitando `overdue_notify_minutes`) e Web Push.
+  - `GET /api/system/versions` — Retorna versões atuais do MediCare Cuidador Web, `sw.js`, Paciente Android (`v2.9.1`) e Cuidador Android (`v2.0.0`).
+  - `GET /api/apk` & `GET /api/apk/cuidador` & `GET /api/apk/version` — Download direto dos instaladores `MediCare-Paciente.apk` e `MediCare-Cuidador.apk` e metadados de versão.
 
 ---
 

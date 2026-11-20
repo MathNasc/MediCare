@@ -710,25 +710,70 @@ class MediCareRepository @Inject constructor(
         )
     }
 
-    // ─── Assistente de IA Seguro ──────────────────────────────────────────────
-    suspend fun askAiAssistant(userQuestion: String, activeMeds: List<Medication>): String {
-        val medsContext = if (activeMeds.isEmpty()) {
-            "Nenhum medicamento cadastrado."
-        } else {
-            activeMeds.joinToString("; ") { "${it.nome} (${it.dosagem}, horários: ${it.horarios.joinToString(",")})" }
-        }
-        val prompt = buildString {
-            appendLine("Você é o Assistente Farmacêutico do MediCare.")
-            appendLine("Sempre inclua um aviso de que suas orientações são informativas e não substituem avaliação médica.")
-            appendLine("Medicamentos atuais do paciente: $medsContext")
-            appendLine("Pergunta do paciente: $userQuestion")
-        }
+    // ─── Assistente de IA Seguro (OpenRouter + Guardrails) ───────────────────
+    suspend fun askAiAssistant(
+        userQuestion: String,
+        activeMeds: List<Medication>,
+        history: List<Pair<String, String>> = emptyList(),
+        allergies: List<AllergyItem> = emptyList(),
+        conditions: List<HealthConditionItem> = emptyList(),
+        patientName: String? = null,
+        role: String? = null
+    ): String {
+        val recentHistory = history
+            .takeLast(6)
+            .filter { (r, t) -> (r == "user" || r == "assistant") && t.isNotBlank() }
+            .map { (r, t) -> AiChatHistoryItem(role = r, text = t) }
+
+        val clinicalContext = AiClinicalContext(
+            patientName = patientName,
+            role = role,
+            medicamentos = activeMeds.map {
+                AiContextMed(
+                    nome = it.nome,
+                    dosagem = it.dosagem,
+                    horarios = it.horarios,
+                    quantidade = it.quantidade
+                )
+            },
+            allergies = allergies.map { AiContextNameItem(it.name) },
+            conditions = conditions.map { AiContextNameItem(it.name) }
+        )
 
         return runCatching {
-            val response = aiApi.askAssistant(AiPromptRequest(prompt = prompt))
+            val response = aiApi.askAssistant(
+                AiPromptRequest(
+                    message = userQuestion,
+                    prompt = userQuestion,
+                    history = recentHistory,
+                    context = clinicalContext,
+                    patientName = patientName
+                )
+            )
             response.text ?: response.error ?: "Não foi possível obter resposta no momento."
         }.getOrElse {
             buildOfflineAssistantAnswer(userQuestion, activeMeds)
+        }
+    }
+
+    // ─── Chat Direto Paciente <-> Cuidador ────────────────────────────────────
+    suspend fun fetchCaregiverChat(caregiverId: String): Result<CaregiverChatThreadResponse> = runCatching {
+        remoteApi.getCaregiverChatMessages(caregiverId = caregiverId, limit = 100)
+    }
+
+    suspend fun sendCaregiverChatMessage(
+        caregiverId: String,
+        message: String,
+        clientMsgId: String = UUID.randomUUID().toString()
+    ): Result<CaregiverChatSendResponse> = runCatching {
+        remoteApi.sendCaregiverChatMessage(
+            CaregiverChatSendRequest(id = clientMsgId, caregiverId = caregiverId, message = message)
+        )
+    }
+
+    suspend fun markCaregiverChatRead(caregiverId: String) {
+        runCatching {
+            remoteApi.markCaregiverChatRead(CaregiverChatMarkReadRequest(caregiverId = caregiverId))
         }
     }
 

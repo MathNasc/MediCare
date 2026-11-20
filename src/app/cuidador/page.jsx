@@ -54,6 +54,9 @@ import {
   Layers,
   CheckSquare,
   Square,
+  MessageSquare,
+  Send,
+  CheckCheck,
 } from 'lucide-react';
 import { formatAuditLogEntry } from '@/lib/auditFormatter';
 import { subscribeToPush } from '@/lib/webPush';
@@ -235,6 +238,14 @@ export default function CuidadorWebPage() {
   const [notificationsList, setNotificationsList] = useState([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [showChatDrawer, setShowChatDrawer] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatErrorMsg, setChatErrorMsg] = useState('');
+  const [unreadChatByPatient, setUnreadChatByPatient] = useState({});
+  const [totalUnreadChat, setTotalUnreadChat] = useState(0);
   const [vapidPublicKey, setVapidPublicKey] = useState('');
   const [pushConfigured, setPushConfigured] = useState(false);
   const [pushPermission, setPushPermission] = useState('default');
@@ -291,6 +302,9 @@ export default function CuidadorWebPage() {
   const seenNotifIdsRef = useRef(null);
   const pushSubscribedRef = useRef(false);
   const loadDataRef = useRef(null);
+  const chatScrollEndRef = useRef(null);
+  const showChatDrawerRef = useRef(false);
+  const selectedPatientIdRef = useRef(null);
 
   const hasAnyOverlay =
     showRecoverModal ||
@@ -305,12 +319,15 @@ export default function CuidadorWebPage() {
     showMobileMenuSheet ||
     showPatientPickerSheet ||
     Boolean(pairingModalData) ||
-    showNotificationsModal;
+    showNotificationsModal ||
+    showChatDrawer;
 
   currentTabRef.current = currentTab;
   isAuthenticatedRef.current = isAuthenticated;
   authModeRef.current = authMode;
   hasAnyOverlayRef.current = hasAnyOverlay;
+  showChatDrawerRef.current = showChatDrawer;
+  selectedPatientIdRef.current = selectedPatientId;
 
   const showToast = useCallback((msg, type = 'success', duration = 4000) => {
     setNotification({ msg, type });
@@ -337,6 +354,7 @@ export default function CuidadorWebPage() {
     setShowPatientPickerSheet(false);
     setPairingModalData(null);
     setShowNotificationsModal(false);
+    setShowChatDrawer(false);
   }, []);
 
   const navigateToTab = useCallback(
@@ -576,6 +594,12 @@ export default function CuidadorWebPage() {
     setCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS });
     setNotificationsList([]);
     setUnreadNotifCount(0);
+    setShowChatDrawer(false);
+    setChatMessages([]);
+    setChatInput('');
+    setChatErrorMsg('');
+    setUnreadChatByPatient({});
+    setTotalUnreadChat(0);
     seenNotifIdsRef.current = null;
     pushSubscribedRef.current = false;
     setSelectedPatientId(null);
@@ -1050,6 +1074,150 @@ export default function CuidadorWebPage() {
     loadSystemVersions();
   }, [isAuthenticated, loadSystemVersions]);
 
+  const fetchUnreadChatSummary = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const res = await apiFetch('/api/v1/chat?summary=1');
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data?.ok) {
+        setUnreadChatByPatient(data.unreadByPatient || {});
+        setTotalUnreadChat(Number(data.totalUnread || 0));
+      }
+    } catch {
+      // ignore transient summary failure
+    }
+  }, [isAuthenticated, apiFetch]);
+
+  const handleMarkChatRead = useCallback(
+    async (patientId) => {
+      if (!isAuthenticated || !patientId) return;
+      setUnreadChatByPatient((prev) => {
+        const current = Number(prev[patientId] || 0);
+        if (current <= 0) return prev;
+        setTotalUnreadChat((tot) => Math.max(0, tot - current));
+        return { ...prev, [patientId]: 0 };
+      });
+      try {
+        await apiFetch('/api/v1/chat', {
+          method: 'PATCH',
+          body: JSON.stringify({ patientId }),
+        });
+      } catch {
+        // ignore mark read failure
+      }
+    },
+    [isAuthenticated, apiFetch]
+  );
+
+  const loadPatientChatMessages = useCallback(
+    async (targetPatientId, { silent = false } = {}) => {
+      if (!isAuthenticated || !targetPatientId) return;
+      if (!silent) {
+        setChatLoading(true);
+        setChatErrorMsg('');
+      }
+      try {
+        const res = await apiFetch(`/api/v1/chat?patientId=${encodeURIComponent(targetPatientId)}&limit=100`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (!silent) {
+            setChatMessages([]);
+            setChatErrorMsg(data.error || 'Chat indisponível para este paciente no momento.');
+          }
+          return;
+        }
+        setChatErrorMsg('');
+        setChatMessages(Array.isArray(data.messages) ? data.messages : []);
+        if (showChatDrawerRef.current && Number(data.unreadCount || 0) > 0) {
+          handleMarkChatRead(targetPatientId);
+        }
+      } catch {
+        if (!silent) {
+          setChatErrorMsg('Erro ao carregar mensagens. Verifique sua conexão.');
+        }
+      } finally {
+        if (!silent) {
+          setChatLoading(false);
+        }
+      }
+    },
+    [isAuthenticated, apiFetch, handleMarkChatRead]
+  );
+
+  const handleOpenPatientChat = useCallback(
+    (patientIdOverride = null) => {
+      const targetId = patientIdOverride || selectedPatientIdRef.current;
+      if (!targetId) {
+        showToast('Selecione um paciente vinculado para abrir o chat.', 'info');
+        return;
+      }
+      if (patientIdOverride && patientIdOverride !== selectedPatientIdRef.current) {
+        setSelectedPatientId(patientIdOverride);
+      }
+      setShowChatDrawer(true);
+      loadPatientChatMessages(targetId, { silent: false });
+      handleMarkChatRead(targetId);
+    },
+    [loadPatientChatMessages, handleMarkChatRead, showToast]
+  );
+
+  const handleSendCaregiverChatMessage = async (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    const targetId = selectedPatientId;
+    const cleanText = String(chatInput || '').trim();
+    if (!targetId || !cleanText || chatSending) return;
+
+    const tempId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `00000000-0000-4000-8000-${Date.now().toString().padStart(12, '0').slice(-12)}`;
+
+    const optimisticMsg = {
+      id: tempId,
+      patient_id: targetId,
+      sender_id: currentUser?.id || '',
+      sender_role: 'cuidador',
+      sender_name: currentUser?.user_metadata?.nome || currentUser?.email || 'Você',
+      message: cleanText,
+      read_at: null,
+      created_at: new Date().toISOString(),
+    };
+
+    setChatInput('');
+    setChatSending(true);
+    setChatMessages((prev) => [...prev, optimisticMsg]);
+
+    try {
+      const res = await apiFetch('/api/v1/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: tempId,
+          patientId: targetId,
+          message: cleanText,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setChatMessages((prev) => prev.filter((m) => m.id !== tempId));
+        setChatInput(cleanText);
+        showToast(data.error || 'Não foi possível enviar a mensagem.', 'error');
+        return;
+      }
+      if (data.message) {
+        setChatMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? data.message : m))
+        );
+      }
+    } catch {
+      setChatMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setChatInput(cleanText);
+      showToast('Falha de rede ao enviar mensagem.', 'error');
+    } finally {
+      setChatSending(false);
+    }
+  };
+
   // Carrega dados do cuidador e pacientes autorizados (somente vínculos ativos!)
   const loadData = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -1080,6 +1248,7 @@ export default function CuidadorWebPage() {
           relationship_label: r.relationship_label || 'Familiar / Acompanhado',
           permission_level: r.permission_level || 'read_write',
           is_managed: Boolean(prof?.is_managed),
+          role: prof?.role || 'paciente',
         };
       });
 
@@ -1196,7 +1365,8 @@ export default function CuidadorWebPage() {
       setLoading(false);
     }
     fetchNotifications({ fromPoll: false });
-  }, [isAuthenticated, selectedPatientId, apiFetch, fetchNotifications]);
+    fetchUnreadChatSummary();
+  }, [isAuthenticated, selectedPatientId, apiFetch, fetchNotifications, fetchUnreadChatSummary]);
 
   loadDataRef.current = loadData;
 
@@ -1209,10 +1379,18 @@ export default function CuidadorWebPage() {
     if (!isAuthenticated) return undefined;
     const intervalId = setInterval(() => {
       fetchNotifications({ fromPoll: true });
+      fetchUnreadChatSummary();
+      if (showChatDrawerRef.current && selectedPatientIdRef.current) {
+        loadPatientChatMessages(selectedPatientIdRef.current, { silent: true });
+      }
     }, 30000);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         fetchNotifications({ fromPoll: true });
+        fetchUnreadChatSummary();
+        if (showChatDrawerRef.current && selectedPatientIdRef.current) {
+          loadPatientChatMessages(selectedPatientIdRef.current, { silent: true });
+        }
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -1220,7 +1398,77 @@ export default function CuidadorWebPage() {
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [isAuthenticated, fetchNotifications]);
+  }, [isAuthenticated, fetchNotifications, fetchUnreadChatSummary, loadPatientChatMessages]);
+
+  // Stream em tempo real (SSE) do chat Cuidador <-> Paciente
+  useEffect(() => {
+    if (!isAuthenticated || typeof EventSource === 'undefined') return undefined;
+    const source = new EventSource('/api/v1/chat/stream', { withCredentials: true });
+
+    source.addEventListener('chat_message', (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        const msg = payload?.message;
+        if (!msg || !msg.patient_id) return;
+
+        const isViewingThread =
+          showChatDrawerRef.current &&
+          String(selectedPatientIdRef.current) === String(msg.patient_id);
+
+        if (isViewingThread) {
+          setChatMessages((prev) =>
+            prev.some((m) => String(m.id) === String(msg.id)) ? prev : [...prev, msg]
+          );
+          if (msg.sender_role === 'paciente') {
+            handleMarkChatRead(msg.patient_id);
+          }
+        } else if (msg.sender_role === 'paciente') {
+          setUnreadChatByPatient((prev) => ({
+            ...prev,
+            [msg.patient_id]: Number(prev[msg.patient_id] || 0) + 1,
+          }));
+          setTotalUnreadChat((tot) => tot + 1);
+          const preview = msg.message?.length > 70 ? `${msg.message.slice(0, 70)}...` : msg.message;
+          showToast(`💬 ${msg.sender_name || 'Paciente'}: ${preview}`, 'info', 5500);
+        }
+      } catch {
+        // ignore malformed sse event
+      }
+    });
+
+    source.addEventListener('chat_read', (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (
+          showChatDrawerRef.current &&
+          String(selectedPatientIdRef.current) === String(payload?.patientId) &&
+          payload?.readerRole === 'paciente'
+        ) {
+          const readTimestamp = payload.readAt || new Date().toISOString();
+          setChatMessages((prev) =>
+            prev.map((m) =>
+              m.sender_role === 'cuidador' && !m.read_at ? { ...m, read_at: readTimestamp } : m
+            )
+          );
+        }
+      } catch {
+        // ignore
+      }
+    });
+
+    return () => {
+      source.close();
+    };
+  }, [isAuthenticated, handleMarkChatRead, showToast]);
+
+  // Rola suavemente para a última mensagem ao abrir ou receber mensagens
+  useEffect(() => {
+    if (!showChatDrawer) return;
+    const timer = setTimeout(() => {
+      chatScrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [showChatDrawer, chatMessages.length]);
 
   // Aceitar convite
   const handleAcceptInvite = async (e) => {
@@ -2764,6 +3012,24 @@ export default function CuidadorWebPage() {
               </button>
             )}
 
+            {patients.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleOpenPatientChat()}
+                title="Conversar com o paciente"
+                aria-label="Conversar com o paciente"
+                className="relative inline-flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 md:px-3 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/35 text-emerald-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+              >
+                <MessageSquare size={16} className="w-4 h-4 shrink-0 text-emerald-300" />
+                <span className="hidden lg:inline text-xs font-semibold">Chat</span>
+                {totalUnreadChat > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center border border-[#0b1120] tabular-nums">
+                    {totalUnreadChat > 9 ? '9+' : totalUnreadChat}
+                  </span>
+                )}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => {
@@ -2934,10 +3200,25 @@ export default function CuidadorWebPage() {
                 </div>
 
                 <div className="grid grid-cols-2 sm:flex sm:items-center gap-2.5 shrink-0">
+                  {selectedPatient.role !== 'independente' && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPatientChat(selectedPatient.patient_id)}
+                      className="relative col-span-2 sm:col-span-1 min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-200 font-semibold text-xs border border-emerald-500/35 transition-colors whitespace-nowrap"
+                    >
+                      <MessageSquare size={15} className="w-4 h-4 shrink-0 text-emerald-300" />
+                      <span>Conversar</span>
+                      {(unreadChatByPatient[selectedPatient.patient_id] || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold tabular-nums">
+                          {unreadChatByPatient[selectedPatient.patient_id]}
+                        </span>
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => navigateToTab('management')}
-                    className="col-span-2 sm:col-span-1 min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-200 font-semibold text-xs border border-indigo-500/30 transition-colors whitespace-nowrap"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-200 font-semibold text-xs border border-indigo-500/30 transition-colors whitespace-nowrap"
                   >
                     <SlidersHorizontal size={15} className="w-4 h-4 shrink-0 text-indigo-300" />
                     <span>Gerenciar</span>
@@ -2960,7 +3241,7 @@ export default function CuidadorWebPage() {
                       setNewAppointmentForm(EMPTY_APPOINTMENT_FORM);
                       setShowAppointmentModal(true);
                     }}
-                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
+                    className="col-span-2 sm:col-span-1 min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
                   >
                     <Calendar size={15} className="w-4 h-4 shrink-0" />
                     <span>Compromisso</span>
@@ -3305,6 +3586,26 @@ export default function CuidadorWebPage() {
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {p.role !== 'independente' && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenPatientChat(p.patient_id);
+                                }}
+                                title={`Conversar com ${p.nome}`}
+                                aria-label={`Conversar com ${p.nome}`}
+                                className="relative min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold transition-colors whitespace-nowrap"
+                              >
+                                <MessageSquare size={14} className="w-3.5 h-3.5 shrink-0" />
+                                <span className="hidden sm:inline">Chat</span>
+                                {(unreadChatByPatient[p.patient_id] || 0) > 0 && (
+                                  <span className="min-w-[16px] h-[16px] px-1 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center tabular-nums">
+                                    {unreadChatByPatient[p.patient_id]}
+                                  </span>
+                                )}
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {
@@ -7298,6 +7599,175 @@ export default function CuidadorWebPage() {
                 })
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────── */}
+      {/* MODAL / DRAWER: CHAT CUIDADOR <-> PACIENTE                 */}
+      {/* ─────────────────────────────────────────────────────────── */}
+      {showChatDrawer && selectedPatient && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-end sm:p-4"
+          onClick={() => setShowChatDrawer(false)}
+        >
+          <div
+            className="bg-[#131d31] rounded-t-3xl sm:rounded-2xl border border-slate-800 w-full sm:max-w-md h-[86vh] sm:h-[640px] sm:max-h-[90vh] shadow-2xl flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 pt-4 pb-3 border-b border-slate-800/90 shrink-0 space-y-3">
+              <div className="w-10 h-1 rounded-full bg-slate-700 mx-auto sm:hidden" />
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold text-sm shrink-0">
+                    {selectedPatient.nome.slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm sm:text-base font-bold text-white truncate">
+                      {selectedPatient.nome}
+                    </h3>
+                    <p className="text-[11px] text-emerald-300/90 font-medium truncate">
+                      {selectedPatient.relationship_label} · Chat direto seguro
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowChatDrawer(false)}
+                  aria-label="Fechar conversa"
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
+                >
+                  <X size={18} className="w-4 h-4" />
+                </button>
+              </div>
+
+              {patients.length > 1 && (
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+                  {patients.map((p) => {
+                    const activeP = p.patient_id === selectedPatient.patient_id;
+                    const pUnread = unreadChatByPatient[p.patient_id] || 0;
+                    return (
+                      <button
+                        key={p.patient_id}
+                        type="button"
+                        onClick={() => handleOpenPatientChat(p.patient_id)}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0 transition-colors border ${
+                          activeP
+                            ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-200'
+                            : 'bg-[#0b1120] border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <span>{p.nome.split(' ')[0]}</span>
+                        {pUnread > 0 && (
+                          <span className="px-1 rounded-full bg-emerald-500 text-slate-950 text-[9px] font-extrabold tabular-nums">
+                            {pUnread}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-[#0b1120]/60">
+              {selectedPatient.role === 'independente' ? (
+                <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/35 text-xs text-amber-200 leading-relaxed">
+                  Este paciente configurou a conta no modo <strong>Independente</strong>. Enquanto estiver neste modo, apenas o Assistente de Saúde com IA fica ativo no aplicativo do paciente.
+                </div>
+              ) : chatLoading ? (
+                <div className="flex items-center justify-center py-12 text-slate-400 text-xs gap-2">
+                  <Loader2 size={16} className="w-4 h-4 animate-spin text-emerald-400" />
+                  <span>Carregando mensagens...</span>
+                </div>
+              ) : chatErrorMsg ? (
+                <div className="p-4 rounded-xl bg-rose-950/30 border border-rose-500/35 text-xs text-rose-200 leading-relaxed">
+                  {chatErrorMsg}
+                </div>
+              ) : chatMessages.length === 0 ? (
+                <div className="text-center py-10 px-4 rounded-2xl bg-[#131d31] border border-slate-800/80 space-y-2">
+                  <MessageSquare size={22} className="w-5 h-5 text-emerald-400 mx-auto" />
+                  <p className="text-xs font-semibold text-white">Nenhuma mensagem ainda</p>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Envie uma mensagem para {selectedPatient.nome}. Ela aparecerá na aba Assistente &rarr; Falar com o Cuidador do aplicativo Android.
+                  </p>
+                </div>
+              ) : (
+                chatMessages.map((msg) => {
+                  const isCaregiver = msg.sender_role === 'cuidador';
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col ${isCaregiver ? 'items-end' : 'items-start'}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap break-words ${
+                          isCaregiver
+                            ? 'bg-emerald-600 text-white rounded-br-sm'
+                            : 'bg-[#131d31] border border-slate-800 text-slate-100 rounded-bl-sm'
+                        }`}
+                      >
+                        {!isCaregiver && (
+                          <div className="text-[10px] font-bold text-emerald-300 mb-0.5">
+                            {msg.sender_name || selectedPatient.nome}
+                          </div>
+                        )}
+                        <div>{msg.message}</div>
+                        <div
+                          className={`flex items-center justify-end gap-1 mt-1 text-[10px] tabular-nums ${
+                            isCaregiver ? 'text-emerald-100/80' : 'text-slate-400'
+                          }`}
+                        >
+                          <span>{formatBrazilTime(msg.created_at) || ''}</span>
+                          {isCaregiver && (
+                            <CheckCheck
+                              size={12}
+                              className={`w-3 h-3 ${msg.read_at ? 'text-sky-200' : 'text-emerald-100/60'}`}
+                              title={msg.read_at ? 'Lida pelo paciente' : 'Enviada'}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatScrollEndRef} />
+            </div>
+
+            {selectedPatient.role !== 'independente' && !chatErrorMsg && (
+              <form
+                onSubmit={handleSendCaregiverChatMessage}
+                className="p-3.5 border-t border-slate-800/90 bg-[#131d31] flex items-end gap-2 shrink-0"
+              >
+                <textarea
+                  rows={1}
+                  maxLength={2000}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendCaregiverChatMessage(e);
+                    }
+                  }}
+                  placeholder={`Escreva para ${selectedPatient.nome.split(' ')[0]}...`}
+                  className="flex-1 bg-[#0b1120] border border-slate-700/80 rounded-xl px-3.5 py-2.5 min-h-[42px] max-h-28 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+                />
+                <button
+                  type="submit"
+                  disabled={chatSending || !chatInput.trim()}
+                  aria-label="Enviar mensagem"
+                  className="min-w-[44px] min-h-[42px] px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white flex items-center justify-center transition-colors shrink-0"
+                >
+                  {chatSending ? (
+                    <Loader2 size={16} className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send size={16} className="w-4 h-4" />
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -48,6 +48,7 @@ async function main() {
       '03_incremental_compatibility.sql',
       '04_caregiver_management_settings.sql',
       '05_caregiver_groups_and_global_settings.sql',
+      '06_caregiver_patient_chat.sql',
     ];
 
     for (const fileName of migrationFiles) {

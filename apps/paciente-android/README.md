@@ -1,6 +1,6 @@
 # MediCare Paciente — Aplicativo Android Nativo (Kotlin + Jetpack Compose)
 
-Este diretório (`/apps/paciente-android`) contém o projeto Android **100% nativo** do **MediCare Paciente** (versão distribuída `v2.9.0` via `MediCare-Paciente.apk`), desenvolvido em **Kotlin** com **Jetpack Compose**, **Clean Architecture + MVVM**, **Room (Offline-First)**, **AlarmManager** e sincronização bidirecional com o backend compartilhado na Oracle Cloud.
+Este diretório (`/apps/paciente-android`) contém o projeto Android **100% nativo** do **MediCare Paciente** (versão distribuída `v2.9.1` via `MediCare-Paciente.apk`), desenvolvido em **Kotlin** com **Jetpack Compose**, **Clean Architecture + MVVM**, **Room (Offline-First)**, **AlarmManager** e sincronização bidirecional com o backend compartilhado na Oracle Cloud.
 
 ---
 
@@ -14,7 +14,7 @@ Este diretório (`/apps/paciente-android`) contém o projeto Android **100% nati
    MEDICARE_BACKEND_URL=https://medicare-cuidador.duckdns.org
    MEDICARE_AI_PROXY_URL=https://medicare-cuidador.duckdns.org
    ```
-   > **Segurança:** Nunca insira senhas do banco PostgreSQL ou `GEMINI_API_KEY` no projeto Android. O assistente de IA consome `/api/ai` no backend e a sincronização clínica usa `Authorization: Bearer <jwt>` em `/api/v1/sync` e `/api/rest/v1/*`.
+   > **Segurança:** Nunca insira senhas do banco PostgreSQL, `OPENROUTER_API_KEY` ou `GEMINI_API_KEY` no projeto Android. O assistente de IA consome `/api/ai` (roteado com OpenRouter e guardrails server-side) e a sincronização clínica/chat usam `Authorization: Bearer <jwt>` em `/api/v1/sync`, `/api/v1/chat` e `/api/rest/v1/*`.
 
 ---
 
@@ -56,4 +56,5 @@ O script compila os recursos e código nativo de `/src-apk`, alinha com `zipalig
 - **Sincronização de Regras do Cuidador (`care_settings`):** Ao sincronizar via `/api/v1/sync`, o aplicativo recebe as regras efetivas configuradas pelo cuidador/clínica no Painel de Gerenciamento (`require_caregiver_confirm`, `require_confirm_after_missed`, `require_confirm_undo`, `missed_dose_minutes`, `allow_patient_med_edit`, `notify_sos_usage`).
 - **Envio de Solicitação e Avanço para Próxima Dose:** Quando um paciente dependente envia uma solicitação de confirmação ao cuidador (`pending_dose_requests`), a interface principal avança automaticamente para a próxima dose pendente da fila; caso o cuidador rejeite a solicitação e a dose ainda não tenha ultrapassado o limite de dose perdida, ela retorna para a fila ativa de tomada.
 - **Agendamento Exato e Repetição (`DoseAlarmScheduler` / `DoseAlarmReceiver`):** Utiliza `AlarmManager.setExactAndAllowWhileIdle`, agenda repetição automática de 15 minutos enquanto não houver confirmação e suprime duplicidades consultando o banco local Room.
+- **Assistente de Saúde (OpenRouter) & Chat Condicional com Cuidador:** Na aba do Assistente, todos os perfis contam com as ferramentas locais + conversa com a IA via `/api/ai` restrita estritamente à área da saúde. Quando o paciente possui vínculo ativo com um cuidador (e não está no perfil `independente`), é exibido também o botão **Falar com o Cuidador** conectado em `/api/v1/chat`. Perfis **Independentes** permanecem exclusivamente com o Assistente de Saúde e a IA.
 - **Limitações de OEMs:** Em aparelhos Xiaomi/Samsung/Huawei, caso o usuário execute *Force Stop* manual nas configurações do Android, os alarmes ficam suspensos até a reabertura do app; recomenda-se configurar a bateria como **"Sem restrições"**.

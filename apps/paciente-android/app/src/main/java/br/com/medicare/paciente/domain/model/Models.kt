@@ -300,3 +300,18 @@ data class HealthcareProfessional(
     val location: String? = null,
     val observation: String? = null
 )
+
+@Serializable
+data class CaregiverChatMessage(
+    val id: String,
+    @SerialName("relationship_id") val relationshipId: String? = null,
+    @SerialName("patient_id") val patientId: String = "",
+    @SerialName("caregiver_id") val caregiverId: String = "",
+    @SerialName("sender_id") val senderId: String = "",
+    @SerialName("sender_role") val senderRole: String = "paciente",
+    @SerialName("sender_name") val senderName: String? = null,
+    val message: String = "",
+    @SerialName("read_at") val readAt: String? = null,
+    @SerialName("created_at") val createdAt: String = ""
+)
+

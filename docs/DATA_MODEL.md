@@ -1,6 +1,6 @@
 # Modelo de Dados e Identidade — MediCare
 
-**Versão:** 2.1 (Atualizada)  
+**Versão:** 2.2 (Atualizada)  
 **Banco Alvo:** PostgreSQL 16 (Oracle Cloud — `medicare_db`)
 
 ---
@@ -13,6 +13,7 @@ O esquema do MediCare utiliza chaves `uuid` e integridade referencial, gerenciad
 - `03_incremental_compatibility.sql`: Colunas de rastreabilidade de doses (`administered_at`, `confirmed_by_role`, `origin`, `atraso_minutos`), `approval_requests`, `notificacoes`, `push_subscriptions` e tabela de controle `schema_migrations`.
 - `04_caregiver_management_settings.sql`: Cria `patient_care_settings` com parâmetros de acompanhamento clínico configuráveis pelo cuidador.
 - `05_caregiver_groups_and_global_settings.sql`: Cria `caregiver_global_settings` e `caregiver_patient_groups`, adicionando `config_mode` (`global` | `group` | `custom`), `group_id` e `caregiver_id` em `patient_care_settings`.
+- `06_caregiver_patient_chat.sql`: Cria `caregiver_chat_messages` e índices de leitura/cronologia para o chat direto entre paciente não-independente e cuidador ativo.
 
 ```text
 app_users (Contas e Autenticação)
@@ -23,7 +24,7 @@ app_users (Contas e Autenticação)
     ├── 1:1 ── patient_care_settings (Herança: global | group | custom)
     ├── 1:N ── medicamentos ── historico_doses & stock_movements
     ├── 1:N ── approval_requests & notificacoes & push_subscriptions
-    ├── 1:N ── caregiver_relationships ── caregiver_notes & caregiver_audit_log
+    ├── 1:N ── caregiver_relationships ── caregiver_notes, caregiver_chat_messages & caregiver_audit_log
     └── 1:N ── audit_logs (Trilha de Auditoria Imutável)
 ```
 
@@ -53,8 +54,9 @@ Campos compartilhados pelos 3 níveis (com precedência `custom` → `group` →
 - `historico_doses`: Separa horário previsto (`hora`, `dose_date` em `America/Sao_Paulo`), horário real (`administered_at`), momento do registro (`created_at`, `corrected_at`), `status` (`confirmed` | `missed` | `pending` | `late`), `atraso_minutos`, `performed_by`, `confirmed_by_name`, `confirmed_by_role`, `origin`, `is_retroactive`, `correction_reason`.
 - `approval_requests`: Solicitações de confirmação ou desfazimento (`confirm_dose` | `undo_dose`) com `status` (`pending` | `approved` | `rejected`).
 
-### 2.4. `schema_migrations`
-Registra todas as migrações aplicadas (`03_incremental_compatibility`, `04_caregiver_management_settings`, `05_caregiver_groups_and_global_settings`).
+### 2.4. `caregiver_chat_messages` e `schema_migrations`
+- `caregiver_chat_messages`: `id` (`uuid`), `relationship_id`, `patient_id`, `caregiver_id`, `sender_id`, `sender_role` (`paciente` | `cuidador`), `message` (`text`), `read_at`, `created_at`. Uso restrito a vínculos `active` onde o paciente não possui perfil `independente`.
+- `schema_migrations`: Registra todas as migrações aplicadas (`03_incremental_compatibility`, `04_caregiver_management_settings`, `05_caregiver_groups_and_global_settings`, `06_caregiver_patient_chat`).
 
 ---
 

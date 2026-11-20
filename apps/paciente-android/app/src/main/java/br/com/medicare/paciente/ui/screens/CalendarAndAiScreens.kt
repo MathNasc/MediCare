@@ -29,6 +29,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.util.UUID
+import kotlinx.coroutines.delay
 
 private val MONTH_NAMES_PT = listOf(
     "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -1298,12 +1299,39 @@ fun RetroactiveConfirmModal(
 @Composable
 fun PatientAiScreen(
     state: PatientUiState,
-    onSendQuestion: (String) -> Unit
+    onSendQuestion: (String) -> Unit,
+    onSelectChatCaregiver: (String) -> Unit = {},
+    onLoadCaregiverChat: () -> Unit = {},
+    onSendCaregiverMessage: (String) -> Unit = {}
 ) {
     val tokens = LocalMediCareTokens.current
     val context = LocalContext.current
-    var view by remember { mutableStateOf("main") } // main, meds, attention, stock, consult, chat
+    var view by remember { mutableStateOf("main") } // main, meds, attention, stock, consult, chat, caregiver_chat
     var questionInput by remember { mutableStateOf("") }
+    var caregiverInput by remember { mutableStateOf("") }
+
+    val activeCaregivers = remember(state.caregivers) {
+        state.caregivers.filter {
+            it.status.equals("active", ignoreCase = true) && !it.caregiverId.isNullOrBlank()
+        }
+    }
+    val canChatWithCaregiver = (state.user?.role != "independente") && activeCaregivers.isNotEmpty()
+
+    LaunchedEffect(canChatWithCaregiver, view) {
+        if (view == "caregiver_chat" && !canChatWithCaregiver) {
+            view = "main"
+        }
+    }
+
+    LaunchedEffect(view, state.selectedChatCaregiverId, canChatWithCaregiver) {
+        if (view == "caregiver_chat" && canChatWithCaregiver) {
+            onLoadCaregiverChat()
+            while (true) {
+                delay(7000L)
+                onLoadCaregiverChat()
+            }
+        }
+    }
 
     BackHandler(enabled = view != "main") {
         view = "main"
@@ -1329,14 +1357,43 @@ fun PatientAiScreen(
     ) {
         if (view != "main") {
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(tokens.bg2)
-                    .clickable { view = "main" }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("← Voltar ao Assistente", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(tokens.bg2)
+                        .clickable { view = "main" }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("← Voltar ao Assistente", color = tokens.txt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                if (canChatWithCaregiver && (view == "chat" || view == "caregiver_chat")) {
+                    val goToCaregiver = view == "chat"
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (goToCaregiver) MediCareColors.Green.copy(alpha = 0.16f) else MediCareColors.Blue.copy(alpha = 0.16f))
+                            .border(
+                                1.dp,
+                                if (goToCaregiver) MediCareColors.Green.copy(alpha = 0.45f) else MediCareColors.Blue.copy(alpha = 0.45f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable { view = if (goToCaregiver) "caregiver_chat" else "chat" }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (goToCaregiver) "🤝 Cuidador" else "🩺 Assistente IA",
+                            color = if (goToCaregiver) MediCareColors.Green else MediCareColors.Blue,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.height(14.dp))
         }
@@ -1467,6 +1524,18 @@ fun PatientAiScreen(
                         modifier = Modifier.fillMaxWidth().height(54.dp)
                     ) {
                         Text("💬 Falar com o Assistente", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+
+                    if (canChatWithCaregiver) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = { view = "caregiver_chat" },
+                            colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Green),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().height(54.dp)
+                        ) {
+                            Text("🤝 Falar com o Cuidador", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(18.dp))
@@ -1754,7 +1823,7 @@ fun PatientAiScreen(
                         OutlinedTextField(
                             value = questionInput,
                             onValueChange = { questionInput = it },
-                            placeholder = { Text("Escreva sua dúvida...") },
+                            placeholder = { Text("Escreva sua dúvida de saúde...") },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
@@ -1770,6 +1839,175 @@ fun PatientAiScreen(
                             modifier = Modifier.height(52.dp)
                         ) {
                             Text("Enviar", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            "caregiver_chat" -> {
+                val cgScrollState = rememberScrollState()
+                val activeCgId = state.selectedChatCaregiverId.ifBlank {
+                    activeCaregivers.firstOrNull()?.caregiverId.orEmpty()
+                }
+                val selectedCg = activeCaregivers.find { it.caregiverId == activeCgId } ?: activeCaregivers.firstOrNull()
+
+                LaunchedEffect(state.caregiverChatMessages.size) {
+                    cgScrollState.animateScrollTo(cgScrollState.maxValue)
+                }
+
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Seletor de cuidadores se houver mais de 1 vínculo ativo
+                    if (activeCaregivers.size > 1) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            activeCaregivers.forEach { cg ->
+                                val cgId = cg.caregiverId.orEmpty()
+                                val selected = cgId == activeCgId
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (selected) MediCareColors.Green else tokens.bg1)
+                                        .border(1.dp, if (selected) MediCareColors.Green else tokens.bdr, RoundedCornerShape(12.dp))
+                                        .clickable { onSelectChatCaregiver(cgId) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = cg.caregiverName?.takeIf { it.isNotBlank() } ?: cg.relationshipLabel,
+                                        color = if (selected) Color.White else tokens.txt,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    } else if (selectedCg != null) {
+                        Text(
+                            text = "🤝 Conversando com ${selectedCg.caregiverName?.takeIf { it.isNotBlank() } ?: selectedCg.relationshipLabel}",
+                            color = tokens.txt,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    if (!state.caregiverChatError.isNullOrBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MediCareColors.Red.copy(alpha = 0.14f))
+                                .border(1.dp, MediCareColors.Red.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                                .padding(10.dp)
+                        ) {
+                            Text(state.caregiverChatError, color = MediCareColors.Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(cgScrollState),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (state.caregiverChatLoading && state.caregiverChatMessages.isEmpty()) {
+                            Text("⏳ Carregando conversa...", color = tokens.muted, fontSize = 13.sp)
+                        } else if (state.caregiverChatMessages.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(tokens.bg1)
+                                    .border(1.dp, tokens.bdr, RoundedCornerShape(16.dp))
+                                    .padding(18.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("🤝 Canal direto com seu cuidador", color = tokens.txt, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Envie dúvidas sobre seus horários, sintomas ou pedidos de compra de medicamentos.",
+                                    color = tokens.sub,
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            state.caregiverChatMessages.forEach { msg ->
+                                val isMine = msg.senderRole == "paciente"
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .then(if (isMine) Modifier.widthIn(max = 310.dp) else Modifier.fillMaxWidth(0.92f))
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(if (isMine) MediCareColors.Green else tokens.bg1)
+                                            .border(1.dp, if (isMine) MediCareColors.Green else tokens.bdr, RoundedCornerShape(16.dp))
+                                            .padding(14.dp)
+                                    ) {
+                                        if (!isMine) {
+                                            Text(
+                                                text = "🤝 ${msg.senderName.ifBlank { "Cuidador" }}",
+                                                color = MediCareColors.Green,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        }
+                                        Text(
+                                            text = msg.message,
+                                            color = if (isMine) Color.White else tokens.txt,
+                                            fontSize = 14.sp,
+                                            lineHeight = 20.sp
+                                        )
+                                        val timeLabel = if (msg.createdAt.length >= 16) msg.createdAt.substring(11, 16) else ""
+                                        if (timeLabel.isNotEmpty() || (isMine && !msg.readAt.isNullOrBlank())) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = buildString {
+                                                    append(timeLabel)
+                                                    if (isMine && !msg.readAt.isNullOrBlank()) {
+                                                        append(" ✓✓")
+                                                    }
+                                                },
+                                                color = if (isMine) Color.White.copy(alpha = 0.8f) else tokens.muted,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = caregiverInput,
+                            onValueChange = { caregiverInput = it },
+                            placeholder = { Text("Mensagem para o cuidador...") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                if (caregiverInput.isNotBlank() && !state.caregiverChatSending) {
+                                    onSendCaregiverMessage(caregiverInput)
+                                    caregiverInput = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MediCareColors.Green),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(52.dp)
+                        ) {
+                            Text(if (state.caregiverChatSending) "..." else "Enviar", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

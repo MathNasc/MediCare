@@ -35,6 +35,12 @@ data class PatientUiState(
     val selectedDoseForModal: ScheduledDose? = null,
     val aiMessages: List<Pair<String, String>> = emptyList(),
     val aiLoading: Boolean = false,
+    val caregiverChatMessages: List<CaregiverChatMessage> = emptyList(),
+    val selectedChatCaregiverId: String = "",
+    val caregiverChatUnreadCount: Int = 0,
+    val caregiverChatLoading: Boolean = false,
+    val caregiverChatSending: Boolean = false,
+    val caregiverChatError: String? = null,
     val toastMessage: String? = null,
     val isRemoteConfigured: Boolean = false
 )
@@ -55,6 +61,12 @@ class MediCareViewModel @Inject constructor(
     )
     private val _aiLoading = MutableStateFlow(false)
     private val _toastMessage = MutableStateFlow<String?>(null)
+    private val _caregiverChatMessages = MutableStateFlow<List<CaregiverChatMessage>>(emptyList())
+    private val _selectedChatCaregiverId = MutableStateFlow("")
+    private val _caregiverChatUnreadCount = MutableStateFlow(0)
+    private val _caregiverChatLoading = MutableStateFlow(false)
+    private val _caregiverChatSending = MutableStateFlow(false)
+    private val _caregiverChatError = MutableStateFlow<String?>(null)
 
     private val medsFlow = sessionManager.currentUser.flatMapLatest { u ->
         if (u == null) flowOf(emptyList()) else repository.observeMedications(u.id)
@@ -145,6 +157,26 @@ class MediCareViewModel @Inject constructor(
         )
     }.combine(combine(_aiLoading, _toastMessage) { l, t -> l to t }) { state, (loading, toast) ->
         state.copy(aiLoading = loading, toastMessage = toast)
+    }.combine(
+        combine(
+            _caregiverChatMessages,
+            _selectedChatCaregiverId,
+            _caregiverChatUnreadCount,
+            _caregiverChatLoading,
+            _caregiverChatSending
+        ) { msgs, cgId, unread, cgLoading, cgSending ->
+            Quintuple(msgs, cgId, unread, cgLoading, cgSending)
+        }
+    ) { state, cgTuple ->
+        state.copy(
+            caregiverChatMessages = cgTuple.a,
+            selectedChatCaregiverId = cgTuple.b,
+            caregiverChatUnreadCount = cgTuple.c,
+            caregiverChatLoading = cgTuple.d,
+            caregiverChatSending = cgTuple.e
+        )
+    }.combine(_caregiverChatError) { state, cgErr ->
+        state.copy(caregiverChatError = cgErr)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -215,6 +247,10 @@ class MediCareViewModel @Inject constructor(
     fun logout() {
         viewModelScope.launch {
             _selectedDoseId.value = null
+            _caregiverChatMessages.value = emptyList()
+            _selectedChatCaregiverId.value = ""
+            _caregiverChatUnreadCount.value = 0
+            _caregiverChatError.value = null
             _aiMessages.value = listOf(
                 "assistant" to "Olá! Sou o Assistente de Saúde do MediCare. Posso explicar seus medicamentos em linguagem simples, revisar sua adesão ou preparar um resumo para sua próxima consulta médica.\n\nℹ️ *Minhas respostas são informativas e nunca substituem a orientação do seu médico.*"
             )
@@ -226,6 +262,10 @@ class MediCareViewModel @Inject constructor(
         viewModelScope.launch {
             _toastMessage.value = "Excluindo conta e registros do servidor..."
             _selectedDoseId.value = null
+            _caregiverChatMessages.value = emptyList()
+            _selectedChatCaregiverId.value = ""
+            _caregiverChatUnreadCount.value = 0
+            _caregiverChatError.value = null
             _aiMessages.value = listOf(
                 "assistant" to "Olá! Sou o Assistente de Saúde do MediCare. Posso explicar seus medicamentos em linguagem simples, revisar sua adesão ou preparar um resumo para sua próxima consulta médica.\n\nℹ️ *Minhas respostas são informativas e nunca substituem a orientação do seu médico.*"
             )
@@ -427,14 +467,94 @@ class MediCareViewModel @Inject constructor(
 
     fun askAi(question: String) {
         if (question.isBlank() || _aiLoading.value) return
-        val currentMeds = uiState.value.medications
-        _aiMessages.value = _aiMessages.value + ("user" to question)
+        val snapshot = uiState.value
+        val previousMsgs = _aiMessages.value
+        _aiMessages.value = previousMsgs + ("user" to question)
         _aiLoading.value = true
 
         viewModelScope.launch {
-            val answer = repository.askAiAssistant(question, currentMeds)
+            val answer = repository.askAiAssistant(
+                userQuestion = question,
+                activeMeds = snapshot.medications,
+                history = previousMsgs,
+                allergies = snapshot.allergies,
+                conditions = snapshot.healthConditions,
+                patientName = snapshot.user?.nome,
+                role = snapshot.user?.role
+            )
             _aiMessages.value = _aiMessages.value + ("assistant" to answer)
             _aiLoading.value = false
+        }
+    }
+
+    fun selectChatCaregiver(caregiverId: String) {
+        _selectedChatCaregiverId.value = caregiverId
+        loadCaregiverChat(markRead = true)
+    }
+
+    fun loadCaregiverChat(markRead: Boolean = true) {
+        val state = uiState.value
+        if (state.user?.role == "independente") return
+        val activeCaregivers = state.caregivers.filter { it.status.equals("active", ignoreCase = true) && !it.caregiverId.isNullOrBlank() }
+        val targetCgId = _selectedChatCaregiverId.value.ifBlank { activeCaregivers.firstOrNull()?.caregiverId.orEmpty() }
+        if (targetCgId.isBlank()) return
+        if (_selectedChatCaregiverId.value != targetCgId) {
+            _selectedChatCaregiverId.value = targetCgId
+        }
+
+        viewModelScope.launch {
+            _caregiverChatLoading.value = _caregiverChatMessages.value.isEmpty()
+            _caregiverChatError.value = null
+            val res = repository.fetchCaregiverChat(targetCgId)
+            res.onSuccess { thread ->
+                _caregiverChatMessages.value = thread.messages
+                _caregiverChatUnreadCount.value = if (markRead) 0 else thread.unreadCount
+                if (markRead && thread.unreadCount > 0) {
+                    repository.markCaregiverChatRead(targetCgId)
+                }
+            }.onFailure { err ->
+                _caregiverChatError.value = err.message ?: "Não foi possível carregar o chat com o cuidador."
+            }
+            _caregiverChatLoading.value = false
+        }
+    }
+
+    fun sendCaregiverChatMessage(text: String) {
+        val clean = text.trim()
+        val state = uiState.value
+        if (clean.isBlank() || _caregiverChatSending.value || state.user?.role == "independente") return
+        val activeCaregivers = state.caregivers.filter { it.status.equals("active", ignoreCase = true) && !it.caregiverId.isNullOrBlank() }
+        val targetCgId = _selectedChatCaregiverId.value.ifBlank { activeCaregivers.firstOrNull()?.caregiverId.orEmpty() }
+        if (targetCgId.isBlank()) return
+
+        val msgId = UUID.randomUUID().toString()
+        val optimistic = CaregiverChatMessage(
+            id = msgId,
+            patientId = state.user?.id.orEmpty(),
+            caregiverId = targetCgId,
+            senderId = state.user?.id.orEmpty(),
+            senderRole = "paciente",
+            senderName = state.user?.nome ?: "Você",
+            message = clean,
+            createdAt = Instant.now().toString()
+        )
+        _caregiverChatMessages.value = _caregiverChatMessages.value + optimistic
+        _caregiverChatSending.value = true
+        _caregiverChatError.value = null
+
+        viewModelScope.launch {
+            val res = repository.sendCaregiverChatMessage(targetCgId, clean, msgId)
+            res.onSuccess { sent ->
+                sent.message?.let { confirmed ->
+                    _caregiverChatMessages.value = _caregiverChatMessages.value.map {
+                        if (it.id == msgId) confirmed else it
+                    }
+                }
+            }.onFailure { err ->
+                _caregiverChatMessages.value = _caregiverChatMessages.value.filterNot { it.id == msgId }
+                _toastMessage.value = err.message ?: "Erro ao enviar mensagem para o cuidador."
+            }
+            _caregiverChatSending.value = false
         }
     }
 

@@ -175,7 +175,10 @@ class MainActivity : ComponentActivity() {
                                 )
                                 PatientTab.AI -> PatientAiScreen(
                                     state = state,
-                                    onSendQuestion = viewModel::askAi
+                                    onSendQuestion = viewModel::askAi,
+                                    onSelectChatCaregiver = viewModel::selectChatCaregiver,
+                                    onLoadCaregiverChat = { viewModel.loadCaregiverChat(markRead = true) },
+                                    onSendCaregiverMessage = viewModel::sendCaregiverChatMessage
                                 )
                                 PatientTab.PROFILE -> PatientProfileScreen(
                                     state = state,

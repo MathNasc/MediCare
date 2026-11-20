@@ -156,24 +156,107 @@ interface MediCareRemoteApi {
 
     @POST("rest/v1/rpc/revoke_caregiver")
     suspend fun revokeCaregiver(@Body payload: Map<String, String>): Boolean
+
+    // ─── Chat Direto Paciente <-> Cuidador ────────────────────────────────────
+    @GET("api/v1/chat")
+    suspend fun getCaregiverChatMessages(
+        @Query("caregiverId") caregiverId: String,
+        @Query("limit") limit: Int = 100
+    ): CaregiverChatThreadResponse
+
+    @POST("api/v1/chat")
+    suspend fun sendCaregiverChatMessage(@Body request: CaregiverChatSendRequest): CaregiverChatSendResponse
+
+    @PATCH("api/v1/chat")
+    suspend fun markCaregiverChatRead(@Body request: CaregiverChatMarkReadRequest): CaregiverChatMarkReadResponse
 }
 
 @Serializable
+data class AiChatHistoryItem(
+    val role: String,
+    val text: String
+)
+
+@Serializable
+data class AiContextMed(
+    val nome: String,
+    val dosagem: String = "",
+    val horarios: List<String> = emptyList(),
+    val quantidade: Int = 0
+)
+
+@Serializable
+data class AiContextNameItem(
+    val name: String
+)
+
+@Serializable
+data class AiClinicalContext(
+    val patientName: String? = null,
+    val role: String? = null,
+    val medicamentos: List<AiContextMed> = emptyList(),
+    val allergies: List<AiContextNameItem> = emptyList(),
+    val conditions: List<AiContextNameItem> = emptyList()
+)
+
+@Serializable
 data class AiPromptRequest(
-    val prompt: String,
+    val message: String,
+    val prompt: String = message,
+    val history: List<AiChatHistoryItem> = emptyList(),
+    val context: AiClinicalContext? = null,
+    val patientName: String? = null,
     val jsonMode: Boolean = false
 )
 
 @Serializable
 data class AiPromptResponse(
     val text: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val provider: String? = null,
+    val guardrailBlocked: Boolean = false
+)
+
+@Serializable
+data class CaregiverChatThreadResponse(
+    val ok: Boolean = false,
+    val patientId: String? = null,
+    val caregiverId: String? = null,
+    val patientName: String? = null,
+    val caregiverName: String? = null,
+    val unreadCount: Int = 0,
+    val messages: List<CaregiverChatMessage> = emptyList()
+)
+
+@Serializable
+data class CaregiverChatSendRequest(
+    val id: String? = null,
+    val caregiverId: String,
+    val message: String
+)
+
+@Serializable
+data class CaregiverChatSendResponse(
+    val ok: Boolean = false,
+    val message: CaregiverChatMessage? = null
+)
+
+@Serializable
+data class CaregiverChatMarkReadRequest(
+    val caregiverId: String
+)
+
+@Serializable
+data class CaregiverChatMarkReadResponse(
+    val ok: Boolean = false,
+    val markedRead: Int = 0
 )
 
 /**
- * Cliente para o proxy seguro de IA (/api/ai), evitando embutir GEMINI_API_KEY no APK.
+ * Cliente para o proxy seguro de IA OpenRouter (/api/ai) com guardrails estritos de saúde.
  */
 interface AiAssistantApi {
     @POST("api/ai")
     suspend fun askAssistant(@Body request: AiPromptRequest): AiPromptResponse
 }
+
