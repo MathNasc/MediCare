@@ -189,6 +189,7 @@ export default function CuidadorWebPage() {
   const [stockMovements, setStockMovements] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState([]);
+  const [allApprovalRequests, setAllApprovalRequests] = useState([]);
   const [careSettings, setCareSettings] = useState(() => ({ ...DEFAULT_CARE_SETTINGS }));
   const [careSettingsDraft, setCareSettingsDraft] = useState(() => ({ ...DEFAULT_CARE_SETTINGS }));
   const [careSettingsLoading, setCareSettingsLoading] = useState(false);
@@ -1277,7 +1278,7 @@ export default function CuidadorWebPage() {
             method: 'POST',
             body: JSON.stringify({ p_patient_id: validTargetId, p_limit: 30 }),
           }),
-          apiFetch(`/api/rest/v1/approval_requests?patient_id=eq.${validTargetId}&status=eq.pending&order=created_at.desc`),
+          apiFetch('/api/rest/v1/approval_requests?status=eq.pending&order=created_at.desc'),
           apiFetch(`/api/rest/v1/calendar_notes?user_id=eq.${validTargetId}&order=date.desc&limit=200`),
           apiFetch(`/api/rest/v1/stock_movements?user_id=eq.${validTargetId}&order=created_at.desc&limit=200`),
           apiFetch(`/api/v1/caregiver/settings?patientId=${encodeURIComponent(validTargetId)}`),
@@ -1308,11 +1309,20 @@ export default function CuidadorWebPage() {
         const resolvedGroups = Array.isArray(settingsJson?.groups) ? settingsJson.groups : [];
         const resolvedOverview = Array.isArray(settingsJson?.patientsOverview) ? settingsJson.patientsOverview : [];
 
+        const activePatientIds = new Set(patientList.map((p) => String(p.patient_id)));
+        const allPendingApprovals = Array.isArray(approvals)
+          ? approvals.filter((reqItem) => reqItem && activePatientIds.has(String(reqItem.patient_id)))
+          : [];
+        const selectedApprovals = allPendingApprovals.filter(
+          (reqItem) => String(reqItem.patient_id) === String(validTargetId)
+        );
+
         setMedications(Array.isArray(meds) ? meds : []);
         setDoseHistory(Array.isArray(hist) ? hist : []);
         setAppointments(Array.isArray(events) ? events : []);
         setAuditLogs(Array.isArray(logs) ? logs : []);
-        setApprovalRequests(Array.isArray(approvals) ? approvals : []);
+        setAllApprovalRequests(allPendingApprovals);
+        setApprovalRequests(selectedApprovals);
         setCalendarNotes(Array.isArray(cNotes) ? cNotes : []);
         setStockMovements(Array.isArray(sMoves) ? sMoves : []);
         setCareSettings(resolvedSettings);
@@ -1336,6 +1346,7 @@ export default function CuidadorWebPage() {
         setDoseHistory([]);
         setAppointments([]);
         setAuditLogs([]);
+        setAllApprovalRequests([]);
         setApprovalRequests([]);
         setCalendarNotes([]);
         setStockMovements([]);
@@ -2347,10 +2358,23 @@ export default function CuidadorWebPage() {
       const isLateDose =
         rawStatus === 'late' || (rawStatus === 'confirmed' && delayMinutes > 15);
 
+      const pendingApproval = approvalRequests.find((reqItem) => {
+        const reqMedId = String(reqItem?.med_id || '');
+        const reqHora = String(reqItem?.hora || '').trim().slice(0, 5);
+        const reqDate = reqItem?.dose_date ? String(reqItem.dose_date).slice(0, 10) : todayIso;
+        return reqMedId === String(med.id || '') && reqHora === hora && reqDate === todayIso;
+      }) || null;
+
       let displayCategory = 'pending'; // 'patient_confirmed' | 'caregiver_confirmed' | 'late' | 'missed' | 'unconfirmed' | 'pending'
       let statusLabel = 'Prevista';
 
-      if (rawStatus === 'missed') {
+      if (pendingApproval) {
+        displayCategory = 'unconfirmed';
+        statusLabel =
+          pendingApproval.action_type === 'undo_dose' || pendingApproval.requested_status === 'pending'
+            ? 'Aguardando aprovação (Desfazer)'
+            : 'Aguardando sua validação';
+      } else if (rawStatus === 'missed') {
         displayCategory = 'missed';
         statusLabel = 'Não Administrada';
       } else if (rawStatus === 'confirmed' || rawStatus === 'late') {
@@ -2383,6 +2407,7 @@ export default function CuidadorWebPage() {
         raw_status: rawStatus,
         display_category: displayCategory,
         status_label: statusLabel,
+        pending_approval: pendingApproval,
         performed_by: match?.performed_by || null,
         confirmed_by_name: match?.confirmed_by_name || null,
         confirmed_by_role: match?.confirmed_by_role || null,
@@ -2406,6 +2431,21 @@ export default function CuidadorWebPage() {
   const pendingDosesToday = todayDoses.filter((d) => d.status === 'pending').length;
   const adherenceRate =
     totalDosesToday > 0 ? Math.round((confirmedDosesToday / totalDosesToday) * 100) : 100;
+
+  const pendingApprovalsByPatient = {};
+  allApprovalRequests.forEach((reqItem) => {
+    const pid = String(reqItem?.patient_id || '');
+    if (!pid) return;
+    pendingApprovalsByPatient[pid] = (pendingApprovalsByPatient[pid] || 0) + 1;
+  });
+  const totalPendingApprovals = allApprovalRequests.length;
+  const otherPatientsPendingIds = Array.from(
+    new Set(
+      allApprovalRequests
+        .map((reqItem) => String(reqItem?.patient_id || ''))
+        .filter((pid) => pid && pid !== String(selectedPatientId || ''))
+    )
+  );
 
   const calendarMonthData = buildCalendarMonthData({
     year: calYear,
@@ -2952,19 +2992,27 @@ export default function CuidadorWebPage() {
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentTab === item.id;
+              const badgeCount = item.id === 'dashboard' ? totalPendingApprovals : 0;
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => navigateToTab(item.id)}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 min-h-[42px] rounded-xl text-xs font-semibold transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                  className={`w-full flex items-center justify-between gap-2 px-3.5 py-2.5 min-h-[42px] rounded-xl text-xs font-semibold transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                     isActive
                       ? 'bg-blue-600/15 text-blue-400 border border-blue-500/30'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 border border-transparent'
                   }`}
                 >
-                  <Icon size={17} className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
+                  <span className="flex items-center gap-3 min-w-0">
+                    <Icon size={17} className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </span>
+                  {badgeCount > 0 && (
+                    <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center tabular-nums shrink-0">
+                      {badgeCount > 9 ? '9+' : badgeCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -2990,8 +3038,8 @@ export default function CuidadorWebPage() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Header Compacto (Mobile-First + Desktop) */}
-        <header className="h-14 md:h-16 border-b border-slate-800/90 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 bg-[#0b1120]/90 backdrop-blur-md sticky top-0 z-30">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <header className="h-14 md:h-16 border-b border-slate-800/90 px-3 sm:px-6 lg:px-8 flex items-center justify-between gap-2 sm:gap-3 bg-[#0b1120]/90 backdrop-blur-md sticky top-0 z-30">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             {canGoBack ? (
               <button
                 type="button"
@@ -3014,7 +3062,14 @@ export default function CuidadorWebPage() {
             )}
             <div className="min-w-0">
               <h2 className="text-sm md:text-base font-bold text-white truncate leading-tight">
-                {currentTabTitle}
+                {currentTab === 'patients' ? (
+                  <>
+                    <span className="sm:hidden">Pacientes</span>
+                    <span className="hidden sm:inline">Pacientes e Vínculos</span>
+                  </>
+                ) : (
+                  currentTabTitle
+                )}
               </h2>
               {selectedPatient && currentTab !== 'patients' && (
                 <p className="hidden md:block text-xs text-slate-400 truncate mt-0.5">
@@ -3024,15 +3079,15 @@ export default function CuidadorWebPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <PWAInstallButton variant="header" />
 
-            {/* Seletor rápido de paciente no Mobile */}
-            {patients.length > 0 && (
+            {/* Seletor rápido de paciente no Mobile (omitido na aba Pacientes onde a lista já está aberta) */}
+            {patients.length > 0 && currentTab !== 'patients' && (
               <button
                 type="button"
                 onClick={() => setShowPatientPickerSheet(true)}
-                className="md:hidden inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] max-w-[155px] rounded-xl bg-[#131d31] border border-slate-700/80 text-xs font-semibold text-slate-100 hover:border-slate-600 transition-colors"
+                className="md:hidden inline-flex items-center gap-1 px-2.5 py-2 min-h-[38px] max-w-[125px] rounded-xl bg-[#131d31] border border-slate-700/80 text-xs font-semibold text-slate-100 hover:border-slate-600 transition-colors"
                 aria-label="Selecionar paciente"
               >
                 <span className="truncate">{selectedPatient?.nome?.split(' ')[0] || 'Paciente'}</span>
@@ -3277,6 +3332,40 @@ export default function CuidadorWebPage() {
                 </div>
               </div>
 
+              {/* Aviso caso outros pacientes acompanhados possuam solicitações pendentes */}
+              {otherPatientsPendingIds.length > 0 && (
+                <div className="bg-amber-950/20 border border-amber-500/35 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-amber-300 font-bold text-xs sm:text-sm">
+                      <AlertTriangle size={15} className="w-4 h-4 shrink-0" />
+                      <span>Outros pacientes aguardando sua confirmação de dose</span>
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      Toque em um paciente abaixo para abrir e aprovar ou recusar a solicitação:
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {otherPatientsPendingIds.map((pid) => {
+                      const otherP = patients.find((p) => String(p.patient_id) === pid);
+                      const count = pendingApprovalsByPatient[pid] || 0;
+                      return (
+                        <button
+                          key={pid}
+                          type="button"
+                          onClick={() => setSelectedPatientId(pid)}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+                        >
+                          <span>{otherP?.nome?.split(' ')[0] || 'Paciente'}</span>
+                          <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-extrabold tabular-nums">
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Solicitações Pendentes de Validação do Paciente */}
               {approvalRequests.length > 0 && (
                 <div className="bg-amber-950/25 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-3">
@@ -3501,23 +3590,51 @@ export default function CuidadorWebPage() {
                                     Obs.: <span className="text-slate-300">{dose.correction_reason}</span>
                                   </div>
                                 )}
+                                {dose.pending_approval && (
+                                  <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5 mt-1">
+                                    Pedido do paciente: <strong>&ldquo;{dose.pending_approval.reason || 'Confirmação pendente'}&rdquo;</strong>
+                                  </div>
+                                )}
                               </div>
                             </div>
 
                             <div className="sm:self-center shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedDoseTarget(dose);
-                                  setDoseAdministeredTime(dose.hora);
-                                  setDoseActionReason('');
-                                  setConfirmDoseSave(false);
-                                  setShowDoseModal(true);
-                                }}
-                                className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
-                              >
-                                Registrar Ação
-                              </button>
+                              {dose.pending_approval ? (
+                                <div className="grid grid-cols-2 sm:flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={actionLoading}
+                                    onClick={() => handleResolveApprovalRequest(dose.pending_approval.id, 'approved')}
+                                    className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+                                  >
+                                    <Check size={14} className="w-3.5 h-3.5" />
+                                    <span>Aprovar</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={actionLoading}
+                                    onClick={() => handleResolveApprovalRequest(dose.pending_approval.id, 'rejected')}
+                                    className="min-h-[40px] px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+                                  >
+                                    <X size={14} className="w-3.5 h-3.5" />
+                                    <span>Recusar</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedDoseTarget(dose);
+                                    setDoseAdministeredTime(dose.hora);
+                                    setDoseActionReason('');
+                                    setConfirmDoseSave(false);
+                                    setShowDoseModal(true);
+                                  }}
+                                  className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors whitespace-nowrap"
+                                >
+                                  Registrar Ação
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -3579,89 +3696,86 @@ export default function CuidadorWebPage() {
                   Nenhum paciente com vínculo ativo encontrado para esta conta de cuidador.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {patients
                     .filter((p) => p.nome.toLowerCase().includes(searchPatient.toLowerCase()))
-                    .map((p) => (
-                      <div
-                        key={p.patient_id}
-                        onClick={() => setSelectedPatientId(p.patient_id)}
-                        className={`bg-[#131d31] p-5 rounded-2xl border transition-all cursor-pointer ${
-                          selectedPatientId === p.patient_id
-                            ? 'border-blue-500 ring-1 ring-blue-500/40'
-                            : 'border-slate-800/90 hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-11 h-11 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 text-sm shrink-0">
-                              {p.nome.slice(0, 1).toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                              <h3 className="font-bold text-white text-sm truncate">{p.nome}</h3>
-                              <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-slate-400 mt-0.5">
-                                <span className="text-slate-300 font-medium">{p.relationship_label}</span>
-                                <span aria-hidden="true">·</span>
-                                <span>{p.blood_type || 'Tipo sanguíneo N/I'}</span>
-                                {p.is_managed && (
-                                  <>
-                                    <span aria-hidden="true">·</span>
-                                    <span className="text-amber-400 font-semibold">Dependente</span>
-                                  </>
+                    .map((p) => {
+                      const overview = patientsOverview.find(
+                        (ov) => String(ov.patient_id) === String(p.patient_id)
+                      );
+                      const pendingCount = pendingApprovalsByPatient[String(p.patient_id)] || 0;
+                      const unreadChat = unreadChatByPatient[p.patient_id] || 0;
+                      const modeLabel =
+                        overview?.config_mode === 'group'
+                          ? `Grupo: ${overview.group_name || 'Ala'}`
+                          : overview?.config_mode === 'custom'
+                          ? 'Regras individuais'
+                          : 'Padrão global';
+                      const modeBadgeClass =
+                        overview?.config_mode === 'group'
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : overview?.config_mode === 'custom'
+                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                          : 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300';
+
+                      return (
+                        <div
+                          key={p.patient_id}
+                          onClick={() => setSelectedPatientId(p.patient_id)}
+                          className={`bg-[#131d31] p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-4 ${
+                            selectedPatientId === p.patient_id
+                              ? 'border-blue-500 ring-1 ring-blue-500/40'
+                              : 'border-slate-800/90 hover:border-slate-700'
+                          }`}
+                        >
+                          {/* Cabeçalho limpo sem sobreposição de botões */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3 min-w-0 flex-1">
+                              <div className="w-11 h-11 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 text-base shrink-0">
+                                {p.nome.slice(0, 1).toUpperCase()}
+                              </div>
+                              <div className="min-w-0 flex-1 space-y-1.5">
+                                <h3 className="font-bold text-white text-sm sm:text-base leading-snug break-words">
+                                  {p.nome}
+                                </h3>
+                                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                  <span className="px-2 py-0.5 rounded-md bg-slate-800/90 border border-slate-700/70 text-slate-200 font-medium">
+                                    {p.relationship_label}
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700/50 text-slate-300">
+                                    {p.blood_type ? `Sangue ${p.blood_type}` : 'Sangue N/I'}
+                                  </span>
+                                  {p.is_managed && (
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-semibold">
+                                      Dependente
+                                    </span>
+                                  )}
+                                  {overview && (
+                                    <span className={`px-2 py-0.5 rounded-md border font-semibold ${modeBadgeClass}`}>
+                                      {modeLabel}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {pendingCount > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedPatientId(p.patient_id);
+                                      navigateToTab('dashboard');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-200 text-[11px] font-bold transition-colors"
+                                  >
+                                    <AlertTriangle size={12} className="w-3 h-3 text-amber-300 shrink-0" />
+                                    <span>
+                                      {pendingCount} dose{pendingCount === 1 ? '' : 's'} aguardando aprovação
+                                    </span>
+                                  </button>
                                 )}
                               </div>
                             </div>
-                          </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {p.role !== 'independente' && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenPatientChat(p.patient_id);
-                                }}
-                                title={`Conversar com ${p.nome}`}
-                                aria-label={`Conversar com ${p.nome}`}
-                                className="relative min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold transition-colors whitespace-nowrap"
-                              >
-                                <MessageSquare size={14} className="w-3.5 h-3.5 shrink-0" />
-                                <span className="hidden sm:inline">Chat</span>
-                                {(unreadChatByPatient[p.patient_id] || 0) > 0 && (
-                                  <span className="min-w-[16px] h-[16px] px-1 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center tabular-nums">
-                                    {unreadChatByPatient[p.patient_id]}
-                                  </span>
-                                )}
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedPatientId(p.patient_id);
-                                navigateToTab('management');
-                              }}
-                              title="Configurar regras de gerenciamento deste paciente"
-                              aria-label={`Gerenciar regras de ${p.nome}`}
-                              className="min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 text-[11px] font-semibold transition-colors whitespace-nowrap"
-                            >
-                              <SlidersHorizontal size={14} className="w-3.5 h-3.5 shrink-0" />
-                              <span className="hidden sm:inline">Gerenciar</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={pairingLoading}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenPatientPairing(p);
-                              }}
-                              title="Vincular celular Android do paciente"
-                              aria-label={`Vincular celular de ${p.nome}`}
-                              className="min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-blue-300 text-[11px] font-semibold transition-colors whitespace-nowrap"
-                            >
-                              <Smartphone size={14} className="w-3.5 h-3.5 shrink-0" />
-                              <span>Vincular</span>
-                            </button>
                             <button
                               type="button"
                               onClick={(e) => {
@@ -3675,9 +3789,78 @@ export default function CuidadorWebPage() {
                               <Trash2 size={16} className="w-4 h-4" />
                             </button>
                           </div>
+
+                          {/* Barra dedicada de ações no rodapé do card */}
+                          <div className="pt-3 border-t border-slate-800/80 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+                            {p.role !== 'independente' && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenPatientChat(p.patient_id);
+                                }}
+                                title={`Conversar com ${p.nome}`}
+                                aria-label={`Conversar com ${p.nome}`}
+                                className="relative min-h-[40px] px-3 py-2 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/35 text-emerald-200 text-xs font-semibold transition-colors whitespace-nowrap"
+                              >
+                                <MessageSquare size={14} className="w-3.5 h-3.5 shrink-0 text-emerald-300" />
+                                <span>Conversar</span>
+                                {unreadChat > 0 && (
+                                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center tabular-nums">
+                                    {unreadChat}
+                                  </span>
+                                )}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPatientId(p.patient_id);
+                                navigateToTab('management');
+                              }}
+                              title="Configurar regras de gerenciamento deste paciente"
+                              aria-label={`Gerenciar regras de ${p.nome}`}
+                              className="min-h-[40px] px-3 py-2 flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/35 text-indigo-200 text-xs font-semibold transition-colors whitespace-nowrap"
+                            >
+                              <SlidersHorizontal size={14} className="w-3.5 h-3.5 shrink-0 text-indigo-300" />
+                              <span>Gerenciar</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pairingLoading}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenPatientPairing(p);
+                              }}
+                              title="Vincular celular Android do paciente"
+                              aria-label={`Vincular celular de ${p.nome}`}
+                              className="min-h-[40px] px-3 py-2 flex items-center justify-center gap-1.5 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/35 text-blue-200 text-xs font-semibold transition-colors whitespace-nowrap"
+                            >
+                              <Smartphone size={14} className="w-3.5 h-3.5 shrink-0 text-blue-300" />
+                              <span>Vincular</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPatientId(p.patient_id);
+                                navigateToTab('dashboard');
+                              }}
+                              title={`Abrir doses de ${p.nome}`}
+                              className={`min-h-[40px] px-3 py-2 flex items-center justify-center gap-1.5 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap ${
+                                pendingCount > 0
+                                  ? 'bg-amber-600/20 hover:bg-amber-600/30 border-amber-500/40 text-amber-200'
+                                  : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200'
+                              }`}
+                            >
+                              <Home size={14} className="w-3.5 h-3.5 shrink-0" />
+                              <span>{pendingCount > 0 ? `Doses (${pendingCount})` : 'Ver Doses'}</span>
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -4363,13 +4546,13 @@ export default function CuidadorWebPage() {
                                 </p>
                               </div>
 
-                              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                              <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2.5 w-full lg:w-auto shrink-0">
                                 {isCustomMode && (
                                   <button
                                     type="button"
                                     disabled={careSettingsSaving || careSettingsLoading}
                                     onClick={() => setCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS })}
-                                    className="min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                                    className="w-full sm:w-auto min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
                                   >
                                     <RotateCcw size={14} className="w-3.5 h-3.5" />
                                     <span>Restaurar Padrão</span>
@@ -4379,7 +4562,7 @@ export default function CuidadorWebPage() {
                                   type="button"
                                   disabled={careSettingsSaving || careSettingsLoading}
                                   onClick={() => handleSaveCareSettings()}
-                                  className="min-h-[42px] inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-blue-600/20 transition-colors"
+                                  className="w-full sm:w-auto min-h-[42px] inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-blue-600/20 transition-colors"
                                 >
                                   {careSettingsSaving ? (
                                     <Loader2 size={14} className="w-3.5 h-3.5 animate-spin" />
@@ -4575,6 +4758,54 @@ export default function CuidadorWebPage() {
                                 </div>
                               </div>
                             )}
+                            {/* Resumo rápido da regra ativa em tela para facilitar visualização no celular */}
+                            {(() => {
+                              const normalizedEffective = normalizeCareSettings(effectiveRuleDraft);
+                              return (
+                                <div className="p-3.5 rounded-xl bg-[#0b1120] border border-slate-800/90 space-y-2">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                                      Resumo da regra em edição
+                                    </span>
+                                    <span className="text-[11px] text-slate-400">
+                                      Role abaixo para ajustar cada interruptor
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                    <span
+                                      className={`px-2.5 py-1 rounded-lg border font-semibold ${
+                                        normalizedEffective.require_caregiver_confirm
+                                          ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                                          : 'bg-slate-800 border-slate-700 text-slate-300'
+                                      }`}
+                                    >
+                                      Confirmar toda dose tomada:{' '}
+                                      {normalizedEffective.require_caregiver_confirm ? 'SIM' : 'NÃO (Direto)'}
+                                    </span>
+                                    <span
+                                      className={`px-2.5 py-1 rounded-lg border font-semibold ${
+                                        normalizedEffective.require_confirm_after_missed
+                                          ? 'bg-amber-500/15 border-amber-500/35 text-amber-300'
+                                          : 'bg-slate-800 border-slate-700 text-slate-300'
+                                      }`}
+                                    >
+                                      Confirmar após dose perdida:{' '}
+                                      {normalizedEffective.require_confirm_after_missed ? 'SIM' : 'NÃO'}
+                                    </span>
+                                    <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300 font-medium">
+                                      Dose perdida após {formatMinutesLabelPt(normalizedEffective.missed_dose_minutes)}
+                                    </span>
+                                  </div>
+                                  {!normalizedEffective.require_caregiver_confirm &&
+                                    normalizedEffective.require_confirm_after_missed && (
+                                      <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                                        Com esta combinação, doses tomadas no horário ficam como <strong>Tomado</strong> direto. Apenas doses já perdidas (ou desfeitas) pedem sua validação. Para aprovar toda dose tomada, ative{' '}
+                                        <strong>&ldquo;Precisa confirmar que o paciente tomou a dose?&rdquo;</strong> abaixo e salve.
+                                      </p>
+                                    )}
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           {/* Regras efetivas / editáveis do paciente */}
@@ -7575,6 +7806,33 @@ export default function CuidadorWebPage() {
               </div>
             )}
 
+            {totalPendingApprovals > 0 && (
+              <div className="mb-3 p-3 rounded-xl bg-amber-950/30 border border-amber-500/40 flex items-center justify-between gap-2.5 shrink-0">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-amber-200">
+                    {totalPendingApprovals} solicitação(ões) de dose aguardando sua aprovação
+                  </p>
+                  <p className="text-[11px] text-slate-300 truncate">
+                    Abra a aba Doses para aprovar ou recusar agora.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstPendingPid = allApprovalRequests[0]?.patient_id;
+                    if (firstPendingPid) {
+                      setSelectedPatientId(String(firstPendingPid));
+                    }
+                    setShowNotificationsModal(false);
+                    navigateToTab('dashboard');
+                  }}
+                  className="min-h-[36px] px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold whitespace-nowrap shrink-0 transition-colors"
+                >
+                  Ir para Doses
+                </button>
+              </div>
+            )}
+
             <div className="overflow-y-auto space-y-2.5 pr-1 flex-1">
               {notificationsList.length === 0 ? (
                 <div className="text-center py-10 px-4 rounded-xl bg-[#0b1120] border border-slate-800/80 text-slate-400 text-xs leading-relaxed">
@@ -7809,6 +8067,7 @@ export default function CuidadorWebPage() {
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentTab === item.id;
+            const mobileBadgeCount = item.id === 'dashboard' ? totalPendingApprovals : 0;
             return (
               <button
                 key={item.id}
@@ -7821,7 +8080,14 @@ export default function CuidadorWebPage() {
                 {isActive && (
                   <span className="absolute top-1 w-5 h-0.5 rounded-full bg-blue-400" aria-hidden="true" />
                 )}
-                <Icon size={20} className="w-5 h-5 shrink-0" />
+                <div className="relative">
+                  <Icon size={20} className="w-5 h-5 shrink-0" />
+                  {mobileBadgeCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-extrabold flex items-center justify-center border border-[#0f172a] tabular-nums">
+                      {mobileBadgeCount > 9 ? '9+' : mobileBadgeCount}
+                    </span>
+                  )}
+                </div>
                 <span className="text-[11px] leading-none whitespace-nowrap truncate max-w-full">
                   {item.label}
                 </span>
