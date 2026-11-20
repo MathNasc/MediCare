@@ -958,10 +958,10 @@ export default function CuidadorWebPage() {
 
           if (newlyArrived.length > 0) {
             const top = newlyArrived[0];
-            showToast(top.titulo || 'Nova notificação de acompanhamento', top.tipo === 'atraso' ? 'error' : 'success', 5500);
+            showToast(top.titulo || 'Nova notificação de acompanhamento', top.tipo === 'atraso' || top.tipo === 'critico' ? 'error' : 'success', 5500);
             showNativeBrowserAlert(top);
-            if (fromPoll && newlyArrived.some((n) => n.tipo === 'cuidador')) {
-              loadDataRef.current?.();
+            if (fromPoll && newlyArrived.some((n) => ['cuidador', 'critico', 'atraso', 'estoque'].includes(n.tipo))) {
+              loadDataRef.current?.({ silent: true });
             }
           }
         }
@@ -1219,9 +1219,11 @@ export default function CuidadorWebPage() {
   };
 
   // Carrega dados do cuidador e pacientes autorizados (somente vínculos ativos!)
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!isAuthenticated) return;
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const [relRes, profRes] = await Promise.all([
         apiFetch('/api/rest/v1/caregiver_relationships?status=eq.active&select=*'),
@@ -1264,7 +1266,9 @@ export default function CuidadorWebPage() {
       }
 
       if (validTargetId) {
-        setCareSettingsLoading(true);
+        if (!silent) {
+          setCareSettingsLoading(true);
+        }
         const [medsRes, histRes, eventsRes, logsRes, approvalsRes, notesRes, stockRes, settingsRes] = await Promise.all([
           apiFetch(`/api/rest/v1/medicamentos?user_id=eq.${validTargetId}&ativo=eq.true&order=created_at.asc`),
           apiFetch(`/api/rest/v1/historico_doses?user_id=eq.${validTargetId}&order=created_at.desc&limit=350`),
@@ -1312,18 +1316,20 @@ export default function CuidadorWebPage() {
         setCalendarNotes(Array.isArray(cNotes) ? cNotes : []);
         setStockMovements(Array.isArray(sMoves) ? sMoves : []);
         setCareSettings(resolvedSettings);
-        setCareSettingsDraft(
-          resolvedMeta.config_mode === 'custom'
-            ? normalizeCareSettings(resolvedMeta.custom_settings || resolvedSettings)
-            : resolvedSettings
-        );
         setPatientRuleMeta(resolvedMeta);
-        setPatientConfigModeDraft(normalizeConfigMode(resolvedMeta.config_mode, 'global'));
-        setPatientGroupIdDraft(resolvedMeta.group_id || resolvedGroups[0]?.id || '');
         setGlobalCareSettings(resolvedGlobal);
-        setGlobalCareSettingsDraft(normalizeCareSettings(resolvedGlobal));
         setCareGroups(resolvedGroups);
         setPatientsOverview(resolvedOverview);
+        if (!silent) {
+          setCareSettingsDraft(
+            resolvedMeta.config_mode === 'custom'
+              ? normalizeCareSettings(resolvedMeta.custom_settings || resolvedSettings)
+              : resolvedSettings
+          );
+          setPatientConfigModeDraft(normalizeConfigMode(resolvedMeta.config_mode, 'global'));
+          setPatientGroupIdDraft(resolvedMeta.group_id || resolvedGroups[0]?.id || '');
+          setGlobalCareSettingsDraft(normalizeCareSettings(resolvedGlobal));
+        }
         setCareSettingsLoading(false);
       } else {
         setMedications([]);
@@ -1334,7 +1340,6 @@ export default function CuidadorWebPage() {
         setCalendarNotes([]);
         setStockMovements([]);
         setCareSettings({ ...DEFAULT_CARE_SETTINGS });
-        setCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS });
         setPatientRuleMeta({
           config_mode: 'global',
           group_id: null,
@@ -1343,8 +1348,6 @@ export default function CuidadorWebPage() {
           effective_source: 'default',
           custom_settings: { ...DEFAULT_CARE_SETTINGS },
         });
-        setPatientConfigModeDraft('global');
-        setPatientGroupIdDraft('');
         const emptySetRes = await apiFetch('/api/v1/caregiver/settings').catch(() => null);
         const emptySetJson = emptySetRes && emptySetRes.ok ? await emptySetRes.json().catch(() => null) : null;
         const resolvedGlobal = {
@@ -1353,18 +1356,25 @@ export default function CuidadorWebPage() {
           updated_at: emptySetJson?.globalSettings?.updated_at || null,
         };
         setGlobalCareSettings(resolvedGlobal);
-        setGlobalCareSettingsDraft(normalizeCareSettings(resolvedGlobal));
         setCareGroups(Array.isArray(emptySetJson?.groups) ? emptySetJson.groups : []);
         setPatientsOverview(Array.isArray(emptySetJson?.patientsOverview) ? emptySetJson.patientsOverview : []);
+        if (!silent) {
+          setCareSettingsDraft({ ...DEFAULT_CARE_SETTINGS });
+          setPatientConfigModeDraft('global');
+          setPatientGroupIdDraft('');
+          setGlobalCareSettingsDraft(normalizeCareSettings(resolvedGlobal));
+        }
         setCareSettingsLoading(false);
       }
     } catch (err) {
       console.warn('Erro ao carregar dados:', err);
       setCareSettingsLoading(false);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-    fetchNotifications({ fromPoll: false });
+    fetchNotifications({ fromPoll: silent });
     fetchUnreadChatSummary();
   }, [isAuthenticated, selectedPatientId, apiFetch, fetchNotifications, fetchUnreadChatSummary]);
 
@@ -1374,31 +1384,49 @@ export default function CuidadorWebPage() {
     loadData();
   }, [loadData]);
 
-  // Verificação periódica de solicitações de confirmação e doses atrasadas (+1h)
+  // Sincronização periódica em segundo plano (linha do tempo, aprovações, estoque e notificações)
   useEffect(() => {
     if (!isAuthenticated) return undefined;
-    const intervalId = setInterval(() => {
-      fetchNotifications({ fromPoll: true });
-      fetchUnreadChatSummary();
+    let lastSilentSyncAt = 0;
+
+    const runBackgroundRefresh = () => {
+      const now = Date.now();
+      if (now - lastSilentSyncAt < 4000) return;
+      lastSilentSyncAt = now;
+      loadDataRef.current?.({ silent: true });
       if (showChatDrawerRef.current && selectedPatientIdRef.current) {
         loadPatientChatMessages(selectedPatientIdRef.current, { silent: true });
       }
-    }, 30000);
+    };
+
+    const intervalId = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        runBackgroundRefresh();
+      }
+    }, 20000);
+
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        fetchNotifications({ fromPoll: true });
-        fetchUnreadChatSummary();
-        if (showChatDrawerRef.current && selectedPatientIdRef.current) {
-          loadPatientChatMessages(selectedPatientIdRef.current, { silent: true });
-        }
+        runBackgroundRefresh();
       }
     };
+
+    const onFocus = () => {
+      runBackgroundRefresh();
+    };
+
     document.addEventListener('visibilitychange', onVisibility);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', onFocus);
+    }
     return () => {
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', onFocus);
+      }
     };
-  }, [isAuthenticated, fetchNotifications, fetchUnreadChatSummary, loadPatientChatMessages]);
+  }, [isAuthenticated, loadPatientChatMessages]);
 
   // Stream em tempo real (SSE) do chat Cuidador <-> Paciente
   useEffect(() => {

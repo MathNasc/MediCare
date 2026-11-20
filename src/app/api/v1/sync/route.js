@@ -6,6 +6,7 @@ import {
   getLocalDateAndMinutes,
   notifyCaregiversOfDoseRequest,
   notifyCaregiversOfSosUsage,
+  sendWebPushToUsers,
 } from '@/lib/caregiverNotifications';
 import { ensureOverdueCaregiverScheduler } from '@/lib/reminderWorker';
 import {
@@ -30,6 +31,31 @@ function toDeterministicUuid(rawId, prefix = 'medicare') {
   const seed = `${prefix}:${String(rawId || crypto.randomUUID())}`;
   const hash = crypto.createHash('md5').update(seed).digest('hex');
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+async function runOptionalTxFn(client, label, fn, fallbackValue = null) {
+  const sp = `sp_${String(label || 'opt').replace(/[^a-zA-Z0-9_]/g, '_')}`;
+  try {
+    await client.query(`SAVEPOINT ${sp}`);
+  } catch {
+    return fallbackValue;
+  }
+  try {
+    const res = await fn();
+    await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    return res;
+  } catch (err) {
+    await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
+    await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    if (err?.message) {
+      console.warn(`[sync] optional tx step ${sp} skipped:`, err.message);
+    }
+    return fallbackValue;
+  }
+}
+
+async function runOptionalTxQuery(client, label, sql, params = [], fallbackValue = { rows: [], rowCount: 0 }) {
+  return runOptionalTxFn(client, label, () => client.query(sql, params), fallbackValue);
 }
 
 function parsePgDate(val) {
@@ -112,10 +138,10 @@ function normalizeTreatmentType(val) {
 
 function normalizeDoseStatus(val) {
   const s = String(val || '').toLowerCase().trim();
-  if (s === 'confirmed' || s === 'tomada' || s === 'taken' || s === 'concluida') return 'confirmed';
-  if (s === 'missed' || s === 'pulada' || s === 'perdida' || s === 'skipped') return 'missed';
-  if (s === 'late' || s === 'atrasada') return 'late';
-  if (s === 'pending' || s === 'pendente') return 'pending';
+  if (['confirmed', 'tomada', 'tomado', 'taken', 'concluida', 'concluido'].includes(s)) return 'confirmed';
+  if (['missed', 'pulada', 'pulado', 'puladas', 'perdida', 'perdido', 'skipped'].includes(s)) return 'missed';
+  if (['late', 'atrasada', 'atrasado'].includes(s)) return 'late';
+  if (['pending', 'pendente'].includes(s)) return 'pending';
   return 'confirmed';
 }
 
@@ -474,6 +500,7 @@ export async function POST(request) {
     const isHorariosArray = horariosColRes.rows[0]?.data_type === 'ARRAY';
 
     await client.query('BEGIN');
+    const deferredPushes = [];
 
     // 1. Atualiza ou insere o perfil do paciente preservando campos existentes caso não venham preenchidos
     const rawIncomingRole = String(user.role || user.user_role || '')
@@ -548,46 +575,35 @@ export async function POST(request) {
 
     if (deletedMedIdsToMatch.size > 0 && (!isDependentPatientSync || careSettings.allow_patient_med_edit)) {
       const delMedArr = Array.from(deletedMedIdsToMatch);
-      await client
-        .query(
-          `UPDATE medicamentos
-           SET ativo = false, status = 'cancelado', updated_at = NOW()
-           WHERE user_id = $1
-             AND LOWER(id::text) = ANY($2::text[])
-             AND (COALESCE(ativo, true) = true OR COALESCE(status, 'ativo') <> 'cancelado')`,
-          [userId, delMedArr]
-        )
-        .catch(() => {});
+      await runOptionalTxQuery(
+        client,
+        'del_meds',
+        `UPDATE medicamentos
+         SET ativo = false, status = 'cancelado', updated_at = NOW()
+         WHERE user_id = $1
+           AND LOWER(id::text) = ANY($2::text[])
+           AND (COALESCE(ativo, true) = true OR COALESCE(status, 'ativo') <> 'cancelado')`,
+        [userId, delMedArr]
+      );
     }
 
     if (deletedSet.size > 0) {
       const allDelArr = Array.from(deletedSet);
       if (!isDependentPatientSync || !careSettings.require_confirm_undo) {
-        await client
-          .query(`DELETE FROM historico_doses WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-          .catch(() => {});
+        await runOptionalTxQuery(
+          client,
+          'del_hist',
+          `DELETE FROM historico_doses WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`,
+          [userId, allDelArr]
+        );
       }
-      await client
-        .query(`DELETE FROM health_events WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-        .catch(() => {});
-      await client
-        .query(`DELETE FROM notes WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-        .catch(() => {});
-      await client
-        .query(`DELETE FROM calendar_notes WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-        .catch(() => {});
-      await client
-        .query(`DELETE FROM allergies WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-        .catch(() => {});
-      await client
-        .query(`DELETE FROM health_conditions WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-        .catch(() => {});
-      await client
-        .query(`DELETE FROM emergency_contacts WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-        .catch(() => {});
-      await client
-        .query(`DELETE FROM healthcare_professionals WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr])
-        .catch(() => {});
+      await runOptionalTxQuery(client, 'del_ev', `DELETE FROM health_events WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr]);
+      await runOptionalTxQuery(client, 'del_notes', `DELETE FROM notes WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr]);
+      await runOptionalTxQuery(client, 'del_cal_notes', `DELETE FROM calendar_notes WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr]);
+      await runOptionalTxQuery(client, 'del_alg', `DELETE FROM allergies WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr]);
+      await runOptionalTxQuery(client, 'del_cond', `DELETE FROM health_conditions WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr]);
+      await runOptionalTxQuery(client, 'del_ct', `DELETE FROM emergency_contacts WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr]);
+      await runOptionalTxQuery(client, 'del_pr', `DELETE FROM healthcare_professionals WHERE user_id = $1 AND LOWER(id::text) = ANY($2::text[])`, [userId, allDelArr]);
     }
 
     // Mapa de IDs de medicamentos (ex: "med-123" -> UUID determinístico) para manter integridade com historico_doses e stock_movements
@@ -687,10 +703,13 @@ export async function POST(request) {
         await client.query('RELEASE SAVEPOINT sp_med_upsert');
       } catch (medErr) {
         await client.query('ROLLBACK TO SAVEPOINT sp_med_upsert');
+        await client.query('RELEASE SAVEPOINT sp_med_upsert').catch(() => {});
         if (medErr?.code === '23514') {
-          await client
-            .query('ALTER TABLE public.medicamentos DROP CONSTRAINT IF EXISTS medicamentos_quantidade_check')
-            .catch(() => {});
+          await runOptionalTxQuery(
+            client,
+            'drop_med_qty_chk',
+            'ALTER TABLE public.medicamentos DROP CONSTRAINT IF EXISTS medicamentos_quantidade_check'
+          );
           await client.query(medUpsertSql, medUpsertParams);
         } else {
           throw medErr;
@@ -724,12 +743,13 @@ export async function POST(request) {
       }
     }
 
-    const activeCgLinksRes = await client
-      .query(
-        "SELECT id, caregiver_id FROM caregiver_relationships WHERE patient_id = $1 AND status = 'active'",
-        [userId]
-      )
-      .catch(() => ({ rows: [] }));
+    const activeCgLinksRes = await runOptionalTxQuery(
+      client,
+      'active_cg_links',
+      "SELECT id, caregiver_id FROM caregiver_relationships WHERE patient_id = $1 AND status = 'active'",
+      [userId],
+      { rows: [] }
+    );
     const activeCaregiverIds = (activeCgLinksRes.rows || [])
       .map((r) => r.caregiver_id)
       .filter(Boolean)
@@ -861,26 +881,37 @@ export async function POST(request) {
       );
 
       if (isSosDose && careSettings.notify_sos_usage && activeCaregiverIds.length > 0 && normStatus === 'confirmed') {
-        await notifyCaregiversOfSosUsage(client, {
-          patientId: userId,
-          patientName: resolvedPatientName,
-          caregiverIds: activeCaregiverIds,
-          doseId: doseUuid,
-          medNome: matchedMed.nome || h.med_nome || 'Medicamento SOS',
-          dosagem: matchedMed.dosagem || '',
-          hora,
-          doseDate,
-          reason: h.motivo || h.reason || 'Uso SOS',
-        }).catch(() => {});
+        const sosNotifRes = await runOptionalTxFn(
+          client,
+          'sos_notif',
+          () =>
+            notifyCaregiversOfSosUsage(client, {
+              patientId: userId,
+              patientName: resolvedPatientName,
+              caregiverIds: activeCaregiverIds,
+              doseId: doseUuid,
+              medNome: matchedMed.nome || h.med_nome || 'Medicamento SOS',
+              dosagem: matchedMed.dosagem || '',
+              hora,
+              doseDate,
+              reason: h.motivo || h.reason || 'Uso SOS',
+              deferPush: true,
+              useSavepoint: true,
+            }),
+          { pendingPushes: [] }
+        );
+        if (Array.isArray(sosNotifRes?.pendingPushes)) {
+          deferredPushes.push(...sosNotifRes.pendingPushes);
+        }
       }
     }
 
-    await client
-      .query(
-        `DELETE FROM health_events WHERE user_id = $1 AND (type = 'estoque' OR title ILIKE 'Reposição:%' OR title ILIKE 'Ajuste:%')`,
-        [userId]
-      )
-      .catch(() => {});
+    await runOptionalTxQuery(
+      client,
+      'cleanup_stock_events',
+      `DELETE FROM health_events WHERE user_id = $1 AND (type = 'estoque' OR title ILIKE 'Reposição:%' OR title ILIKE 'Ajuste:%')`,
+      [userId]
+    );
 
     for (const ev of events) {
       const evType = normalizeEventType(ev.type || ev.tipo);
@@ -926,23 +957,23 @@ export async function POST(request) {
         continue;
       }
 
-      await client
-        .query(
-          `INSERT INTO notes (id, user_id, title, description, date, time)
-           VALUES ($1,$2,$3,$4,$5,$6)
-           ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
-          [noteUuid, userId, content.slice(0, 120), content, noteDate, parsePgTime(n.time || n.hora)]
-        )
-        .catch(() => {});
+      await runOptionalTxQuery(
+        client,
+        'upsert_note',
+        `INSERT INTO notes (id, user_id, title, description, date, time)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
+        [noteUuid, userId, content.slice(0, 120), content, noteDate, parsePgTime(n.time || n.hora)]
+      );
 
-      await client
-        .query(
-          `INSERT INTO calendar_notes (id, user_id, date, content, mood)
-           VALUES ($1,$2,$3,$4,$5)
-           ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content`,
-          [noteUuid, userId, noteDate, content, n.mood || null]
-        )
-        .catch(() => {});
+      await runOptionalTxQuery(
+        client,
+        'upsert_cal_note',
+        `INSERT INTO calendar_notes (id, user_id, date, content, mood)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content`,
+        [noteUuid, userId, noteDate, content, n.mood || null]
+      );
     }
 
     for (const a of allergies) {
@@ -1082,12 +1113,13 @@ export async function POST(request) {
 
     // Processa solicitações de validação de dose (confirmação ou desfazimento) enviadas pelo paciente ao cuidador
     if (pendingDoseRequests.length > 0) {
-      const cgLinksRes = await client
-        .query(
-          "SELECT id, caregiver_id FROM caregiver_relationships WHERE patient_id = $1 AND status = 'active'",
-          [userId]
-        )
-        .catch(() => ({ rows: [] }));
+      const cgLinksRes = await runOptionalTxQuery(
+        client,
+        'req_cg_links',
+        "SELECT id, caregiver_id FROM caregiver_relationships WHERE patient_id = $1 AND status = 'active'",
+        [userId],
+        { rows: [] }
+      );
       const patientName = user.nome || user.full_name || 'Paciente';
 
       for (const reqItem of pendingDoseRequests) {
@@ -1114,9 +1146,13 @@ export async function POST(request) {
         );
 
         // Verifica se já foi resolvida anteriormente no servidor
-        const existingReq = await client
-          .query('SELECT status, updated_at FROM approval_requests WHERE id = $1 LIMIT 1', [reqUuid])
-          .catch(() => ({ rows: [] }));
+        const existingReq = await runOptionalTxQuery(
+          client,
+          'check_existing_req',
+          'SELECT status, updated_at FROM approval_requests WHERE id = $1 LIMIT 1',
+          [reqUuid],
+          { rows: [] }
+        );
         const alreadyExists = existingReq.rows.length > 0;
         const isReopened = alreadyExists && existingReq.rows[0].status !== 'pending';
         if (isReopened) {
@@ -1148,37 +1184,37 @@ export async function POST(request) {
           status: 'pending',
         };
 
-        await client
-          .query(
-            `INSERT INTO approval_requests (
-               id, patient_id, caregiver_id, med_id, med_nome, dose_date, hora,
-               action_type, requested_status, reason, status, metadata, updated_at
-             )
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',$11,NOW())
-             ON CONFLICT (id) DO UPDATE SET
-               caregiver_id = COALESCE(EXCLUDED.caregiver_id, approval_requests.caregiver_id),
-               med_nome = EXCLUDED.med_nome,
-               action_type = EXCLUDED.action_type,
-               requested_status = EXCLUDED.requested_status,
-               reason = EXCLUDED.reason,
-               status = 'pending',
-               metadata = EXCLUDED.metadata,
-               updated_at = NOW()`,
-            [
-              reqUuid,
-              userId,
-              primaryCaregiverId,
-              String(resolvedMedUuid || ''),
-              medNome,
-              doseDate,
-              hora,
-              actionType,
-              reqStatus,
-              reason,
-              JSON.stringify(metaObj),
-            ]
-          )
-          .catch(() => {});
+        await runOptionalTxQuery(
+          client,
+          'upsert_approval_req',
+          `INSERT INTO approval_requests (
+             id, patient_id, caregiver_id, med_id, med_nome, dose_date, hora,
+             action_type, requested_status, reason, status, metadata, updated_at
+           )
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',$11,NOW())
+           ON CONFLICT (id) DO UPDATE SET
+             caregiver_id = COALESCE(EXCLUDED.caregiver_id, approval_requests.caregiver_id),
+             med_nome = EXCLUDED.med_nome,
+             action_type = EXCLUDED.action_type,
+             requested_status = EXCLUDED.requested_status,
+             reason = EXCLUDED.reason,
+             status = 'pending',
+             metadata = EXCLUDED.metadata,
+             updated_at = NOW()`,
+          [
+            reqUuid,
+            userId,
+            primaryCaregiverId,
+            String(resolvedMedUuid || ''),
+            medNome,
+            doseDate,
+            hora,
+            actionType,
+            reqStatus,
+            reason,
+            JSON.stringify(metaObj),
+          ]
+        );
 
         const isUndo = actionType === 'undo_dose' || reqStatus === 'pending';
         const notifTitle = isUndo
@@ -1190,75 +1226,86 @@ export async function POST(request) {
 
         // Notificação vinculada ao paciente (visível via /api/rest/v1/notificacoes?user_id=eq.<patientId>)
         const patNotifId = toDeterministicUuid(`notif:pat:${reqUuid}`, `notif:${userId}`);
-        await client
-          .query(
-            `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
-             VALUES ($1,$2,'cuidador',$3,$4,false)
-             ON CONFLICT (id) DO UPDATE SET
-               titulo = EXCLUDED.titulo,
-               mensagem = EXCLUDED.mensagem,
-               lida = false`,
-            [patNotifId, userId, notifTitle, notifMsg]
-          )
-          .catch(() => {});
+        await runOptionalTxQuery(
+          client,
+          'notif_pat_req',
+          `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
+           VALUES ($1,$2,'cuidador',$3,$4,false)
+           ON CONFLICT (id) DO UPDATE SET
+             titulo = EXCLUDED.titulo,
+             mensagem = EXCLUDED.mensagem,
+             lida = false`,
+          [patNotifId, userId, notifTitle, notifMsg]
+        );
 
-        // Notificação persistente + Web Push para cada cuidador ativo vinculado
-        await notifyCaregiversOfDoseRequest(client, {
-          patientId: userId,
-          patientName,
-          caregiverRows: cgLinksRes.rows,
-          reqUuid,
-          medNome,
-          hora,
-          doseDate,
-          reason,
-          isUndo,
-          isNewOrReopened,
-        }).catch(() => {});
+        // Notificação persistente para cada cuidador ativo vinculado (Web Push é enviado após COMMIT)
+        const reqNotifRes = await runOptionalTxFn(
+          client,
+          'notif_cg_req',
+          () =>
+            notifyCaregiversOfDoseRequest(client, {
+              patientId: userId,
+              patientName,
+              caregiverRows: cgLinksRes.rows,
+              reqUuid,
+              medNome,
+              hora,
+              doseDate,
+              reason,
+              isUndo,
+              isNewOrReopened,
+              deferPush: true,
+              useSavepoint: true,
+            }),
+          { pendingPushes: [] }
+        );
+        if (Array.isArray(reqNotifRes?.pendingPushes)) {
+          deferredPushes.push(...reqNotifRes.pendingPushes);
+        }
 
         // Nota clínica vinculada para cada cuidador ativo
         for (const cgRow of cgLinksRes.rows) {
           if (!cgRow.caregiver_id) continue;
           const cgNoteId = toDeterministicUuid(`cgnote:${cgRow.caregiver_id}:${reqUuid}`, `cgnote:${userId}`);
-          await client
-            .query(
-              `INSERT INTO caregiver_notes (id, relationship_id, patient_id, caregiver_id, title, description, metadata)
-               VALUES ($1,$2,$3,$4,$5,$6,$7)
-               ON CONFLICT (id) DO UPDATE SET
-                 title = EXCLUDED.title,
-                 description = EXCLUDED.description,
-                 metadata = EXCLUDED.metadata`,
-              [
-                cgNoteId,
-                cgRow.id,
-                userId,
-                cgRow.caregiver_id,
-                notifTitle,
-                notifMsg,
-                JSON.stringify(metaObj),
-              ]
-            )
-            .catch(() => {});
+          await runOptionalTxQuery(
+            client,
+            'upsert_cg_note',
+            `INSERT INTO caregiver_notes (id, relationship_id, patient_id, caregiver_id, title, description, metadata)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)
+             ON CONFLICT (id) DO UPDATE SET
+               title = EXCLUDED.title,
+               description = EXCLUDED.description,
+               metadata = EXCLUDED.metadata`,
+            [
+              cgNoteId,
+              cgRow.id,
+              userId,
+              cgRow.caregiver_id,
+              notifTitle,
+              notifMsg,
+              JSON.stringify(metaObj),
+            ]
+          );
         }
 
         // Registra em audit_logs para histórico de auditoria do cuidador
         if (!alreadyExists) {
           const auditId = toDeterministicUuid(`audit:${reqUuid}`, `audit:${userId}`);
-          await client
-            .query(
-              `INSERT INTO audit_logs (id, patient_id, performed_by, action, new_value, reason)
-               VALUES ($1,$2,$3,$4,$5,$6)
-               ON CONFLICT (id) DO NOTHING`,
-              [
-                auditId,
-                userId,
-                userId,
-                isUndo ? 'dose_undo_requested' : 'dose_confirm_requested',
-                JSON.stringify(metaObj),
-                reason,
-              ]
-            )
-            .catch(() => {});
+          await runOptionalTxQuery(
+            client,
+            'audit_req',
+            `INSERT INTO audit_logs (id, patient_id, performed_by, action, new_value, reason)
+             VALUES ($1,$2,$3,$4,$5,$6)
+             ON CONFLICT (id) DO NOTHING`,
+            [
+              auditId,
+              userId,
+              userId,
+              isUndo ? 'dose_undo_requested' : 'dose_confirm_requested',
+              JSON.stringify(metaObj),
+              reason,
+            ]
+          );
         }
       }
     }
@@ -1267,23 +1314,24 @@ export async function POST(request) {
     for (const rawDelId of deletedRecordIds) {
       const delUuid = toDeterministicUuid(rawDelId, `cg:${userId}`);
       deletedSet.add(delUuid.toLowerCase());
-      const revokedRows = await client
-        .query(
-          `UPDATE caregiver_relationships
-           SET status = 'revoked', revoked_at = COALESCE(revoked_at, NOW()), updated_at = NOW()
-           WHERE patient_id = $1 AND (id::text = $2::text OR id::text = $3::text) AND status <> 'revoked'
-           RETURNING caregiver_id`,
-          [userId, rawDelId, delUuid]
-        )
-        .catch(() => ({ rows: [] }));
+      const revokedRows = await runOptionalTxQuery(
+        client,
+        'revoke_cg',
+        `UPDATE caregiver_relationships
+         SET status = 'revoked', revoked_at = COALESCE(revoked_at, NOW()), updated_at = NOW()
+         WHERE patient_id = $1 AND (id::text = $2::text OR id::text = $3::text) AND status <> 'revoked'
+         RETURNING caregiver_id`,
+        [userId, rawDelId, delUuid],
+        { rows: [] }
+      );
       for (const r of revokedRows.rows) {
         if (r.caregiver_id) {
-          await client
-            .query(
-              `UPDATE cuidadores SET status = 'recusado' WHERE paciente_id = $1 AND cuidador_id = $2`,
-              [userId, r.caregiver_id]
-            )
-            .catch(() => {});
+          await runOptionalTxQuery(
+            client,
+            'revoke_legacy_cg',
+            `UPDATE cuidadores SET status = 'recusado' WHERE paciente_id = $1 AND cuidador_id = $2`,
+            [userId, r.caregiver_id]
+          );
         }
       }
     }
@@ -1316,56 +1364,77 @@ export async function POST(request) {
       const cleanRelLabel = cleanNullableText(cg.relationship_label || cg.relacao || cg.relationship);
       const cleanInviteEmail = cleanNullableText(cg.invite_email || cg.email);
 
-      let targetCgId = cgUuid;
-      if (cleanToken) {
-        const existingByToken = await client
-          .query('SELECT id FROM caregiver_relationships WHERE UPPER(TRIM(invite_token)) = $1 LIMIT 1', [cleanToken])
-          .catch(() => ({ rows: [] }));
-        if (existingByToken.rows[0]?.id) {
-          targetCgId = existingByToken.rows[0].id;
+      await runOptionalTxFn(client, 'upsert_cg_rel', async () => {
+        let targetCgId = cgUuid;
+        if (cleanCaregiverId) {
+          const existingByPair = await client.query(
+            'SELECT id FROM caregiver_relationships WHERE patient_id = $1 AND caregiver_id = $2 LIMIT 1',
+            [userId, cleanCaregiverId]
+          );
+          if (existingByPair.rows[0]?.id) {
+            targetCgId = existingByPair.rows[0].id;
+          }
         }
-      }
+        if (targetCgId === cgUuid && cleanToken) {
+          const existingByToken = await client.query(
+            'SELECT id FROM caregiver_relationships WHERE UPPER(TRIM(invite_token)) = $1 LIMIT 1',
+            [cleanToken]
+          );
+          if (existingByToken.rows[0]?.id) {
+            targetCgId = existingByToken.rows[0].id;
+          }
+        }
 
-      await client.query(
-        `INSERT INTO caregiver_relationships (
-           id, patient_id, caregiver_id, permission_level, status,
-           invite_token, invite_email, invite_expires_at, relationship_label, updated_at
-         )
-         VALUES (
-           $1, $2, $3, $4, $5,
-           COALESCE($6, encode(gen_random_bytes(24), 'hex')),
-           $7,
-           NOW() + interval '7 days',
-           $8,
-           NOW()
-         )
-         ON CONFLICT (id) DO UPDATE SET
-           invite_token = COALESCE(caregiver_relationships.invite_token, EXCLUDED.invite_token),
-           invite_expires_at = CASE
-             WHEN caregiver_relationships.status = 'pending'
-             THEN GREATEST(COALESCE(caregiver_relationships.invite_expires_at, NOW() + interval '7 days'), NOW() + interval '7 days')
-             ELSE caregiver_relationships.invite_expires_at
-           END,
-           relationship_label = CASE
-             WHEN caregiver_relationships.relationship_label IS NULL OR LOWER(caregiver_relationships.relationship_label) = 'pendente'
-             THEN COALESCE(EXCLUDED.relationship_label, caregiver_relationships.relationship_label)
-             ELSE caregiver_relationships.relationship_label
-           END,
-           updated_at = NOW()`,
-        [
-          targetCgId,
-          userId,
-          cleanCaregiverId,
-          cleanPerm,
-          dbStatus,
-          cleanToken,
-          cleanInviteEmail,
-          cleanRelLabel,
-        ]
-      );
+        await client.query(
+          `INSERT INTO caregiver_relationships (
+             id, patient_id, caregiver_id, permission_level, status,
+             invite_token, invite_email, invite_expires_at, relationship_label, updated_at
+           )
+           VALUES (
+             $1, $2, $3, $4, $5,
+             COALESCE($6, encode(gen_random_bytes(24), 'hex')),
+             $7,
+             NOW() + interval '7 days',
+             $8,
+             NOW()
+           )
+           ON CONFLICT (id) DO UPDATE SET
+             invite_token = COALESCE(caregiver_relationships.invite_token, EXCLUDED.invite_token),
+             invite_expires_at = CASE
+               WHEN caregiver_relationships.status = 'pending'
+               THEN GREATEST(COALESCE(caregiver_relationships.invite_expires_at, NOW() + interval '7 days'), NOW() + interval '7 days')
+               ELSE caregiver_relationships.invite_expires_at
+             END,
+             relationship_label = CASE
+               WHEN caregiver_relationships.relationship_label IS NULL OR LOWER(caregiver_relationships.relationship_label) = 'pendente'
+               THEN COALESCE(EXCLUDED.relationship_label, caregiver_relationships.relationship_label)
+               ELSE caregiver_relationships.relationship_label
+             END,
+             updated_at = NOW()`,
+          [
+            targetCgId,
+            userId,
+            cleanCaregiverId,
+            cleanPerm,
+            dbStatus,
+            cleanToken,
+            cleanInviteEmail,
+            cleanRelLabel,
+          ]
+        );
+      });
     }
 
     await client.query('COMMIT');
+
+    if (deferredPushes.length > 0) {
+      await Promise.race([
+        Promise.allSettled(
+          deferredPushes.map((p) => sendWebPushToUsers(client, p.userIds, p.payload))
+        ),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]).catch(() => {});
+    }
 
     return NextResponse.json(
       {

@@ -140,6 +140,8 @@ export async function notifyCaregiversOfDoseRequest(
     reason,
     isUndo = false,
     isNewOrReopened = true,
+    deferPush = false,
+    useSavepoint = false,
   }
 ) {
   const notifTitle = isUndo
@@ -155,9 +157,12 @@ export async function notifyCaregiversOfDoseRequest(
     caregiverIds.push(String(cgRow.caregiver_id));
     const cgNotifId = toDeterministicUuid(`notif:cg:${cgRow.caregiver_id}:${reqUuid}`, `notif:${cgRow.caregiver_id}`);
 
-    if (isNewOrReopened) {
-      await client
-        .query(
+    if (useSavepoint) {
+      await client.query('SAVEPOINT sp_cg_req_notif').catch(() => {});
+    }
+    try {
+      if (isNewOrReopened) {
+        await client.query(
           `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
            VALUES ($1,$2,'cuidador',$3,$4,false)
            ON CONFLICT (id) DO UPDATE SET
@@ -166,30 +171,48 @@ export async function notifyCaregiversOfDoseRequest(
              lida = false,
              created_at = NOW()`,
           [cgNotifId, cgRow.caregiver_id, notifTitle, notifMsg]
-        )
-        .catch(() => {});
-    } else {
-      await client
-        .query(
+        );
+      } else {
+        await client.query(
           `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
            VALUES ($1,$2,'cuidador',$3,$4,false)
            ON CONFLICT (id) DO NOTHING`,
           [cgNotifId, cgRow.caregiver_id, notifTitle, notifMsg]
-        )
-        .catch(() => {});
+        );
+      }
+      if (useSavepoint) {
+        await client.query('RELEASE SAVEPOINT sp_cg_req_notif').catch(() => {});
+      }
+    } catch {
+      if (useSavepoint) {
+        await client.query('ROLLBACK TO SAVEPOINT sp_cg_req_notif').catch(() => {});
+        await client.query('RELEASE SAVEPOINT sp_cg_req_notif').catch(() => {});
+      }
     }
   }
 
-  if (isNewOrReopened && caregiverIds.length > 0) {
-    await sendWebPushToUsers(client, caregiverIds, {
-      title: isUndo ? `↩️ Desfazer dose: ${medNome}` : `🔔 Confirmação de dose: ${medNome}`,
-      body: `${patientName} pediu para ${isUndo ? 'desfazer' : 'confirmar'} ${medNome} (${hora}). Motivo: ${reason}`,
-      tag: `cg-req-${reqUuid}`,
-      url: '/cuidador',
-    });
+  const pendingPush =
+    isNewOrReopened && caregiverIds.length > 0
+      ? {
+          userIds: caregiverIds,
+          payload: {
+            title: isUndo ? `↩️ Desfazer dose: ${medNome}` : `🔔 Confirmação de dose: ${medNome}`,
+            body: `${patientName} pediu para ${isUndo ? 'desfazer' : 'confirmar'} ${medNome} (${hora}). Motivo: ${reason}`,
+            tag: `cg-req-${reqUuid}`,
+            url: '/cuidador',
+          },
+        }
+      : null;
+
+  if (pendingPush && !deferPush) {
+    await sendWebPushToUsers(client, pendingPush.userIds, pendingPush.payload);
   }
 
-  return { caregiverCount: caregiverIds.length, patientId };
+  return {
+    caregiverCount: caregiverIds.length,
+    patientId,
+    pendingPushes: pendingPush ? [pendingPush] : [],
+  };
 }
 
 /**
@@ -207,10 +230,12 @@ export async function notifyCaregiversOfSosUsage(
     hora,
     doseDate,
     reason = 'Uso SOS',
+    deferPush = false,
+    useSavepoint = false,
   }
 ) {
   const cleanCgIds = Array.from(new Set((caregiverIds || []).filter(Boolean).map(String)));
-  if (cleanCgIds.length === 0) return { alertsCreated: 0, pushSent: 0 };
+  if (cleanCgIds.length === 0) return { alertsCreated: 0, pushSent: 0, pendingPushes: [] };
 
   const title = `🆘 Uso SOS registrado — ${medNome}`;
   const body = `${patientName} utilizou ${medNome}${dosagem ? ` (${dosagem})` : ''} em modo SOS às ${hora} (${doseDate}). Motivo: ${reason}.`;
@@ -220,15 +245,27 @@ export async function notifyCaregiversOfSosUsage(
 
   for (const cgId of cleanCgIds) {
     const notifId = toDeterministicUuid(`sos:${cgId}:${doseId}`, `notif:${cgId}`);
-    const insRes = await client
-      .query(
+    if (useSavepoint) {
+      await client.query('SAVEPOINT sp_cg_sos_notif').catch(() => {});
+    }
+    let insRes = { rowCount: 0 };
+    try {
+      insRes = await client.query(
         `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
-         VALUES ($1, $2, 'alerta', $3, $4, FALSE)
+         VALUES ($1, $2, 'critico', $3, $4, FALSE)
          ON CONFLICT (id) DO NOTHING
          RETURNING id`,
         [notifId, cgId, title, body]
-      )
-      .catch(() => ({ rowCount: 0 }));
+      );
+      if (useSavepoint) {
+        await client.query('RELEASE SAVEPOINT sp_cg_sos_notif').catch(() => {});
+      }
+    } catch {
+      if (useSavepoint) {
+        await client.query('ROLLBACK TO SAVEPOINT sp_cg_sos_notif').catch(() => {});
+        await client.query('RELEASE SAVEPOINT sp_cg_sos_notif').catch(() => {});
+      }
+    }
 
     if (insRes.rowCount > 0) {
       alertsCreated += 1;
@@ -236,18 +273,30 @@ export async function notifyCaregiversOfSosUsage(
     }
   }
 
+  const pendingPush =
+    newCgIds.length > 0
+      ? {
+          userIds: newCgIds,
+          payload: {
+            title,
+            body,
+            tag: `cg-sos-${doseId}`,
+            url: '/cuidador',
+          },
+        }
+      : null;
+
   let pushSent = 0;
-  if (newCgIds.length > 0) {
-    const pushRes = await sendWebPushToUsers(client, newCgIds, {
-      title,
-      body,
-      tag: `cg-sos-${doseId}`,
-      url: '/cuidador',
-    });
+  if (pendingPush && !deferPush) {
+    const pushRes = await sendWebPushToUsers(client, pendingPush.userIds, pendingPush.payload);
     pushSent = pushRes.sent;
   }
 
-  return { alertsCreated, pushSent };
+  return {
+    alertsCreated,
+    pushSent,
+    pendingPushes: pendingPush ? [pendingPush] : [],
+  };
 }
 
 /**
@@ -356,7 +405,7 @@ export async function checkOverdueDosesForCaregivers(client, options = {}) {
             const insRes = await client
               .query(
                 `INSERT INTO notificacoes (id, user_id, tipo, titulo, mensagem, lida)
-                 VALUES ($1, $2, 'alerta', $3, $4, FALSE)
+                 VALUES ($1, $2, 'estoque', $3, $4, FALSE)
                  ON CONFLICT (id) DO NOTHING
                  RETURNING id`,
                 [notifId, cgId, stockTitle, stockBody]

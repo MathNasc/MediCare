@@ -182,6 +182,7 @@ public class MainActivity extends Activity {
     private String selectedStockMedId = "";
     private JSONObject careSettings = createDefaultCareSettings();
     private String lastSyncTimestamp = "Sincronização automática ativa";
+    private volatile String lastSyncError = "";
     private boolean backendStatusOk = true;
     private volatile boolean hasUnsyncedLocalChanges = false;
     private volatile boolean lastPullSucceeded = false;
@@ -219,6 +220,24 @@ public class MainActivity extends Activity {
             }
         }
     };
+
+    private boolean hasLocalUnsyncedItems() {
+        try {
+            if (this.meds != null) {
+                for (int i = 0; i < this.meds.length(); i++) {
+                    JSONObject m = this.meds.optJSONObject(i);
+                    if (m != null && m.optBoolean("_local_unsynced", false)) return true;
+                }
+            }
+            if (this.doseLogs != null) {
+                for (int i = 0; i < this.doseLogs.length(); i++) {
+                    JSONObject dl = this.doseLogs.optJSONObject(i);
+                    if (dl != null && dl.optBoolean("_local_unsynced", false)) return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
 
     private void reloadIfUpdatedByNotification() {
         try {
@@ -2082,6 +2101,7 @@ public class MainActivity extends Activity {
             snap.put("ai_messages", this.aiMessages != null ? new JSONArray(this.aiMessages.toString()) : new JSONArray());
             snap.put("pending_dose_requests", this.pendingDoseRequests != null ? new JSONArray(this.pendingDoseRequests.toString()) : new JSONArray());
             snap.put("care_settings", this.careSettings != null ? new JSONObject(this.careSettings.toString()) : createDefaultCareSettings());
+            snap.put("has_unsynced_local_changes", this.hasUnsyncedLocalChanges);
             snap.put("onboarding_completed", this.prefs.getBoolean("onboarding_completed", false));
             this.prefs.edit().putString("user_snapshot_" + emailKey, snap.toString()).apply();
         } catch (Exception ignored) {}
@@ -2118,10 +2138,14 @@ public class MainActivity extends Activity {
             this.aiMessages = snap.optJSONArray("ai_messages") != null ? snap.optJSONArray("ai_messages") : new JSONArray();
             this.pendingDoseRequests = snap.optJSONArray("pending_dose_requests") != null ? snap.optJSONArray("pending_dose_requests") : new JSONArray();
             this.careSettings = sanitizeCareSettings(snap.optJSONObject("care_settings"));
+            this.hasUnsyncedLocalChanges = snap.optBoolean("has_unsynced_local_changes", false) || hasLocalUnsyncedItems();
             sanitizeAllInMemoryData();
             deduplicateStockMovements();
             boolean snapOnboard = snap.optBoolean("onboarding_completed", true) || this.meds.length() > 0;
-            this.prefs.edit().putBoolean("onboarding_completed", snapOnboard).commit();
+            this.prefs.edit()
+                .putBoolean("onboarding_completed", snapOnboard)
+                .putBoolean("has_unsynced_local_changes", this.hasUnsyncedLocalChanges)
+                .commit();
             return true;
         } catch (Exception e) {
             return false;
@@ -2175,7 +2199,10 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                this.hasUnsyncedLocalChanges = this.prefs.getBoolean("has_unsynced_local_changes", false);
+                this.hasUnsyncedLocalChanges = this.prefs.getBoolean("has_unsynced_local_changes", false) || hasLocalUnsyncedItems();
+                if (this.hasUnsyncedLocalChanges) {
+                    this.prefs.edit().putBoolean("has_unsynced_local_changes", true).apply();
+                }
                 if (!this.prefs.getBoolean("onboarding_completed", false) && this.meds != null && this.meds.length() > 0) {
                     this.prefs.edit().putBoolean("onboarding_completed", true).commit();
                 }
@@ -12439,6 +12466,7 @@ public class MainActivity extends Activity {
             String[] baseCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
             boolean retriedAfterRefresh = false;
 
+            String lastNetError = "";
             for (int attempt = 0; attempt < 2; attempt++) {
                 token = this.prefs.getString("auth_access_token", "").trim();
                 boolean got401 = false;
@@ -12450,8 +12478,8 @@ public class MainActivity extends Activity {
                         URL url = new URL(base + pathAndQuery);
                         conn = (HttpURLConnection) url.openConnection();
                         conn.setRequestMethod(method);
-                        conn.setConnectTimeout(8000);
-                        conn.setReadTimeout(12000);
+                        conn.setConnectTimeout(10000);
+                        conn.setReadTimeout(15000);
                         conn.setRequestProperty("Authorization", "Bearer " + token);
                         conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
 
@@ -12477,10 +12505,21 @@ public class MainActivity extends Activity {
                             br.close();
                             rawResp = sb.toString();
                         }
-                        JSONObject parsed = rawResp.isEmpty() ? new JSONObject() : new JSONObject(rawResp);
+                        JSONObject parsed;
+                        try {
+                            parsed = rawResp.isEmpty() ? new JSONObject() : new JSONObject(rawResp);
+                        } catch (Exception jsonErr) {
+                            parsed = new JSONObject();
+                            parsed.put("error", "Servidor retornou resposta inesperada (HTTP " + code + ").");
+                        }
+                        if (code >= 400 && parsed.optString("error", "").trim().isEmpty()) {
+                            parsed.put("error", "Erro HTTP " + code + " ao comunicar com o chat.");
+                        }
                         parsed.put("_http_status", code);
                         return parsed;
-                    } catch (Exception ignored) {
+                    } catch (Exception netEx) {
+                        lastNetError = netEx.getClass().getSimpleName()
+                            + (netEx.getMessage() != null && !netEx.getMessage().isEmpty() ? ": " + netEx.getMessage() : "");
                     } finally {
                         if (conn != null) {
                             try { conn.disconnect(); } catch (Exception ignored) {}
@@ -12500,7 +12539,9 @@ public class MainActivity extends Activity {
                 break;
             }
             result.put("_http_status", 503);
-            result.put("error", "Não foi possível conectar ao servidor do chat agora.");
+            result.put("error", lastNetError.isEmpty()
+                ? "Não foi possível conectar ao servidor do chat agora."
+                : "Não foi possível conectar ao servidor do chat (" + lastNetError + ").");
         } catch (Exception e) {
             try {
                 result.put("_http_status", 500);
@@ -14569,6 +14610,74 @@ public class MainActivity extends Activity {
         });
         rVerContainer.addView(btnCheckUpdate);
         card.addView(rVerContainer);
+
+        View divSync = new View(this);
+        divSync.setBackgroundColor(this.cBorder);
+        divSync.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        card.addView(divSync);
+
+        // Row 7: Sincronização na Nuvem
+        LinearLayout rSyncContainer = new LinearLayout(this);
+        rSyncContainer.setOrientation(1);
+        rSyncContainer.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        LinearLayout rSyncHeader = new LinearLayout(this);
+        rSyncHeader.setOrientation(0);
+        rSyncHeader.setGravity(16);
+
+        TextView tvSyncIcon = new TextView(this);
+        tvSyncIcon.setText(this.hasUnsyncedLocalChanges ? "☁️" : "✅");
+        tvSyncIcon.setTextSize(sp(22.0f));
+        tvSyncIcon.setPadding(0, 0, dp(14), 0);
+        rSyncHeader.addView(tvSyncIcon);
+
+        LinearLayout syncCol = new LinearLayout(this);
+        syncCol.setOrientation(1);
+        syncCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView tvSyncTitle = new TextView(this);
+        tvSyncTitle.setText("Sincronização com Cuidador");
+        tvSyncTitle.setTextColor(this.cTextMain);
+        tvSyncTitle.setTextSize(sp(16.0f));
+        tvSyncTitle.setTypeface(null, 1);
+        syncCol.addView(tvSyncTitle);
+
+        TextView tvSyncSub = new TextView(this);
+        String syncSubTxt = this.lastSyncTimestamp != null ? this.lastSyncTimestamp : "Sincronização automática ativa";
+        if (this.hasUnsyncedLocalChanges) {
+            syncSubTxt += "\nAlterações locais aguardando envio";
+        }
+        if (this.lastSyncError != null && !this.lastSyncError.isEmpty()) {
+            syncSubTxt += "\nÚltimo erro: " + this.lastSyncError;
+        }
+        tvSyncSub.setText(syncSubTxt);
+        tvSyncSub.setTextColor(!this.backendStatusOk ? this.cDanger : (this.hasUnsyncedLocalChanges ? this.cWarning : this.cTextMuted));
+        tvSyncSub.setTextSize(sp(13.0f));
+        tvSyncSub.setPadding(0, dp(2), 0, 0);
+        syncCol.addView(tvSyncSub);
+
+        rSyncHeader.addView(syncCol);
+        rSyncContainer.addView(rSyncHeader);
+
+        TextView btnManualSync = new TextView(this);
+        LinearLayout.LayoutParams btnSyncLp = new LinearLayout.LayoutParams(-1, -2);
+        btnSyncLp.topMargin = dp(12);
+        btnManualSync.setLayoutParams(btnSyncLp);
+        btnManualSync.setText("☁️ Sincronizar Agora");
+        btnManualSync.setTextColor(Color.WHITE);
+        btnManualSync.setBackground(shape(this.cPrimary, 12, 0, 0));
+        btnManualSync.setTextSize(sp(14.0f));
+        btnManualSync.setTypeface(null, 1);
+        btnManualSync.setGravity(17);
+        btnManualSync.setPadding(dp(14), dp(12), dp(14), dp(12));
+        btnManualSync.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MainActivity.this.syncWithBackendSilently(true);
+            }
+        });
+        rSyncContainer.addView(btnManualSync);
+        card.addView(rSyncContainer);
 
         linearLayout.addView(card);
     }
@@ -17280,13 +17389,17 @@ public class MainActivity extends Activity {
                                 : (lm.has("quantidade") ? lm.optInt("quantidade", 0) : lm.optInt("estoque_atual", 0));
                             int remoteStock = rm.optInt("quantidade", rm.optInt("estoque_atual", 0));
                             long localStockUpdatedMs = lm.optLong("_local_stock_updated_ms", 0L);
-                            boolean recentLocalStockEdit = localStockUpdatedMs > 0L && (System.currentTimeMillis() - localStockUpdatedMs) < 30000L;
-                            // Preserve negative local stock if the remote server clamped it to 0 or if edited locally within 30s
+                            boolean recentLocalStockEdit = localStockUpdatedMs > 0L
+                                && (this.hasUnsyncedLocalChanges || (System.currentTimeMillis() - localStockUpdatedMs) < 30000L);
+                            // Preserve negative local stock or pending local stock edits until synced
                             if ((localStock < 0 && remoteStock == 0) || recentLocalStockEdit) {
                                 rm.put("quantidade", localStock);
                                 rm.put("estoque_atual", localStock);
                                 rm.put("_local_stock_val", localStock);
                                 rm.put("_local_stock_updated_ms", localStockUpdatedMs);
+                                if (this.hasUnsyncedLocalChanges) {
+                                    rm.put("_local_unsynced", true);
+                                }
                             } else {
                                 rm.put("_local_stock_val", remoteStock);
                             }
@@ -17968,6 +18081,21 @@ public class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: package-private */
     /* renamed from: lambda$syncWithBackendSilently$23$com-medicare-patient-MainActivity, reason: not valid java name */
+    private JSONArray safeCloneJsonArray(JSONArray src) {
+        if (src == null) return new JSONArray();
+        try {
+            return new JSONArray(src.toString());
+        } catch (Exception e) {
+            JSONArray copy = new JSONArray();
+            try {
+                for (int i = 0; i < src.length(); i++) {
+                    copy.put(src.opt(i));
+                }
+            } catch (Exception ignored) {}
+            return copy;
+        }
+    }
+
     public /* synthetic */ void m24x90e7608c(final boolean z) {
         synchronized (this.syncNetworkLock) {
             try {
@@ -17981,6 +18109,13 @@ public class MainActivity extends Activity {
                 String patId = resolveCurrentAccountUserId();
                 JSONObject syncProfile = new JSONObject(this.profile.toString());
                 syncProfile.put("id", patId);
+                String fotoUrlVal = syncProfile.optString("foto_url", "").trim();
+                String fotoB64Val = syncProfile.optString("foto_base64", "").trim();
+                if (fotoUrlVal.isEmpty() && !fotoB64Val.isEmpty()) {
+                    syncProfile.put("foto_url", fotoB64Val.startsWith("data:") ? fotoB64Val : ("data:image/jpeg;base64," + fotoB64Val));
+                }
+                syncProfile.remove("foto_base64");
+
                 String apelido = this.profile.optString("apelido", this.profile.optString("social_name", "")).trim();
                 if (!apelido.isEmpty()) {
                     syncProfile.put("social_name", apelido);
@@ -18030,39 +18165,36 @@ public class MainActivity extends Activity {
                 } else {
                     syncProfile.remove("blood_type");
                 }
+
                 JSONObject jSONObject = new JSONObject();
                 jSONObject.put("patientId", patId);
                 jSONObject.put("userId", patId);
                 jSONObject.put("timezone", TimeZone.getDefault().getID());
-                jSONObject.put("profile", syncProfile);
                 jSONObject.put("user", syncProfile);
-                jSONObject.put("medicamentos", this.meds);
-                jSONObject.put("meds", this.meds);
-                jSONObject.put("historico_doses", this.doseLogs);
-                jSONObject.put("history", this.doseLogs);
-                jSONObject.put("health_events", this.events);
-                jSONObject.put("events", this.events);
-                jSONObject.put("calendar_notes", this.calNotes);
-                jSONObject.put("notes", this.calNotesList);
-                jSONObject.put("stock_movements", this.stockMovements);
-                jSONObject.put("allergies", this.allergies);
-                jSONObject.put("health_conditions", this.conditions);
-                jSONObject.put("conditions", this.conditions);
-                jSONObject.put("emergency_contacts", this.contacts);
-                jSONObject.put("contacts", this.contacts);
-                jSONObject.put("healthcare_professionals", this.professionals);
-                jSONObject.put("professionals", this.professionals);
-                jSONObject.put("caregiver_relationships", this.caregivers);
-                jSONObject.put("caregivers", this.caregivers);
+                jSONObject.put("meds", safeCloneJsonArray(this.meds));
+                jSONObject.put("history", safeCloneJsonArray(this.doseLogs));
+                jSONObject.put("events", safeCloneJsonArray(this.events));
+                JSONArray clonedNotes = safeCloneJsonArray(this.calNotesList);
+                jSONObject.put("notes", clonedNotes);
+                if (clonedNotes.length() == 0 && this.calNotes != null && this.calNotes.length() > 0) {
+                    jSONObject.put("calendar_notes", new JSONObject(this.calNotes.toString()));
+                }
+                jSONObject.put("stock_movements", safeCloneJsonArray(this.stockMovements));
+                jSONObject.put("allergies", safeCloneJsonArray(this.allergies));
+                jSONObject.put("conditions", safeCloneJsonArray(this.conditions));
+                jSONObject.put("contacts", safeCloneJsonArray(this.contacts));
+                jSONObject.put("professionals", safeCloneJsonArray(this.professionals));
+                jSONObject.put("caregivers", safeCloneJsonArray(this.caregivers));
                 jSONObject.put("deleted_record_ids", new JSONArray(getDeletedRecordIds()));
                 jSONObject.put("sync_authoritative_meds", this.lastPullSucceeded);
-                jSONObject.put("pending_dose_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
-                jSONObject.put("approval_requests", this.pendingDoseRequests != null ? this.pendingDoseRequests : new JSONArray());
+                jSONObject.put("pending_dose_requests", safeCloneJsonArray(this.pendingDoseRequests));
+
                 String syncBearer = this.prefs != null ? this.prefs.getString("auth_access_token", "").trim() : "";
                 byte[] bytes = jSONObject.toString().getBytes(StandardCharsets.UTF_8);
 
                 int responseCode = -1;
                 JSONObject jSONObject2 = new JSONObject();
+                String lastAttemptError = "";
                 String[] postCandidates = new String[]{EMBEDDED_BACKEND_URL, FALLBACK_BACKEND_URL};
                 for (String base : postCandidates) {
                     if (base == null || base.trim().isEmpty()) continue;
@@ -18070,8 +18202,8 @@ public class MainActivity extends Activity {
                     try {
                         httpURLConnection = (HttpURLConnection) new URL(base + "/api/v1/sync").openConnection();
                         httpURLConnection.setRequestMethod("POST");
-                        httpURLConnection.setConnectTimeout(8000);
-                        httpURLConnection.setReadTimeout(8000);
+                        httpURLConnection.setConnectTimeout(10000);
+                        httpURLConnection.setReadTimeout(20000);
                         httpURLConnection.setDoOutput(true);
                         httpURLConnection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                         if (!EMBEDDED_API_KEY.isEmpty()) {
@@ -18096,11 +18228,26 @@ public class MainActivity extends Activity {
                             }
                             bufferedReader.close();
                         }
-                        jSONObject2 = sb.length() > 0 ? new JSONObject(sb.toString()) : new JSONObject();
-                        if (responseCode >= 200 && responseCode < 300) {
-                            break;
+                        String rawBody = sb.toString();
+                        try {
+                            jSONObject2 = rawBody.length() > 0 ? new JSONObject(rawBody) : new JSONObject();
+                        } catch (Exception parseErr) {
+                            jSONObject2 = new JSONObject();
+                            lastAttemptError = "HTTP " + responseCode;
                         }
-                    } catch (Exception ignored) {
+                        if (responseCode >= 200 && responseCode < 300) {
+                            if (jSONObject2.optBoolean("ok", true)) {
+                                lastAttemptError = "";
+                                break;
+                            }
+                            lastAttemptError = jSONObject2.optString("error", "Falha no servidor");
+                        } else {
+                            String srvErr = jSONObject2.optString("error", "").trim();
+                            lastAttemptError = !srvErr.isEmpty() ? ("HTTP " + responseCode + ": " + srvErr) : ("HTTP " + responseCode);
+                        }
+                    } catch (Exception netErr) {
+                        lastAttemptError = netErr.getClass().getSimpleName()
+                            + (netErr.getMessage() != null && !netErr.getMessage().isEmpty() ? ": " + netErr.getMessage() : "");
                     } finally {
                         if (httpURLConnection != null) {
                             try { httpURLConnection.disconnect(); } catch (Exception ignored) {}
@@ -18120,6 +18267,10 @@ public class MainActivity extends Activity {
                     this.careSettings = sanitizeCareSettings(syncedCareCfg);
                 }
                 final boolean optBoolean = (responseCode >= 200 && responseCode < 300) && jSONObject2.optBoolean("ok", z2);
+                final String finalSyncError = optBoolean
+                    ? ""
+                    : (lastAttemptError.isEmpty() ? "Falha ao sincronizar com o servidor" : lastAttemptError);
+                this.lastSyncError = finalSyncError;
                 final boolean noNewerLocalMutation = (this.localMutationVersion == syncVersionAtStart);
                 if (optBoolean && noNewerLocalMutation) {
                     this.hasUnsyncedLocalChanges = false;
@@ -18151,14 +18302,17 @@ public class MainActivity extends Activity {
                             MainActivity.this.pendingRejectedFeedback = null;
                             Toast.makeText(MainActivity.this, rejMsg, 1).show();
                         }
-                        MainActivity.this.m22xc335e10a(optBoolean, format, z);
+                        MainActivity.this.m22xc335e10a(optBoolean, format, z, finalSyncError);
                     }
                 });
-            } catch (Exception e) {
+            } catch (final Exception e) {
+                final String errMsg = e.getClass().getSimpleName()
+                    + (e.getMessage() != null && !e.getMessage().isEmpty() ? ": " + e.getMessage() : "");
+                this.lastSyncError = errMsg;
                 runOnUiThread(new Runnable() { // from class: com.medicare.patient.MainActivity$$ExternalSyntheticLambda9
                     @Override // java.lang.Runnable
                     public final void run() {
-                        MainActivity.this.m23x2a0ea0cb(z);
+                        MainActivity.this.m23x2a0ea0cb(z, errMsg);
                     }
                 });
             }
@@ -18194,6 +18348,7 @@ public class MainActivity extends Activity {
                                 public void run() {
                                     if (MainActivity.this.localMutationVersion != versionBeforePull) return;
                                     MainActivity.this.backendStatusOk = true;
+                                    MainActivity.this.lastSyncError = "";
                                     MainActivity.this.lastSyncTimestamp = "Sincronizado em " + format;
                                     MainActivity.this.prefs.edit().putString("last_sync_timestamp", MainActivity.this.lastSyncTimestamp).apply();
                                     MainActivity.this.saveLocalStateOnly();
@@ -18220,9 +18375,10 @@ public class MainActivity extends Activity {
 
     /* JADX INFO: Access modifiers changed from: package-private */
     /* renamed from: lambda$syncWithBackendSilently$21$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m22xc335e10a(boolean z, String str, boolean z2) {
+    public /* synthetic */ void m22xc335e10a(boolean z, String str, boolean z2, String syncErrorDetail) {
         this.backendStatusOk = z;
         if (z) {
+            this.lastSyncError = "";
             this.lastSyncTimestamp = "Sincronizado em " + str;
             this.prefs.edit().putString("last_sync_timestamp", this.lastSyncTimestamp).apply();
             if (z2) {
@@ -18232,16 +18388,29 @@ public class MainActivity extends Activity {
             }
             return;
         }
+        String shortErr = syncErrorDetail != null && !syncErrorDetail.isEmpty()
+            ? (syncErrorDetail.length() > 80 ? syncErrorDetail.substring(0, 80) + "..." : syncErrorDetail)
+            : "aguardando servidor";
+        this.lastSyncTimestamp = "Falha em " + str + " (" + shortErr + ")";
+        this.prefs.edit().putString("last_sync_timestamp", this.lastSyncTimestamp).apply();
         if (z2) {
-            Toast.makeText(this, "Salvo localmente (aguardando banco Oracle)", 0).show();
+            Toast.makeText(this, "Falha ao sincronizar: " + shortErr, 1).show();
+            render();
         }
     }
 
     /* JADX INFO: Access modifiers changed from: package-private */
     /* renamed from: lambda$syncWithBackendSilently$22$com-medicare-patient-MainActivity, reason: not valid java name */
-    public /* synthetic */ void m23x2a0ea0cb(boolean z) {
+    public /* synthetic */ void m23x2a0ea0cb(boolean z, String syncErrorDetail) {
+        this.backendStatusOk = false;
+        String shortErr = syncErrorDetail != null && !syncErrorDetail.isEmpty()
+            ? (syncErrorDetail.length() > 80 ? syncErrorDetail.substring(0, 80) + "..." : syncErrorDetail)
+            : "modo offline ativo";
+        this.lastSyncTimestamp = "Erro de sincronização (" + shortErr + ")";
+        this.prefs.edit().putString("last_sync_timestamp", this.lastSyncTimestamp).apply();
         if (z) {
-            Toast.makeText(this, "Salvo no dispositivo (modo offline ativo)", 0).show();
+            Toast.makeText(this, "Salvo no dispositivo (" + shortErr + ")", 1).show();
+            render();
         }
     }
 

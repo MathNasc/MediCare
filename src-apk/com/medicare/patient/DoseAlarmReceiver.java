@@ -919,12 +919,15 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
     private static void writeMedStockSafe(JSONObject med, int newStock) {
         if (med == null) return;
         try {
+            long nowMs = System.currentTimeMillis();
             med.put("quantidade", newStock);
             med.put("estoque", newStock);
             med.put("estoque_atual", newStock);
             med.put("stock", newStock);
+            med.put("_local_stock_val", newStock);
+            med.put("_local_stock_updated_ms", nowMs);
             med.put("_local_unsynced", true);
-            med.put("updated_at_ms", System.currentTimeMillis());
+            med.put("updated_at_ms", nowMs);
         } catch (Exception ignored) {}
     }
 
@@ -1091,6 +1094,7 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
             editor.putString("dose_logs", cleanedLogs.toString());
             editor.putString("stock_movements", stockMovements.toString());
             editor.putLong("notif_dose_confirmed_at_ms", nowMs);
+            editor.putBoolean("has_unsynced_local_changes", true);
 
             if (!emailKey.isEmpty()) {
                 String snapRaw = prefs.getString("user_snapshot_" + emailKey, null);
@@ -1100,6 +1104,7 @@ public class DoseAlarmReceiver extends BroadcastReceiver {
                         snap.put("meds", meds);
                         snap.put("dose_logs", cleanedLogs);
                         snap.put("stock_movements", stockMovements);
+                        snap.put("has_unsynced_local_changes", true);
                         editor.putString("user_snapshot_" + emailKey, snap.toString());
                     } catch (Exception ignored) {}
                 }
